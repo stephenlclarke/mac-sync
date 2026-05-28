@@ -2739,8 +2739,6 @@ cmd_status() {
   local live_file_count
   local net_byte_change
   local result
-  local started_byte_count
-  local started_file_count
   local updated_byte_count
   local updated_file_count
   local warning_count
@@ -2771,8 +2769,6 @@ cmd_status() {
     result="$(sync_status_value result)"
     finished_at="$(sync_status_value finished_at)"
     duration="$(sync_status_value duration_seconds)"
-    started_file_count="$(sync_status_value started_file_count)"
-    started_byte_count="$(sync_status_value started_byte_count)"
     updated_file_count="$(sync_status_value updated_file_count)"
     updated_byte_count="$(sync_status_value updated_byte_count)"
     net_byte_change="$(sync_status_value net_byte_change)"
@@ -2783,7 +2779,6 @@ cmd_status() {
     info "last sync: ${result:-unknown}"
     info "last sync finished: ${finished_at:-unknown}"
     info "last sync duration: ${duration:-0}s"
-    info "last sync started storage: ${started_byte_count:-0} bytes across ${started_file_count:-0} files"
     info "last sync updated: ${updated_byte_count:-0} bytes across ${updated_file_count:-0} files"
     info "last sync net storage change: ${net_byte_change:-0} bytes"
     info "last sync warnings: ${warning_count:-0}"

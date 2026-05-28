@@ -27,6 +27,14 @@ assert_stdout_contains() {
   grep -F "$pattern" "$STDOUT_FILE" >/dev/null || fail "missing stdout pattern: $pattern"
 }
 
+assert_stdout_lacks() {
+  local pattern="$1"
+
+  if grep -F "$pattern" "$STDOUT_FILE" >/dev/null; then
+    fail "unexpected stdout pattern: $pattern"
+  fi
+}
+
 run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
@@ -98,6 +106,7 @@ assert_stdout_contains "last sync finished:"
 assert_stdout_contains "last sync duration:"
 assert_stdout_contains "last sync updated:"
 assert_stdout_contains "last sync net storage change:"
+assert_stdout_lacks "last sync started storage:"
 assert_stdout_contains "last sync warnings: 2"
 assert_stdout_contains "last sync errors: 0"
 assert_stdout_contains "machine snapshot stored:"
