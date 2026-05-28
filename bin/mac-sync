@@ -2747,7 +2747,7 @@ cmd_status() {
   local updated_file_count
   local warning_count
 
-  info "repo: $REPO_DIR"
+  info "local repo: $REPO_DIR"
   info "machine: $MACHINE_NAME"
   info "machine dir: $MACHINE_DIR"
   info "installed command: $INSTALL_PATH"

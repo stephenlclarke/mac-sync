@@ -112,6 +112,7 @@ run_mac_sync sync
   || fail "missing local status file"
 
 run_mac_sync status
+assert_stdout_contains "local repo: $TEST_REPO"
 assert_stdout_contains "status file: $TEST_HOME/Library/Application Support/mac-sync/status/target.env"
 assert_stdout_contains "LaunchAgent state: loaded"
 assert_stdout_contains "last sync: success"
