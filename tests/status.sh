@@ -113,8 +113,10 @@ run_mac_sync sync
 
 run_mac_sync status
 assert_stdout_contains "local repo: $TEST_REPO"
+assert_stdout_lacks "machine dir:"
 assert_stdout_contains "status file: $TEST_HOME/Library/Application Support/mac-sync/status/target.env"
 assert_stdout_contains "LaunchAgent state: loaded"
+assert_stdout_contains "next scheduled run:"
 assert_stdout_contains "last sync: success"
 assert_stdout_contains "last sync finished:"
 assert_stdout_contains "last sync duration:"

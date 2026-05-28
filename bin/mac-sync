@@ -2732,6 +2732,80 @@ print_status_messages() {
 }
 
 
+# Return the LaunchAgent minute from the installed plist when available.
+launchagent_scheduled_minute() {
+  local minute=""
+
+  if [[ -f "$LAUNCH_AGENT_PLIST" ]]; then
+    minute="$(awk '
+      /<key>Minute<\/key>/ { want = 1; next }
+      want && /<integer>/ {
+        line = $0
+        sub(/^.*<integer>[[:space:]]*/, "", line)
+        sub(/[[:space:]]*<\/integer>.*$/, "", line)
+        print line
+        exit
+      }
+    ' "$LAUNCH_AGENT_PLIST")"
+  fi
+
+  case "$minute" in
+    ""|*[!0-9]*)
+      minute="$HOURLY_MINUTE"
+      ;;
+  esac
+  case "$minute" in
+    ""|*[!0-9]*)
+      minute=0
+      ;;
+  esac
+
+  if (( 10#$minute < 0 || 10#$minute > 59 )); then
+    minute=0
+  fi
+
+  printf '%s\n' "$minute"
+}
+
+
+# Format an epoch timestamp on macOS or GNU date.
+format_epoch() {
+  local epoch="$1"
+
+  date -r "$epoch" '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null \
+    || date -d "@$epoch" '+%Y-%m-%d %H:%M:%S %Z'
+}
+
+
+# Print the next hourly LaunchAgent run based on the configured minute.
+next_scheduled_run() {
+  local current_minute
+  local current_second
+  local delta
+  local elapsed
+  local next_epoch
+  local now_epoch
+  local scheduled_minute
+  local target
+
+  scheduled_minute="$(launchagent_scheduled_minute)"
+  now_epoch="$(date '+%s')"
+  current_minute="$(date '+%M')"
+  current_second="$(date '+%S')"
+
+  ((elapsed = 10#$current_minute * 60 + 10#$current_second)) || true
+  ((target = 10#$scheduled_minute * 60)) || true
+  if (( elapsed < target )); then
+    ((delta = target - elapsed)) || true
+  else
+    ((delta = 3600 - elapsed + target)) || true
+  fi
+  ((next_epoch = now_epoch + delta)) || true
+
+  format_epoch "$next_epoch"
+}
+
+
 # Show current repo, launchd, and git state.
 cmd_status() {
   local duration
@@ -2749,7 +2823,6 @@ cmd_status() {
 
   info "local repo: $REPO_DIR"
   info "machine: $MACHINE_NAME"
-  info "machine dir: $MACHINE_DIR"
   info "installed command: $INSTALL_PATH"
   info "paths file: $PATHS_FILE"
   info "LaunchAgent: $LAUNCH_AGENT_PLIST"
@@ -2768,6 +2841,7 @@ cmd_status() {
   else
     info "LaunchAgent state: not loaded"
   fi
+  info "next scheduled run: $(next_scheduled_run)"
 
   live_file_count="$(tree_file_count "$MACHINE_DIR")"
   live_byte_count="$(tree_byte_count "$MACHINE_DIR")"
