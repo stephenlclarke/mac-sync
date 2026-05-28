@@ -93,3 +93,8 @@ The sync list is explicit by design. Do not add raw secret material such as SSH
 private keys, cloud credentials, token files, shell history, or decrypted secret
 directories. `.gitignore` blocks several common credential paths under
 `machines/`, but the path manifest is still the real safety boundary.
+
+## License
+
+This repository is licensed under the GNU Affero General Public License v3.0
+(AGPL-3.0). See `LICENSE`, `LICENSE.md`, and `NOTICE.md`.
