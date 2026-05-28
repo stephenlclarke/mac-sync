@@ -25,7 +25,7 @@
 #   mac-sync <command>
 #
 # COMMANDS:
-#   install     Install or refresh mac-sync and its daily LaunchAgent
+#   install     Install or refresh mac-sync and its hourly LaunchAgent
 #   bootstrap   Alias for install
 #   uninstall   Unload the LaunchAgent and remove the installed command
 #   sync        Sync configured paths, commit machine changes, and push
@@ -43,8 +43,8 @@
 #   MAC_SYNC_REPO          Repo path. Default: $HOME/github/mac-sync
 #   MAC_SYNC_MACHINE       Machine directory name. Default: macOS host name
 #   MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
-#   MAC_SYNC_DAILY_HOUR    LaunchAgent hour, 0-23. Default: 9
-#   MAC_SYNC_DAILY_MINUTE  LaunchAgent minute, 0-59. Default: 0
+#   MAC_SYNC_HOURLY_MINUTE LaunchAgent minute, 0-59. Default: 0
+#   MAC_SYNC_DAILY_MINUTE  Legacy alias for MAC_SYNC_HOURLY_MINUTE
 #   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
@@ -65,8 +65,7 @@ readonly HOME_DIR="${HOME:?HOME is not set}"
 readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
 readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
 readonly INSTALL_PATH="${MAC_SYNC_INSTALL_PATH:-${HOME_DIR}/bin/mac-sync}"
-readonly DAILY_HOUR="${MAC_SYNC_DAILY_HOUR:-9}"
-readonly DAILY_MINUTE="${MAC_SYNC_DAILY_MINUTE:-0}"
+readonly HOURLY_MINUTE="${MAC_SYNC_HOURLY_MINUTE:-${MAC_SYNC_DAILY_MINUTE:-0}}"
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
@@ -157,12 +156,73 @@ log() {
 }
 
 
+# Release the sync lock when this process owns it.
+release_lock() {
+  local pid_file="${LOCK_DIR}/pid"
+  local lock_pid=""
+
+  if [[ -f "$pid_file" ]]; then
+    lock_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  fi
+
+  if [[ "$lock_pid" = "$$" ]]; then
+    rm -rf "$LOCK_DIR"
+  fi
+}
+
+
+# Prevent overlapping hourly sync runs.
+acquire_lock() {
+  local pid_file="${LOCK_DIR}/pid"
+  local lock_pid=""
+
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" >"$pid_file"
+    return 0
+  fi
+
+  if [[ -f "$pid_file" ]]; then
+    lock_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+      info "another mac-sync run is active; exiting: pid $lock_pid"
+      exit 0
+    fi
+  fi
+
+  warning "removing stale sync lock: $LOCK_DIR"
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR"
+  printf '%s\n' "$$" >"$pid_file"
+}
+
+
 # Ensure a required command is available.
 need() {
   command -v "$1" >/dev/null 2>&1 || {
     error "missing required command: $1"
     exit 1
   }
+}
+
+
+# Ensure an integer value falls inside a closed range.
+validate_int_range() {
+  local name="$1"
+  local value="$2"
+  local min="$3"
+  local max="$4"
+
+  case "$value" in
+    ""|*[!0-9]*)
+      error "$name must be an integer from $min to $max"
+      exit 2
+      ;;
+  esac
+
+  if (( 10#$value < min || 10#$value > max )); then
+    error "$name must be an integer from $min to $max"
+    exit 2
+  fi
 }
 
 
@@ -230,6 +290,7 @@ readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
 readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
 readonly DYNAMIC_PATHS_FILE="${MACHINE_DIR}/dynamic-sync-paths.txt"
 readonly HOMEBREW_DIR="${MACHINE_DIR}/homebrew"
+readonly LOCK_DIR="${TMPDIR:-/tmp}/mac-sync-${MACHINE_NAME}.lock"
 
 
 # Return true when the current LaunchAgent is loaded.
@@ -253,6 +314,17 @@ repo_clean() {
 # Return true when the current branch has an upstream branch.
 branch_has_upstream() {
   git -C "$REPO_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1
+}
+
+
+# Return true when the current branch has commits not present upstream.
+branch_ahead_of_upstream() {
+  local ahead_count
+
+  branch_has_upstream || return 1
+  ahead_count="$(git -C "$REPO_DIR" rev-list --count '@{u}..HEAD' 2>/dev/null || printf '0')"
+
+  [[ "$ahead_count" != "0" ]]
 }
 
 
@@ -1218,6 +1290,7 @@ update_installed_self_or_exit() {
 commit_and_push() {
   local branch
   local commit_message
+  local committed=0
 
   if [[ "$DRY_RUN" = "1" ]]; then
     info "dry run enabled; skipping git commit and push"
@@ -1231,6 +1304,7 @@ commit_and_push() {
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
     git -C "$REPO_DIR" commit -m "$commit_message"
+    committed=1
   fi
 
   if ! repo_has_origin; then
@@ -1241,6 +1315,11 @@ commit_and_push() {
   branch="$(git -C "$REPO_DIR" branch --show-current)"
   if [[ -z "$branch" ]]; then
     warning "detached HEAD; skipping git push"
+    return 0
+  fi
+
+  if [[ "$committed" = "0" ]] && ! branch_ahead_of_upstream; then
+    info "no local commits to push"
     return 0
   fi
 
@@ -1284,6 +1363,9 @@ cmd_sync() {
   local tmp_manifest
 
   check_runtime
+  acquire_lock
+  trap 'release_lock' EXIT INT TERM
+
   pull_repo_if_safe
   update_installed_self_or_exit
 
@@ -1291,7 +1373,7 @@ cmd_sync() {
   tmp_dynamic="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic.XXXXXX")"
   tmp_dynamic_extra="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic-extra.XXXXXX")"
   tmp_manifest="$(mktemp "${TMPDIR:-/tmp}/mac-sync-manifest.XXXXXX")"
-  trap 'rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"' EXIT INT TERM
+  trap 'rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"; release_lock' EXIT INT TERM
 
   configured_manifest_paths >"$tmp_configured"
   dynamic_manifest_paths >"$tmp_dynamic"
@@ -1317,9 +1399,10 @@ cmd_sync() {
   fi
 
   rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"
-  trap - EXIT INT TERM
 
   commit_and_push
+  release_lock
+  trap - EXIT INT TERM
 }
 
 
@@ -1427,12 +1510,13 @@ cmd_list() {
 }
 
 
-# Install or refresh the command and its LaunchAgent.
+# Install or refresh the command and its hourly LaunchAgent.
 cmd_install() {
   local install_dir
 
   need install
   need launchctl
+  validate_int_range "MAC_SYNC_HOURLY_MINUTE" "$HOURLY_MINUTE" 0 59
 
   install_dir="$(dirname "$INSTALL_PATH")"
   mkdir -p "$install_dir" "$(dirname "$LAUNCH_AGENT_PLIST")"
@@ -1462,7 +1546,7 @@ cmd_uninstall() {
 }
 
 
-# Write the daily LaunchAgent plist.
+# Write the hourly LaunchAgent plist.
 write_launchagent() {
   local escaped_install_path
   local escaped_log_err
@@ -1511,10 +1595,8 @@ ${script_colour_xml}
     <true/>
     <key>StartCalendarInterval</key>
     <dict>
-      <key>Hour</key>
-      <integer>${DAILY_HOUR}</integer>
       <key>Minute</key>
-      <integer>${DAILY_MINUTE}</integer>
+      <integer>${HOURLY_MINUTE}</integer>
     </dict>
     <key>StandardOutPath</key>
     <string>${escaped_log_out}</string>

@@ -28,12 +28,12 @@ That command:
 - installs `mac-sync` to `~/bin/mac-sync`
 - writes `~/Library/LaunchAgents/tools.xyzzy.mac-sync.plist`
 - loads the LaunchAgent into the current GUI session
-- schedules a daily run at 09:00 local time
+- schedules an hourly run at minute `0`
 
 Override install-time settings when needed:
 
 ```sh
-MAC_SYNC_MACHINE=work-mbp MAC_SYNC_DAILY_HOUR=8 ./bin/mac-sync install
+MAC_SYNC_MACHINE=work-mbp MAC_SYNC_HOURLY_MINUTE=17 ./bin/mac-sync install
 ```
 
 ## Usage
@@ -49,7 +49,7 @@ mac-sync uninstall
 
 Commands:
 
-- `install`: install or refresh the command and daily LaunchAgent
+- `install`: install or refresh the command and hourly LaunchAgent
 - `uninstall`: unload the LaunchAgent and remove the installed command
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: LaunchAgent mode; same behavior as `sync`
@@ -140,8 +140,8 @@ Environment overrides:
 - `MAC_SYNC_REPO`: repo path, defaulting to `~/github/mac-sync`
 - `MAC_SYNC_MACHINE`: machine directory name, defaulting to the macOS host name
 - `MAC_SYNC_INSTALL_PATH`: installed command path, defaulting to `~/bin/mac-sync`
-- `MAC_SYNC_DAILY_HOUR`: LaunchAgent hour, defaulting to `9`
-- `MAC_SYNC_DAILY_MINUTE`: LaunchAgent minute, defaulting to `0`
+- `MAC_SYNC_HOURLY_MINUTE`: LaunchAgent minute, defaulting to `0`
+- `MAC_SYNC_DAILY_MINUTE`: legacy alias for `MAC_SYNC_HOURLY_MINUTE`
 - `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
   committing, or pushing
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
