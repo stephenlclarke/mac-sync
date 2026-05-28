@@ -59,7 +59,26 @@ Commands:
 - `restore`: copy a machine snapshot from the repo back into `$HOME`
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `list`: show every configured source path and repo destination
-- `status`: show install, LaunchAgent, repo, and git state
+- `status`: show install, LaunchAgent, repo, git, and last-sync state
+
+## Status
+
+Show current install state, the LaunchAgent state, the last completed sync, the
+amount of data changed by that sync, total machine snapshot storage, and warning
+or error messages captured during the last sync:
+
+```sh
+mac-sync status
+```
+
+Sync status is local machine state and is intentionally not committed to the
+repo. By default it is written under:
+
+```text
+~/Library/Application Support/mac-sync/status/
+```
+
+The status output also shows the LaunchAgent stdout and stderr log paths.
 
 ## Restore
 
@@ -230,6 +249,8 @@ Environment overrides:
 - `MAC_SYNC_DAILY_MINUTE`: legacy alias for `MAC_SYNC_HOURLY_MINUTE`
 - `MAC_SYNC_LAUNCH_AGENT_PATH`: `PATH` used by the LaunchAgent, defaulting to
   `~/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`
+- `MAC_SYNC_STATUS_DIR`: local status directory, defaulting to
+  `~/Library/Application Support/mac-sync/status`
 - `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
   committing, or pushing
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
