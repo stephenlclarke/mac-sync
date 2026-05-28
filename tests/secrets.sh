@@ -7,6 +7,7 @@ readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-secrets.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_REPO="${TMP_ROOT}/repo"
+readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
 readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly FAKE_BIN="${TMP_ROOT}/fake-bin"
@@ -57,6 +58,7 @@ run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
@@ -69,6 +71,7 @@ run_mac_sync() {
   else
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
@@ -94,7 +97,7 @@ mkdir -p \
   "$FAKE_KEYCHAIN" \
   "$TEST_REPO/bin" \
   "$TEST_REPO/config" \
-  "$TEST_REPO/machines/source/home" \
+  "$TEST_MACHINES_REPO/machines/source/home" \
   "$TEST_HOME/.ssh" \
   "$TEST_HOME/.secrets"
 
@@ -257,6 +260,9 @@ cp "$SCRIPT_PATH" "$TEST_REPO/bin/mac-sync"
 git -C "$TEST_REPO" init -b main >/dev/null
 git -C "$TEST_REPO" config user.name "mac-sync test"
 git -C "$TEST_REPO" config user.email "mac-sync@example.invalid"
+git -C "$TEST_MACHINES_REPO" init -b main >/dev/null
+git -C "$TEST_MACHINES_REPO" config user.name "mac-sync test"
+git -C "$TEST_MACHINES_REPO" config user.email "mac-sync@example.invalid"
 
 cat >"$TEST_REPO/config/sync-paths.txt" <<'EOF'
 .bashrc
@@ -284,14 +290,14 @@ assert_file_contains "$TEST_REPO/config/secret-paths.txt" ".secrets"
 assert_file_contains "$TEST_REPO/config/age-recipients.txt" "age1fakepublicrecipient"
 
 run_mac_sync secrets sync
-assert_file_contains "$TEST_REPO/machines/target/secrets/included-paths.txt" ".ssh"
-assert_file_contains "$TEST_REPO/machines/target/secrets/included-paths.txt" ".secrets"
-[[ -f "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age" ]] || fail "missing encrypted archive"
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".ssh"
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".secrets"
+[[ -f "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age" ]] || fail "missing encrypted archive"
 
-archive_checksum="$(cksum "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age")"
+archive_checksum="$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")"
 run_mac_sync secrets sync
 assert_stdout_contains "encrypted secrets snapshot unchanged"
-[[ "$(cksum "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
+[[ "$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
   || fail "unchanged secrets sync rewrote the archive"
 
 run_mac_sync secrets list

@@ -42,7 +42,8 @@
 #   -h, --help  Show this help text
 #
 # ENVIRONMENT:
-#   MAC_SYNC_REPO          Repo path. Default: $HOME/github/mac-sync
+#   MAC_SYNC_REPO          mac-sync repo path. Default: $HOME/github/mac-sync
+#   MAC_SYNC_MACHINES_REPO Machine snapshot repo. Default: $HOME/github/dot-files
 #   MAC_SYNC_MACHINE       Machine directory name. Default: macOS host name
 #   MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
 #   MAC_SYNC_HOURLY_MINUTE LaunchAgent minute, 0-59. Default: 0
@@ -78,7 +79,9 @@ SCRIPT_NAME="$(basename "$SELF_PATH")"
 readonly SCRIPT_NAME
 readonly HOME_DIR="${HOME:?HOME is not set}"
 readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
+readonly DEFAULT_MACHINES_REPO_DIR="${HOME_DIR}/github/dot-files"
 readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
+readonly MACHINES_REPO_DIR="${MAC_SYNC_MACHINES_REPO:-$DEFAULT_MACHINES_REPO_DIR}"
 readonly INSTALL_PATH="${MAC_SYNC_INSTALL_PATH:-${HOME_DIR}/bin/mac-sync}"
 readonly HOURLY_MINUTE="${MAC_SYNC_HOURLY_MINUTE:-${MAC_SYNC_DAILY_MINUTE:-0}}"
 readonly LAUNCH_AGENT_PATH="${MAC_SYNC_LAUNCH_AGENT_PATH:-${HOME_DIR}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
@@ -174,7 +177,7 @@ OPTIONS:
   -h, --help        Show this help text.
 
 BEHAVIOR:
-  Restore pulls the repo first when the worktree is clean.
+  Restore pulls both repos first when their worktrees are clean.
   It restores configured paths plus that machine's persisted dynamic paths.
   Newer local files are kept unless --force is used.
   Homebrew differences are printed as manual brew commands.
@@ -427,7 +430,8 @@ machine_name() {
 
 MACHINE_NAME="$(machine_name)"
 readonly MACHINE_NAME
-readonly MACHINE_DIR="${REPO_DIR}/machines/${MACHINE_NAME}"
+readonly MACHINES_ROOT_DIR="${MACHINES_REPO_DIR}/machines"
+readonly MACHINE_DIR="${MACHINES_ROOT_DIR}/${MACHINE_NAME}"
 readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
 readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
 readonly DYNAMIC_PATHS_FILE="${MACHINE_DIR}/dynamic-sync-paths.txt"
@@ -582,13 +586,13 @@ changed_machine_metrics() {
   while IFS= read -r -d '' rel_path; do
     [[ -n "$rel_path" ]] || continue
     ((count += 1))
-    abs_path="${REPO_DIR}/${rel_path}"
+    abs_path="${MACHINES_REPO_DIR}/${rel_path}"
     if [[ -f "$abs_path" ]]; then
       size="$(file_size_bytes "$abs_path")"
       ((total += size)) || true
     fi
   done < <(
-    git -C "$REPO_DIR" ls-files \
+    git -C "$MACHINES_REPO_DIR" ls-files \
       --modified \
       --deleted \
       --others \
@@ -681,8 +685,8 @@ finish_sync_status() {
     : >"$SYNC_ERRORS_FILE"
   fi
 
-  last_commit="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
-  remote_repo="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || printf 'none')"
+  last_commit="$(git -C "$MACHINES_REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+  remote_repo="$(git -C "$MACHINES_REPO_DIR" remote get-url origin 2>/dev/null || printf 'none')"
   tmp_status="$(mktemp "${STATUS_DIR}/${MACHINE_NAME}.env.XXXXXX")"
   {
     printf 'machine=%s\n' "$MACHINE_NAME"
@@ -719,28 +723,35 @@ launchagent_loaded() {
 
 # Return true when the repo has an origin remote.
 repo_has_origin() {
-  git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1
+  local repo="${1:-$REPO_DIR}"
+
+  git -C "$repo" remote get-url origin >/dev/null 2>&1
 }
 
 
 # Return true when the repo worktree is clean.
 repo_clean() {
-  [[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]]
+  local repo="${1:-$REPO_DIR}"
+
+  [[ -z "$(git -C "$repo" status --porcelain)" ]]
 }
 
 
 # Return true when the current branch has an upstream branch.
 branch_has_upstream() {
-  git -C "$REPO_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1
+  local repo="${1:-$REPO_DIR}"
+
+  git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1
 }
 
 
 # Return true when the current branch has commits not present upstream.
 branch_ahead_of_upstream() {
+  local repo="${1:-$REPO_DIR}"
   local ahead_count
 
-  branch_has_upstream || return 1
-  ahead_count="$(git -C "$REPO_DIR" rev-list --count '@{u}..HEAD' 2>/dev/null || printf '0')"
+  branch_has_upstream "$repo" || return 1
+  ahead_count="$(git -C "$repo" rev-list --count '@{u}..HEAD' 2>/dev/null || printf '0')"
 
   [[ "$ahead_count" != "0" ]]
 }
@@ -1188,7 +1199,7 @@ dest_path_for() {
 snapshot_path_for() {
   local machine="$1"
   local rel="$2"
-  local machine_dir="${REPO_DIR}/machines/${machine}"
+  local machine_dir="${MACHINES_ROOT_DIR}/${machine}"
 
   case "$rel" in
     /*)
@@ -1218,7 +1229,7 @@ safe_machine_name() {
 # Print the restore manifest for a source machine snapshot.
 restore_manifest_paths() {
   local machine="$1"
-  local dynamic_paths_file="${REPO_DIR}/machines/${machine}/dynamic-sync-paths.txt"
+  local dynamic_paths_file="${MACHINES_ROOT_DIR}/${machine}/dynamic-sync-paths.txt"
 
   {
     configured_manifest_paths
@@ -1231,7 +1242,7 @@ restore_manifest_paths() {
 homebrew_dir_for() {
   local machine="$1"
 
-  printf '%s/machines/%s/homebrew\n' "$REPO_DIR" "$machine"
+  printf '%s/%s/homebrew\n' "$MACHINES_ROOT_DIR" "$machine"
 }
 
 
@@ -1493,7 +1504,7 @@ print_homebrew_restore_commands() {
 secrets_dir_for() {
   local machine="$1"
 
-  printf '%s/machines/%s/secrets\n' "$REPO_DIR" "$machine"
+  printf '%s/%s/secrets\n' "$MACHINES_ROOT_DIR" "$machine"
 }
 
 
@@ -1698,7 +1709,6 @@ cmd_secrets_init() {
 
   check_runtime
   pull_repo_if_safe
-  update_installed_self_or_exit
   check_keychain_runtime
 
   ensure_secret_paths_file
@@ -2027,7 +2037,7 @@ cmd_secrets_list() {
 
   check_runtime
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
   check_keychain_runtime
   require_keychain_identity
   archive="$(secrets_archive_for "$from_machine")"
@@ -2083,7 +2093,7 @@ cmd_secrets_restore() {
 
   check_runtime
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
   check_keychain_runtime
   require_keychain_identity
   archive="$(secrets_archive_for "$from_machine")"
@@ -2134,7 +2144,7 @@ cmd_secrets_test() {
 
   check_runtime
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
   check_keychain_runtime
   require_keychain_identity
 
@@ -2169,7 +2179,7 @@ cmd_secrets_sync() {
   trap 'release_lock' EXIT INT TERM
 
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
   sync_secrets_archive required
   commit_and_push
 
@@ -2404,21 +2414,36 @@ write_machine_metadata() {
 }
 
 
-# Pull the repo when safe, keeping the installed command in step with repo code.
+# Pull a git repo when it is safe to fast-forward.
+pull_git_repo_if_safe() {
+  local repo="$1"
+  local label="$2"
+
+  if ! repo_has_origin "$repo"; then
+    warning "no origin remote configured for ${label}; skipping git pull"
+    return 0
+  fi
+
+  if ! repo_clean "$repo"; then
+    warning "${label} has local changes; skipping pre-operation git pull"
+    return 0
+  fi
+
+  info "pulling latest ${label} changes"
+  git -C "$repo" pull --ff-only
+}
+
+
+# Pull the mac-sync repo when safe, keeping the installed command in step.
 pull_repo_if_safe() {
-  if ! repo_has_origin; then
-    warning "no origin remote configured; skipping git pull"
-    return 0
-  fi
-
-  if ! repo_clean; then
-    warning "repo has local changes; skipping pre-operation git pull"
-    return 0
-  fi
-
-  info "pulling latest repo changes"
-  git -C "$REPO_DIR" pull --ff-only
+  pull_git_repo_if_safe "$REPO_DIR" "local repo"
   update_installed_self_or_exit
+}
+
+
+# Pull the machine snapshot repo when safe.
+pull_machines_repo_if_safe() {
+  pull_git_repo_if_safe "$MACHINES_REPO_DIR" "machines repo"
 }
 
 
@@ -2465,43 +2490,42 @@ commit_and_push() {
     return 0
   fi
 
-  git -C "$REPO_DIR" add "machines/${MACHINE_NAME}"
+  git -C "$MACHINES_REPO_DIR" add "machines/${MACHINE_NAME}"
 
-  if git -C "$REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
+  if git -C "$MACHINES_REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
     info "no machine snapshot changes to commit"
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
-    git -C "$REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
+    git -C "$MACHINES_REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
     committed=1
   fi
 
-  if ! repo_has_origin; then
-    warning "no origin remote configured; skipping git push"
+  if ! repo_has_origin "$MACHINES_REPO_DIR"; then
+    warning "no origin remote configured for machines repo; skipping git push"
     return 0
   fi
 
-  branch="$(git -C "$REPO_DIR" branch --show-current)"
+  branch="$(git -C "$MACHINES_REPO_DIR" branch --show-current)"
   if [[ -z "$branch" ]]; then
     warning "detached HEAD; skipping git push"
     return 0
   fi
 
-  if [[ "$committed" = "0" ]] && ! branch_ahead_of_upstream; then
+  if [[ "$committed" = "0" ]] && ! branch_ahead_of_upstream "$MACHINES_REPO_DIR"; then
     info "no local commits to push"
     return 0
   fi
 
-  if repo_clean && branch_has_upstream; then
-    git -C "$REPO_DIR" pull --rebase --autostash
-    update_installed_self_or_exit
-  elif repo_clean; then
+  if repo_clean "$MACHINES_REPO_DIR" && branch_has_upstream "$MACHINES_REPO_DIR"; then
+    git -C "$MACHINES_REPO_DIR" pull --rebase --autostash
+  elif repo_clean "$MACHINES_REPO_DIR"; then
     info "no upstream branch yet; skipping pre-push pull"
   else
-    warning "repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
+    warning "machines repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
   fi
 
   info "pushing ${branch} to origin"
-  git -C "$REPO_DIR" push -u origin "$branch"
+  git -C "$MACHINES_REPO_DIR" push -u origin "$branch"
 }
 
 
@@ -2521,6 +2545,12 @@ check_runtime() {
     error "clone or create the repo there, or set MAC_SYNC_REPO"
     exit 1
   fi
+
+  if [[ ! -d "$MACHINES_REPO_DIR/.git" ]]; then
+    error "not a git repository: $MACHINES_REPO_DIR"
+    error "clone https://github.com/stephenlclarke/dot-files there, or set MAC_SYNC_MACHINES_REPO"
+    exit 1
+  fi
 }
 
 
@@ -2538,7 +2568,7 @@ cmd_sync() {
   trap 'status=$?; finish_sync_status "$status"; cleanup_sync_tmps; release_lock; exit "$status"' EXIT INT TERM
 
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
   capture_sync_start_metrics
 
   tmp_configured="$(mktemp "${TMPDIR:-/tmp}/mac-sync-configured.XXXXXX")"
@@ -2612,7 +2642,7 @@ cmd_restore() {
         ;;
       *)
         error "unknown restore option: $1"
-        usage >&2
+        usage_restore >&2
         exit 2
         ;;
     esac
@@ -2625,9 +2655,9 @@ cmd_restore() {
 
   check_runtime
   pull_repo_if_safe
-  update_installed_self_or_exit
+  pull_machines_repo_if_safe
 
-  machine_dir="${REPO_DIR}/machines/${from_machine}"
+  machine_dir="${MACHINES_ROOT_DIR}/${from_machine}"
   if [[ ! -d "$machine_dir" ]]; then
     error "missing machine snapshot: $machine_dir"
     exit 1
@@ -2656,7 +2686,8 @@ cmd_list() {
   local dest
   local state
 
-  info "repo: $REPO_DIR"
+  info "local repo: $REPO_DIR"
+  info "machines repo: $MACHINES_REPO_DIR"
   info "machine: $MACHINE_NAME"
   info "paths file: $PATHS_FILE"
   info "dynamic paths file: $DYNAMIC_PATHS_FILE"
@@ -2740,6 +2771,7 @@ write_launchagent() {
   local escaped_log_err
   local escaped_log_out
   local escaped_machine_name
+  local escaped_machines_repo_dir
   local escaped_path
   local escaped_repo_dir
   local escaped_script_colour
@@ -2749,6 +2781,7 @@ write_launchagent() {
   escaped_log_err="$(xmlescape "$LOG_ERR")"
   escaped_log_out="$(xmlescape "$LOG_OUT")"
   escaped_machine_name="$(xmlescape "$MACHINE_NAME")"
+  escaped_machines_repo_dir="$(xmlescape "$MACHINES_REPO_DIR")"
   escaped_path="$(xmlescape "$LAUNCH_AGENT_PATH")"
   escaped_repo_dir="$(xmlescape "$REPO_DIR")"
 
@@ -2777,6 +2810,8 @@ EOF
     <dict>
       <key>MAC_SYNC_REPO</key>
       <string>${escaped_repo_dir}</string>
+      <key>MAC_SYNC_MACHINES_REPO</key>
+      <string>${escaped_machines_repo_dir}</string>
       <key>MAC_SYNC_MACHINE</key>
       <string>${escaped_machine_name}</string>
       <key>PATH</key>
@@ -2919,6 +2954,7 @@ cmd_status() {
   local warning_count
 
   info "local repo: $REPO_DIR"
+  info "machines repo: $MACHINES_REPO_DIR"
   info "machine: $MACHINE_NAME"
   info "installed command: $INSTALL_PATH"
   info "paths file: $PATHS_FILE"
@@ -2955,7 +2991,7 @@ cmd_status() {
     error_count="$(sync_status_value error_count)"
     remote_repo="$(sync_status_value remote_repo)"
     if [[ -z "$remote_repo" ]]; then
-      remote_repo="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || printf 'unknown')"
+      remote_repo="$(git -C "$MACHINES_REPO_DIR" remote get-url origin 2>/dev/null || printf 'unknown')"
     fi
     last_commit="$(sync_status_value last_commit)"
 
@@ -2975,10 +3011,17 @@ cmd_status() {
   fi
 
   if [[ -d "$REPO_DIR/.git" ]]; then
-    info "git branch: $(git -C "$REPO_DIR" branch --show-current 2>/dev/null || true)"
+    info "local repo branch: $(git -C "$REPO_DIR" branch --show-current 2>/dev/null || true)"
     git -C "$REPO_DIR" status --short
   else
-    warning "repo is not initialized yet"
+    warning "local repo is not initialized yet"
+  fi
+
+  if [[ -d "$MACHINES_REPO_DIR/.git" ]]; then
+    info "machines repo branch: $(git -C "$MACHINES_REPO_DIR" branch --show-current 2>/dev/null || true)"
+    git -C "$MACHINES_REPO_DIR" status --short -- machines
+  else
+    warning "machines repo is not initialized yet"
   fi
 }
 

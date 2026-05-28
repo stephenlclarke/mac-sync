@@ -1,4 +1,8 @@
 SHELL := /bin/bash
+BASH_ENV =
+ENV =
+export BASH_ENV
+export ENV
 
 SCRIPT = bin/mac-sync
 RESTORE_TEST = tests/restore.sh

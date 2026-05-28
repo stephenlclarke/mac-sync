@@ -1,12 +1,13 @@
 # mac-sync
 
 `mac-sync` keeps a curated snapshot of important Mac dotfiles and Homebrew
-packages in git, split by machine name.
+packages in git, split by machine name. This repo owns the command and config;
+machine snapshots live in the separate `stephenlclarke/dot-files` repo.
 
 Snapshots are written to:
 
 ```text
-machines/<machine-name>/
+~/github/dot-files/machines/<machine-name>/
 ```
 
 The reusable sync command lives in:
@@ -21,6 +22,12 @@ From this repo:
 
 ```sh
 ./bin/mac-sync install
+```
+
+The machine snapshot repo must also exist locally:
+
+```sh
+git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
 ```
 
 That command:
@@ -58,7 +65,7 @@ Commands:
 - `uninstall`: unload the LaunchAgent and remove the installed command
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: LaunchAgent mode; same behavior as `sync`
-- `restore`: copy a machine snapshot from the repo back into `$HOME`
+- `restore`: copy a machine snapshot from `dot-files` back into `$HOME`
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
@@ -103,10 +110,11 @@ Restore from another machine:
 mac-sync restore --from old-mbp
 ```
 
-Restore pulls the repo first when the worktree is clean, then copies the curated
-paths from `config/sync-paths.txt` plus the selected machine's persisted dynamic
-paths from `machines/<machine-name>/dynamic-sync-paths.txt`. It also compares
-the selected machine's Homebrew snapshot with the local Homebrew state.
+Restore pulls both repos first when their worktrees are clean, then copies the
+curated paths from `config/sync-paths.txt` plus the selected machine's persisted
+dynamic paths from `~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt`.
+It also compares the selected machine's Homebrew snapshot with the local
+Homebrew state.
 
 By default, restore copies missing files and files that are newer in the repo
 snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
@@ -175,8 +183,8 @@ By default, that file includes:
 Once at least one recipient is configured, hourly sync writes:
 
 ```text
-machines/<machine-name>/secrets/secrets.tar.gz.age
-machines/<machine-name>/secrets/included-paths.txt
+~/github/dot-files/machines/<machine-name>/secrets/secrets.tar.gz.age
+~/github/dot-files/machines/<machine-name>/secrets/included-paths.txt
 ```
 
 You can also update only the encrypted secret snapshot:
@@ -232,7 +240,7 @@ directories in the sync set without hand-editing the manifest every time a
 startup file changes. The generated per-machine dynamic list is persisted to:
 
 ```text
-machines/<machine-name>/dynamic-sync-paths.txt
+~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt
 ```
 
 On later runs, paths that were previously dynamic but are no longer discovered
@@ -243,7 +251,7 @@ Homebrew package state is captured during sync when `brew` is available. The
 generated per-machine lists are persisted to:
 
 ```text
-machines/<machine-name>/homebrew/
+~/github/dot-files/machines/<machine-name>/homebrew/
 ```
 
 That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
@@ -257,7 +265,10 @@ config/excludes.txt
 
 Environment overrides:
 
-- `MAC_SYNC_REPO`: repo path, defaulting to `~/github/mac-sync`
+- `MAC_SYNC_REPO`: mac-sync command/config repo path, defaulting to
+  `~/github/mac-sync`
+- `MAC_SYNC_MACHINES_REPO`: machine snapshot repo path, defaulting to
+  `~/github/dot-files`
 - `MAC_SYNC_MACHINE`: machine directory name, defaulting to the macOS host name
 - `MAC_SYNC_INSTALL_PATH`: installed command path, defaulting to `~/bin/mac-sync`
 - `MAC_SYNC_HOURLY_MINUTE`: LaunchAgent minute, defaulting to `0`
@@ -280,21 +291,21 @@ Environment overrides:
 
 ## Self Update
 
-The repo copy at `bin/mac-sync` is canonical. Each sync pulls the repo first
-when the worktree is clean. If that updates `bin/mac-sync` while the installed
-`~/bin/mac-sync` command is running, the command updates itself, exits, and asks
-you to re-run the sync with the new script.
+The repo copy at `bin/mac-sync` is canonical. Each sync pulls the mac-sync repo
+first when the worktree is clean. If that updates `bin/mac-sync` while the
+installed `~/bin/mac-sync` command is running, the command updates itself,
+exits, and asks you to re-run the sync with the new script.
 
 ## Security Notes
 
 The regular dotfile sync list is explicit by design. Do not add raw secret
 material such as SSH private keys, cloud credentials, token files, shell
 history, or decrypted secret directories to `config/sync-paths.txt`.
-`.gitignore` blocks several common credential paths under `machines/`, but the
-path manifest is still the real safety boundary.
+The machine snapshot repo should also ignore common credential-bearing paths
+under `machines/`, but the path manifest is still the real safety boundary.
 
 Use encrypted secrets for `~/.ssh`, `~/.secrets`, or similar sensitive paths.
-Only encrypted `*.age` snapshots and public recipients belong in the repo. The
+Only encrypted `*.age` snapshots and public recipients belong in git. The
 private `age` identity must stay in Apple Keychain or another secret manager.
 
 ## License
