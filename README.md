@@ -64,6 +64,12 @@ config/sync-paths.txt
 
 Paths are relative to `$HOME` unless they start with `/`.
 
+At runtime, `mac-sync` also scans safe top-level dotfiles in `$HOME` and follows
+safe `$HOME`, `${HOME}`, and `~` references it finds. This keeps sourced files
+such as `~/.shellenv`, `~/.aliases`, `~/.functions`, and referenced plugin
+directories in the sync set without hand-editing the manifest every time a
+startup file changes.
+
 Rsync excludes are listed in:
 
 ```text
@@ -78,6 +84,7 @@ Environment overrides:
 - `MAC_SYNC_DAILY_HOUR`: LaunchAgent hour, defaulting to `9`
 - `MAC_SYNC_DAILY_MINUTE`: LaunchAgent minute, defaulting to `0`
 - `MAC_SYNC_DRY_RUN=1`: preview rsync changes without committing or pushing
+- `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
 - `SCRIPT_COLOUR=off`: disable colour output
 
 ## Self Update
