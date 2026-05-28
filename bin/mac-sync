@@ -573,6 +573,20 @@ write_dynamic_paths_manifest() {
 }
 
 
+# Print dynamic paths that are not already covered by the curated manifest.
+dynamic_extra_paths() {
+  local current_dynamic_file="$1"
+  local configured_paths_file="$2"
+  local rel
+
+  while IFS= read -r rel || [[ -n "$rel" ]]; do
+    safe_dynamic_rel_path "$rel" || continue
+    path_overlaps_file "$rel" "$configured_paths_file" && continue
+    printf '%s\n' "$rel"
+  done <"$current_dynamic_file"
+}
+
+
 # Remove old dynamic snapshot paths that are no longer discovered.
 prune_stale_dynamic_paths() {
   local current_dynamic_file="$1"
@@ -844,6 +858,7 @@ cmd_sync() {
   local rel
   local tmp_configured
   local tmp_dynamic
+  local tmp_dynamic_extra
   local tmp_manifest
 
   check_runtime
@@ -852,12 +867,14 @@ cmd_sync() {
 
   tmp_configured="$(mktemp "${TMPDIR:-/tmp}/mac-sync-configured.XXXXXX")"
   tmp_dynamic="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic.XXXXXX")"
+  tmp_dynamic_extra="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic-extra.XXXXXX")"
   tmp_manifest="$(mktemp "${TMPDIR:-/tmp}/mac-sync-manifest.XXXXXX")"
-  trap 'rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_manifest"' EXIT INT TERM
+  trap 'rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"' EXIT INT TERM
 
   configured_manifest_paths >"$tmp_configured"
   dynamic_manifest_paths >"$tmp_dynamic"
-  awk 'NF && !seen[$0]++' "$tmp_configured" "$tmp_dynamic" >"$tmp_manifest"
+  dynamic_extra_paths "$tmp_dynamic" "$tmp_configured" >"$tmp_dynamic_extra"
+  awk 'NF && !seen[$0]++' "$tmp_configured" "$tmp_dynamic_extra" >"$tmp_manifest"
 
   if [[ "$DRY_RUN" != "1" ]]; then
     mkdir -p "$MACHINE_HOME_DIR" "$MACHINE_ABSOLUTE_DIR"
@@ -867,16 +884,16 @@ cmd_sync() {
     sync_one_path "$rel"
   done <"$tmp_manifest"
 
-  prune_stale_dynamic_paths "$tmp_dynamic" "$tmp_configured"
+  prune_stale_dynamic_paths "$tmp_dynamic_extra" "$tmp_configured"
 
   if [[ "$DRY_RUN" != "1" ]]; then
     if dynamic_refs_enabled; then
-      write_dynamic_paths_manifest "$tmp_dynamic"
+      write_dynamic_paths_manifest "$tmp_dynamic_extra"
     fi
     write_machine_metadata
   fi
 
-  rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_manifest"
+  rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"
   trap - EXIT INT TERM
 
   commit_and_push
