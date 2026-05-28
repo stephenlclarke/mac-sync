@@ -42,6 +42,9 @@ MAC_SYNC_MACHINE=work-mbp MAC_SYNC_HOURLY_MINUTE=17 ./bin/mac-sync install
 mac-sync sync
 mac-sync restore
 mac-sync restore --from old-mbp
+mac-sync secrets init
+mac-sync secrets list --from old-mbp
+mac-sync secrets restore --from old-mbp
 mac-sync list
 mac-sync status
 mac-sync uninstall
@@ -54,6 +57,7 @@ Commands:
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: LaunchAgent mode; same behavior as `sync`
 - `restore`: copy a machine snapshot from the repo back into `$HOME`
+- `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, and git state
 
@@ -94,6 +98,88 @@ When Homebrew packages differ, restore prints the manual commands needed to
 install missing taps, formulae, and casks or upgrade outdated packages from the
 synced list. It does not run those commands for you and it does not uninstall
 extra local packages.
+
+If an encrypted secrets snapshot exists for the selected machine, restore prints
+the `mac-sync secrets list` and `mac-sync secrets restore` commands to inspect
+or restore it. Normal restore never decrypts secrets automatically.
+
+## Encrypted Secrets
+
+Install the required tools:
+
+```sh
+brew install age gnu-tar
+```
+
+Initialize this Mac's encryption identity:
+
+```sh
+mac-sync secrets init
+```
+
+That command creates an `age` identity if needed, stores the private identity in
+Apple Keychain under `mac-sync age identity`, and adds only the public recipient
+to:
+
+```text
+config/age-recipients.txt
+```
+
+The encrypted secret paths are listed in:
+
+```text
+config/secret-paths.txt
+```
+
+By default, that file includes:
+
+```text
+.ssh
+.secrets
+```
+
+Once at least one recipient is configured, hourly sync writes:
+
+```text
+machines/<machine-name>/secrets/secrets.tar.gz.age
+machines/<machine-name>/secrets/included-paths.txt
+```
+
+You can also update only the encrypted secret snapshot:
+
+```sh
+mac-sync secrets sync
+```
+
+Inspect an encrypted snapshot:
+
+```sh
+mac-sync secrets list --from old-mbp
+```
+
+Restore encrypted secrets:
+
+```sh
+mac-sync secrets restore --from old-mbp
+```
+
+Without `--force`, restore refuses to overwrite existing local secret files.
+Use `--force` to overwrite files from the encrypted snapshot:
+
+```sh
+mac-sync secrets restore --from old-mbp --force
+```
+
+Test Keychain and current-machine archive access:
+
+```sh
+mac-sync secrets test
+```
+
+Each trusted Mac should run `mac-sync secrets init`, which adds that Mac's public
+recipient to the repo. Future encrypted snapshots are encrypted to every
+recipient in `config/age-recipients.txt`, so any matching Keychain identity can
+decrypt them.
 
 ## Configuration
 
@@ -147,6 +233,11 @@ Environment overrides:
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
 - `MAC_SYNC_HOMEBREW=0`: disable Homebrew package snapshotting and restore
   command suggestions
+- `MAC_SYNC_SECRETS=0`: disable encrypted secret snapshotting and restore hints
+- `MAC_SYNC_KEYCHAIN_SERVICE`: Keychain service for the `age` identity,
+  defaulting to `mac-sync age identity`
+- `MAC_SYNC_KEYCHAIN_ACCOUNT`: Keychain account for the `age` identity,
+  defaulting to `$USER` or `id -un`
 - `SCRIPT_COLOUR=off`: disable colour output
 
 ## Self Update
@@ -158,10 +249,15 @@ you to re-run the sync with the new script.
 
 ## Security Notes
 
-The sync list is explicit by design. Do not add raw secret material such as SSH
-private keys, cloud credentials, token files, shell history, or decrypted secret
-directories. `.gitignore` blocks several common credential paths under
-`machines/`, but the path manifest is still the real safety boundary.
+The regular dotfile sync list is explicit by design. Do not add raw secret
+material such as SSH private keys, cloud credentials, token files, shell
+history, or decrypted secret directories to `config/sync-paths.txt`.
+`.gitignore` blocks several common credential paths under `machines/`, but the
+path manifest is still the real safety boundary.
+
+Use encrypted secrets for `~/.ssh`, `~/.secrets`, or similar sensitive paths.
+Only encrypted `*.age` snapshots and public recipients belong in the repo. The
+private `age` identity must stay in Apple Keychain or another secret manager.
 
 ## License
 

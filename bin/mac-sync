@@ -33,6 +33,7 @@
 #   restore     Restore this machine snapshot back into $HOME
 #   restore --from <machine> [--force]
 #               Restore another machine snapshot back into $HOME
+#   secrets     Manage encrypted secret snapshots with age and Keychain
 #   list        Show configured source paths and repo destinations
 #   paths       Alias for list
 #   status      Show install, repo, LaunchAgent, and git state
@@ -48,6 +49,11 @@
 #   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
+#   MAC_SYNC_SECRETS       Set to 0 to disable encrypted secret snapshots
+#   MAC_SYNC_KEYCHAIN_SERVICE
+#                          Keychain service for the age identity
+#   MAC_SYNC_KEYCHAIN_ACCOUNT
+#                          Keychain account. Default: $USER or id -un
 #   SCRIPT_COLOUR          Set to off, false, or 0 to disable colour
 #
 # EXAMPLES:
@@ -55,12 +61,15 @@
 #   mac-sync list
 #   mac-sync sync
 #   mac-sync restore --from old-mbp
+#   mac-sync secrets init
+#   mac-sync secrets list --from old-mbp
 #   MAC_SYNC_MACHINE=work-mbp mac-sync install
 
 set -euo pipefail
 
 readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
-readonly SCRIPT_NAME="$(basename "$SELF_PATH")"
+SCRIPT_NAME="$(basename "$SELF_PATH")"
+readonly SCRIPT_NAME
 readonly HOME_DIR="${HOME:?HOME is not set}"
 readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
 readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
@@ -69,8 +78,13 @@ readonly HOURLY_MINUTE="${MAC_SYNC_HOURLY_MINUTE:-${MAC_SYNC_DAILY_MINUTE:-0}}"
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
+readonly SECRETS_SYNC="${MAC_SYNC_SECRETS:-1}"
 readonly PATHS_FILE="${MAC_SYNC_PATHS_FILE:-${REPO_DIR}/config/sync-paths.txt}"
 readonly EXCLUDES_FILE="${MAC_SYNC_EXCLUDES_FILE:-${REPO_DIR}/config/excludes.txt}"
+readonly SECRET_PATHS_FILE="${MAC_SYNC_SECRET_PATHS_FILE:-${REPO_DIR}/config/secret-paths.txt}"
+readonly AGE_RECIPIENTS_FILE="${MAC_SYNC_AGE_RECIPIENTS_FILE:-${REPO_DIR}/config/age-recipients.txt}"
+readonly KEYCHAIN_SERVICE="${MAC_SYNC_KEYCHAIN_SERVICE:-mac-sync age identity}"
+readonly KEYCHAIN_ACCOUNT="${MAC_SYNC_KEYCHAIN_ACCOUNT:-${USER:-$(id -un)}}"
 readonly REPO_SCRIPT="${REPO_DIR}/bin/mac-sync"
 readonly LAUNCH_AGENT_LABEL="tools.xyzzy.mac-sync"
 readonly LAUNCH_AGENT_PLIST="${HOME_DIR}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
@@ -284,12 +298,16 @@ machine_name() {
 }
 
 
-readonly MACHINE_NAME="$(machine_name)"
+MACHINE_NAME="$(machine_name)"
+readonly MACHINE_NAME
 readonly MACHINE_DIR="${REPO_DIR}/machines/${MACHINE_NAME}"
 readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
 readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
 readonly DYNAMIC_PATHS_FILE="${MACHINE_DIR}/dynamic-sync-paths.txt"
 readonly HOMEBREW_DIR="${MACHINE_DIR}/homebrew"
+readonly SECRETS_DIR="${MACHINE_DIR}/secrets"
+readonly SECRETS_ARCHIVE="${SECRETS_DIR}/secrets.tar.gz.age"
+readonly SECRETS_INCLUDED_PATHS_FILE="${SECRETS_DIR}/included-paths.txt"
 readonly LOCK_DIR="${TMPDIR:-/tmp}/mac-sync-${MACHINE_NAME}.lock"
 
 
@@ -344,6 +362,19 @@ dynamic_refs_enabled() {
 # Return true when Homebrew package snapshotting is enabled.
 homebrew_sync_enabled() {
   case "$HOMEBREW_SYNC" in
+    0|off|OFF|false|FALSE)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+
+# Return true when encrypted secret snapshotting is enabled.
+secrets_sync_enabled() {
+  case "$SECRETS_SYNC" in
     0|off|OFF|false|FALSE)
       return 1
       ;;
@@ -1058,6 +1089,683 @@ print_homebrew_restore_commands() {
 }
 
 
+# Return the encrypted secrets snapshot directory for a machine.
+secrets_dir_for() {
+  local machine="$1"
+
+  printf '%s/machines/%s/secrets\n' "$REPO_DIR" "$machine"
+}
+
+
+# Return the encrypted secrets archive for a machine.
+secrets_archive_for() {
+  local machine="$1"
+
+  printf '%s/secrets.tar.gz.age\n' "$(secrets_dir_for "$machine")"
+}
+
+
+# Return true when a secret path is safe to pass to tar as HOME-relative input.
+safe_secret_rel_path() {
+  local rel="$1"
+
+  case "$rel" in
+    ""|/*|..|../*|*/../*|*/..|.|-*)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+
+# Print configured secret paths.
+secret_manifest_paths() {
+  local line
+
+  [[ -f "$SECRET_PATHS_FILE" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    if safe_secret_rel_path "$line"; then
+      printf '%s\n' "$line"
+    else
+      warning "skip unsafe secret path: $line"
+    fi
+  done <"$SECRET_PATHS_FILE"
+}
+
+
+# Print configured age recipients.
+age_recipients() {
+  local line
+
+  [[ -f "$AGE_RECIPIENTS_FILE" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done <"$AGE_RECIPIENTS_FILE"
+}
+
+
+# Return true when at least one age recipient is configured.
+age_recipients_present() {
+  [[ -n "$(age_recipients | sed -n '1p')" ]]
+}
+
+
+# Append a unique non-secret line to a config file, preserving comments.
+append_unique_config_line() {
+  local file="$1"
+  local line="$2"
+
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  if ! grep -Fx "$line" "$file" >/dev/null 2>&1; then
+    printf '%s\n' "$line" >>"$file"
+  fi
+}
+
+
+# Ensure the default secret path manifest exists.
+ensure_secret_paths_file() {
+  if [[ -f "$SECRET_PATHS_FILE" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$SECRET_PATHS_FILE")"
+  {
+    printf '%s\n' "# Paths are relative to \$HOME and are encrypted before syncing."
+    printf '%s\n' "# Keep this list narrow; the decrypted archive restores into \$HOME."
+    printf '%s\n' '.ssh'
+    printf '%s\n' '.secrets'
+  } >"$SECRET_PATHS_FILE"
+}
+
+
+# Ensure the age recipients file exists.
+ensure_age_recipients_file() {
+  if [[ -f "$AGE_RECIPIENTS_FILE" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$AGE_RECIPIENTS_FILE")"
+  {
+    printf '%s\n' '# Public age recipients that can decrypt encrypted secret snapshots.'
+    printf '%s\n' '# Add one age1... recipient per trusted Mac or recovery key.'
+  } >"$AGE_RECIPIENTS_FILE"
+}
+
+
+# Ensure tools needed for encrypted secrets are available.
+check_secrets_runtime() {
+  need age
+  need gtar
+}
+
+
+# Ensure tools needed for Keychain-backed secret identity operations are available.
+check_keychain_runtime() {
+  check_secrets_runtime
+  need age-keygen
+  need security
+}
+
+
+# Return true when the Keychain age identity exists.
+keychain_identity_exists() {
+  security find-generic-password \
+    -a "$KEYCHAIN_ACCOUNT" \
+    -s "$KEYCHAIN_SERVICE" \
+    -w >/dev/null 2>&1
+}
+
+
+# Ensure the Keychain age identity exists before a decrypt operation.
+require_keychain_identity() {
+  if keychain_identity_exists; then
+    return 0
+  fi
+
+  error "missing Keychain age identity: $KEYCHAIN_SERVICE"
+  error "run: $SCRIPT_NAME secrets init"
+  exit 1
+}
+
+
+# Write the Keychain age identity to a temporary identity file.
+write_keychain_identity_file() {
+  local target="$1"
+
+  umask 077
+  security find-generic-password \
+    -a "$KEYCHAIN_ACCOUNT" \
+    -s "$KEYCHAIN_SERVICE" \
+    -w >"$target"
+  chmod 600 "$target"
+}
+
+
+# Store an age identity in Apple Keychain.
+store_keychain_identity() {
+  local identity="$1"
+
+  security add-generic-password \
+    -a "$KEYCHAIN_ACCOUNT" \
+    -s "$KEYCHAIN_SERVICE" \
+    -w "$identity" \
+    -U >/dev/null
+}
+
+
+# Return the public recipient for an age identity file.
+recipient_from_identity_file() {
+  local identity_file="$1"
+
+  age-keygen -y "$identity_file"
+}
+
+
+# Return true when a recipient is present in the configured recipients file.
+recipient_configured() {
+  local recipient="$1"
+
+  [[ -f "$AGE_RECIPIENTS_FILE" ]] || return 1
+  grep -Fx "$recipient" "$AGE_RECIPIENTS_FILE" >/dev/null 2>&1
+}
+
+
+# Create or reuse the Keychain age identity and persist its public recipient.
+cmd_secrets_init() {
+  local tmp_identity
+  local tmp_keygen
+  local identity
+  local recipient
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+  check_keychain_runtime
+
+  ensure_secret_paths_file
+  ensure_age_recipients_file
+
+  tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
+  tmp_keygen="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-keygen.XXXXXX")"
+  chmod 600 "$tmp_identity" "$tmp_keygen"
+  trap 'rm -f "$tmp_identity" "$tmp_keygen"' EXIT INT TERM
+
+  if keychain_identity_exists; then
+    write_keychain_identity_file "$tmp_identity"
+    recipient="$(recipient_from_identity_file "$tmp_identity")"
+    info "Keychain age identity already exists: $KEYCHAIN_SERVICE"
+  else
+    age-keygen -o "$tmp_keygen" >/dev/null
+    identity="$(awk '/^AGE-SECRET-KEY-/ { print; exit }' "$tmp_keygen")"
+    if [[ -z "$identity" ]]; then
+      error "age-keygen did not create an age identity"
+      exit 1
+    fi
+    printf '%s\n' "$identity" >"$tmp_identity"
+    recipient="$(recipient_from_identity_file "$tmp_identity")"
+    store_keychain_identity "$identity"
+    info "Stored new age identity in Apple Keychain: $KEYCHAIN_SERVICE"
+  fi
+
+  append_unique_config_line "$AGE_RECIPIENTS_FILE" "$recipient"
+  if recipient_configured "$recipient"; then
+    info "Configured public age recipient: $recipient"
+  fi
+
+  rm -f "$tmp_identity" "$tmp_keygen"
+  trap - EXIT INT TERM
+
+  commit_config_and_push \
+    "chore: configure encrypted secrets" \
+    "config/secret-paths.txt" \
+    "config/age-recipients.txt"
+}
+
+
+# Commit selected config paths when they changed and push when useful.
+commit_config_and_push() {
+  local commit_message="$1"
+  local branch
+  local committed=0
+  shift
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "dry run enabled; skipping config commit and push"
+    return 0
+  fi
+
+  git -C "$REPO_DIR" add -- "$@"
+
+  if git -C "$REPO_DIR" diff --cached --quiet -- "$@"; then
+    info "no secrets config changes to commit"
+  else
+    git -C "$REPO_DIR" commit -m "$commit_message" -- "$@"
+    committed=1
+  fi
+
+  if ! repo_has_origin; then
+    warning "no origin remote configured; skipping git push"
+    return 0
+  fi
+
+  branch="$(git -C "$REPO_DIR" branch --show-current)"
+  if [[ -z "$branch" ]]; then
+    warning "detached HEAD; skipping git push"
+    return 0
+  fi
+
+  if [[ "$committed" = "1" ]] || branch_ahead_of_upstream; then
+    info "pushing ${branch} to origin"
+    git -C "$REPO_DIR" push -u origin "$branch"
+  else
+    info "no local commits to push"
+  fi
+}
+
+
+# Write the plaintext included-paths manifest for an encrypted secrets snapshot.
+write_secrets_included_paths_manifest() {
+  local included_file="$1"
+
+  mkdir -p "$SECRETS_DIR"
+  {
+    printf '%s\n' '# Generated by mac-sync. Do not edit.'
+    printf '%s\n' '# HOME-relative paths included in secrets.tar.gz.age.'
+    cat "$included_file"
+  } >"$SECRETS_INCLUDED_PATHS_FILE"
+}
+
+
+# Sync configured secret paths into an encrypted machine snapshot.
+sync_secrets_archive() {
+  local mode="${1:-auto}"
+  local tmp_included
+  local tmp_archive
+  local rel
+  local src
+
+  secrets_sync_enabled || return 0
+
+  if ! age_recipients_present; then
+    if [[ "$mode" = "required" ]]; then
+      error "no age recipients configured; run: $SCRIPT_NAME secrets init"
+      exit 1
+    fi
+    return 0
+  fi
+
+  if ! command -v age >/dev/null 2>&1 || ! command -v gtar >/dev/null 2>&1; then
+    if [[ "$mode" = "required" ]]; then
+      check_secrets_runtime
+    fi
+    warning "age or gtar not found; skipping encrypted secrets snapshot"
+    return 0
+  fi
+
+  tmp_included="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-paths.XXXXXX")"
+  tmp_archive="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secrets.XXXXXX")"
+  trap 'rm -f "$tmp_included" "$tmp_archive"' RETURN
+
+  while IFS= read -r rel; do
+    src="$(source_path_for "$rel")"
+    if [[ -e "$src" || -L "$src" ]]; then
+      printf '%s\n' "$rel" >>"$tmp_included"
+    elif [[ "$mode" = "required" ]]; then
+      info "skip missing secret source: $src"
+    fi
+  done < <(secret_manifest_paths)
+
+  if [[ ! -s "$tmp_included" ]]; then
+    if [[ "$mode" = "required" ]]; then
+      warning "no configured secret paths exist; skipping encrypted secrets snapshot"
+    fi
+    rm -f "$tmp_included" "$tmp_archive"
+    trap - RETURN
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "would update encrypted secrets snapshot: $SECRETS_ARCHIVE"
+    rm -f "$tmp_included" "$tmp_archive"
+    trap - RETURN
+    return 0
+  fi
+
+  mkdir -p "$SECRETS_DIR"
+  gtar -C "$HOME_DIR" \
+    --ignore-failed-read \
+    --exclude='.DS_Store' \
+    --exclude='*/.DS_Store' \
+    --exclude='*.sock' \
+    -czf - \
+    -T "$tmp_included" \
+    | age -R "$AGE_RECIPIENTS_FILE" -o "$tmp_archive"
+  mv "$tmp_archive" "$SECRETS_ARCHIVE"
+  write_secrets_included_paths_manifest "$tmp_included"
+  info "updated encrypted secrets snapshot: $SECRETS_ARCHIVE"
+
+  rm -f "$tmp_included"
+  trap - RETURN
+}
+
+
+# Return true when a tar entry is safe to restore under HOME.
+safe_archive_entry() {
+  local entry="$1"
+
+  case "$entry" in
+    ""|/*|..|../*|*/../*|*/..|.)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+
+# Validate all archive entries before extraction.
+validate_archive_entries() {
+  local entries_file="$1"
+  local entry
+
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    safe_archive_entry "$entry" || {
+      error "unsafe archive entry: $entry"
+      exit 1
+    }
+  done <"$entries_file"
+}
+
+
+# Print archive entries that would overwrite existing local files.
+secret_restore_conflicts() {
+  local entries_file="$1"
+  local entry
+  local dest
+
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    case "$entry" in
+      */)
+        continue
+        ;;
+    esac
+    dest="$(source_path_for "$entry")"
+    if [[ -e "$dest" || -L "$dest" ]]; then
+      printf '%s\n' "$entry"
+    fi
+  done <"$entries_file"
+}
+
+
+# Write decrypted archive entry names to a file.
+write_secret_archive_entries() {
+  local archive="$1"
+  local identity_file="$2"
+  local entries_file="$3"
+
+  age -d -i "$identity_file" "$archive" | gtar -tzf - >"$entries_file"
+}
+
+
+# Print an encrypted secrets restore hint during normal restore.
+print_secrets_restore_hint() {
+  local machine="$1"
+  local archive
+
+  secrets_sync_enabled || return 0
+
+  archive="$(secrets_archive_for "$machine")"
+  [[ -f "$archive" ]] || return 0
+
+  printf '\n'
+  info "Encrypted secrets snapshot found:"
+  info "  $archive"
+  info "To inspect it:"
+  info "  $SCRIPT_NAME secrets list --from $(shell_quote "$machine")"
+  info "To restore it:"
+  info "  $SCRIPT_NAME secrets restore --from $(shell_quote "$machine")"
+}
+
+
+# List files in an encrypted secrets archive.
+cmd_secrets_list() {
+  local from_machine="$MACHINE_NAME"
+  local archive
+  local tmp_identity
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown secrets list option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  safe_machine_name "$from_machine" || {
+    error "invalid machine name: $from_machine"
+    exit 2
+  }
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+  check_keychain_runtime
+  require_keychain_identity
+  archive="$(secrets_archive_for "$from_machine")"
+  [[ -f "$archive" ]] || {
+    error "missing encrypted secrets snapshot: $archive"
+    exit 1
+  }
+
+  tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
+  trap 'rm -f "$tmp_identity"' EXIT INT TERM
+  write_keychain_identity_file "$tmp_identity"
+  age -d -i "$tmp_identity" "$archive" | gtar -tzf -
+  rm -f "$tmp_identity"
+  trap - EXIT INT TERM
+}
+
+
+# Restore files from an encrypted secrets archive.
+cmd_secrets_restore() {
+  local force=0
+  local from_machine="$MACHINE_NAME"
+  local archive
+  local tmp_conflicts
+  local tmp_entries
+  local tmp_identity
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
+      *)
+        error "unknown secrets restore option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  safe_machine_name "$from_machine" || {
+    error "invalid machine name: $from_machine"
+    exit 2
+  }
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+  check_keychain_runtime
+  require_keychain_identity
+  archive="$(secrets_archive_for "$from_machine")"
+  [[ -f "$archive" ]] || {
+    error "missing encrypted secrets snapshot: $archive"
+    exit 1
+  }
+
+  tmp_conflicts="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-conflicts.XXXXXX")"
+  tmp_entries="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-entries.XXXXXX")"
+  tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
+  trap 'rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"' EXIT INT TERM
+
+  write_keychain_identity_file "$tmp_identity"
+  write_secret_archive_entries "$archive" "$tmp_identity" "$tmp_entries"
+  validate_archive_entries "$tmp_entries"
+  secret_restore_conflicts "$tmp_entries" >"$tmp_conflicts"
+
+  if [[ "$force" != "1" && -s "$tmp_conflicts" ]]; then
+    error "secret restore would overwrite existing files; re-run with --force"
+    sed 's/^/  /' "$tmp_conflicts" >&2
+    exit 1
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "would restore encrypted secrets from: $archive"
+    rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"
+    trap - EXIT INT TERM
+    return 0
+  fi
+
+  info "restoring encrypted secrets from: $archive"
+  age -d -i "$tmp_identity" "$archive" | gtar -xzf - -C "$HOME_DIR"
+
+  rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"
+  trap - EXIT INT TERM
+}
+
+
+# Test Keychain identity and optional current-machine archive decryption.
+cmd_secrets_test() {
+  local archive="$SECRETS_ARCHIVE"
+  local recipient
+  local tmp_identity
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+  check_keychain_runtime
+  require_keychain_identity
+
+  tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
+  trap 'rm -f "$tmp_identity"' EXIT INT TERM
+  write_keychain_identity_file "$tmp_identity"
+  recipient="$(recipient_from_identity_file "$tmp_identity")"
+
+  if recipient_configured "$recipient"; then
+    info "Keychain identity has a configured public recipient."
+  else
+    warning "Keychain identity recipient is not in $AGE_RECIPIENTS_FILE"
+  fi
+
+  if [[ -f "$archive" ]]; then
+    age -d -i "$tmp_identity" "$archive" | gtar -tzf - >/dev/null
+    info "Current machine encrypted secrets snapshot can be decrypted."
+  else
+    info "No current machine encrypted secrets snapshot found yet."
+  fi
+
+  rm -f "$tmp_identity"
+  trap - EXIT INT TERM
+}
+
+
+# Sync encrypted secrets and push the machine snapshot.
+cmd_secrets_sync() {
+  check_runtime
+  acquire_lock
+  trap 'release_lock' EXIT INT TERM
+
+  pull_repo_if_safe
+  update_installed_self_or_exit
+  sync_secrets_archive required
+  commit_and_push
+
+  release_lock
+  trap - EXIT INT TERM
+}
+
+
+# Dispatch encrypted secrets subcommands.
+cmd_secrets() {
+  local command="${1:-help}"
+
+  case "$command" in
+    init)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "secrets init does not accept options"
+        exit 2
+      fi
+      cmd_secrets_init
+      ;;
+    sync)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "secrets sync does not accept options"
+        exit 2
+      fi
+      cmd_secrets_sync
+      ;;
+    list)
+      shift || true
+      cmd_secrets_list "$@"
+      ;;
+    restore)
+      shift || true
+      cmd_secrets_restore "$@"
+      ;;
+    test)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "secrets test does not accept options"
+        exit 2
+      fi
+      cmd_secrets_test
+      ;;
+    help|-h|--help)
+      info "USAGE:"
+      info "  $SCRIPT_NAME secrets <init|sync|list|restore|test>"
+      ;;
+    *)
+      error "unknown secrets command: $command"
+      exit 2
+      ;;
+  esac
+}
+
+
 # Copy one configured path into the machine snapshot.
 sync_one_path() {
   local rel="$1"
@@ -1227,7 +1935,7 @@ write_machine_metadata() {
   mkdir -p "$MACHINE_DIR"
   {
     printf '# %s\n\n' "$MACHINE_NAME"
-    printf 'This directory contains the curated dotfile snapshot for `%s`.\n\n' "$MACHINE_NAME"
+    printf "This directory contains the curated dotfile snapshot for \`%s\`.\n\n" "$MACHINE_NAME"
     printf '%s\n' "- ComputerName: \`${computer_name:-unknown}\`"
     printf '%s\n' "- LocalHostName: \`${local_host_name:-unknown}\`"
     printf '%s\n' "- OS: \`${os_name:-unknown} ${os_version:-unknown}\`"
@@ -1303,7 +2011,7 @@ commit_and_push() {
     info "no machine snapshot changes to commit"
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
-    git -C "$REPO_DIR" commit -m "$commit_message"
+    git -C "$REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
     committed=1
   fi
 
@@ -1390,6 +2098,7 @@ cmd_sync() {
 
   prune_stale_dynamic_paths "$tmp_dynamic_extra" "$tmp_configured"
   sync_homebrew_packages
+  sync_secrets_archive auto
 
   if [[ "$DRY_RUN" != "1" ]]; then
     if dynamic_refs_enabled; then
@@ -1466,6 +2175,7 @@ cmd_restore() {
   done < <(restore_manifest_paths "$from_machine")
 
   print_homebrew_restore_commands "$from_machine"
+  print_secrets_restore_hint "$from_machine"
 }
 
 
@@ -1481,6 +2191,9 @@ cmd_list() {
   info "paths file: $PATHS_FILE"
   info "dynamic paths file: $DYNAMIC_PATHS_FILE"
   info "Homebrew snapshot dir: $HOMEBREW_DIR"
+  info "secret paths file: $SECRET_PATHS_FILE"
+  info "age recipients file: $AGE_RECIPIENTS_FILE"
+  info "encrypted secrets archive: $SECRETS_ARCHIVE"
   if dynamic_refs_enabled; then
     info "dynamic refs: enabled"
   else
@@ -1490,6 +2203,11 @@ cmd_list() {
     info "Homebrew sync: enabled"
   else
     info "Homebrew sync: disabled"
+  fi
+  if secrets_sync_enabled; then
+    info "encrypted secrets sync: enabled"
+  else
+    info "encrypted secrets sync: disabled"
   fi
   printf '\n'
 
@@ -1655,6 +2373,10 @@ main() {
     restore)
       shift || true
       cmd_restore "$@"
+      ;;
+    secrets)
+      shift || true
+      cmd_secrets "$@"
       ;;
     list|paths)
       cmd_list

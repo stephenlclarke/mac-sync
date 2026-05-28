@@ -4,7 +4,8 @@ set -euo pipefail
 
 readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
-readonly TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-restore.XXXXXX")"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-restore.XXXXXX")"
+readonly TMP_ROOT
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
 readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"

@@ -15,3 +15,6 @@ machines/*/home/.gnupg/private-keys-v1.d/
 machines/*/home/.secrets/
 machines/*/home/.ssh/id_*
 machines/*/home/.vault-pass
+machines/*/secrets/*.tar.gz
+machines/*/secrets/*identity*
+machines/*/secrets/*.tmp
