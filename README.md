@@ -45,6 +45,8 @@ mac-sync restore --from old-mbp
 mac-sync secrets init
 mac-sync secrets list --from old-mbp
 mac-sync secrets restore --from old-mbp
+mac-sync help restore
+mac-sync help secrets
 mac-sync list
 mac-sync status
 mac-sync uninstall
@@ -60,6 +62,7 @@ Commands:
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
+- `help [topic]`: show general help or command-specific help
 
 ## Status
 
@@ -86,6 +89,12 @@ Restore the current machine snapshot:
 
 ```sh
 mac-sync restore
+```
+
+Show restore help:
+
+```sh
+mac-sync help restore
 ```
 
 Restore from another machine:
@@ -134,6 +143,12 @@ Initialize this Mac's encryption identity:
 
 ```sh
 mac-sync secrets init
+```
+
+Show encrypted secrets help:
+
+```sh
+mac-sync help secrets
 ```
 
 That command creates an `age` identity if needed, stores the private identity in

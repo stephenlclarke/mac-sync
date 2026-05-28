@@ -37,7 +37,8 @@
 #   list        Show configured source paths and repo destinations
 #   paths       Alias for list
 #   status      Show install, repo, LaunchAgent, git, and last-sync state
-#   help        Show this help text
+#   help [topic]
+#               Show this help text or command-specific help
 #   -h, --help  Show this help text
 #
 # ENVIRONMENT:
@@ -66,6 +67,8 @@
 #   mac-sync restore --from old-mbp
 #   mac-sync secrets init
 #   mac-sync secrets list --from old-mbp
+#   mac-sync help restore
+#   mac-sync help secrets
 #   MAC_SYNC_MACHINE=work-mbp mac-sync install
 
 set -euo pipefail
@@ -156,6 +159,101 @@ usage() {
       }
     }
   ' "$SELF_PATH"
+}
+
+
+# Print command-specific restore usage.
+usage_restore() {
+  cat <<EOF
+USAGE:
+  $SCRIPT_NAME restore [--from <machine>] [--force]
+
+OPTIONS:
+  --from <machine>  Restore from another machine snapshot. Default: current machine.
+  --force           Overwrite newer local files and resolve file/directory conflicts.
+  -h, --help        Show this help text.
+
+BEHAVIOR:
+  Restore pulls the repo first when the worktree is clean.
+  It restores configured paths plus that machine's persisted dynamic paths.
+  Newer local files are kept unless --force is used.
+  Homebrew differences are printed as manual brew commands.
+  Encrypted secrets are not restored automatically; restore prints the secrets
+  commands when an encrypted snapshot exists.
+
+EXAMPLES:
+  $SCRIPT_NAME restore
+  $SCRIPT_NAME restore --from old-mbp
+  $SCRIPT_NAME restore --from old-mbp --force
+  MAC_SYNC_DRY_RUN=1 $SCRIPT_NAME restore --from old-mbp
+EOF
+}
+
+
+# Print command-specific encrypted secrets usage.
+usage_secrets() {
+  cat <<EOF
+USAGE:
+  $SCRIPT_NAME secrets <command>
+
+COMMANDS:
+  init       Create or reuse this Mac's Keychain age identity
+  sync       Update the encrypted secret snapshot and push machine state
+  list       List files in an encrypted secret snapshot
+  restore    Restore files from an encrypted secret snapshot
+  test       Check Keychain identity and current archive decryption
+  help       Show this help text
+
+OPTIONS:
+  list --from <machine>
+  restore --from <machine> [--force]
+
+NOTES:
+  Private age identity is stored in Apple Keychain under the configured service.
+  Public recipients are stored in config/age-recipients.txt.
+  Secret paths are configured in config/secret-paths.txt.
+  Normal restore never decrypts secrets automatically.
+
+EXAMPLES:
+  $SCRIPT_NAME secrets init
+  $SCRIPT_NAME secrets sync
+  $SCRIPT_NAME secrets list --from old-mbp
+  $SCRIPT_NAME secrets restore --from old-mbp
+  $SCRIPT_NAME secrets restore --from old-mbp --force
+  $SCRIPT_NAME secrets test
+EOF
+}
+
+
+# Dispatch top-level and command-specific help.
+cmd_help() {
+  local topic="${1:-}"
+
+  if [[ "$#" -gt 1 ]]; then
+    error "too many help arguments"
+    usage >&2
+    exit 2
+  fi
+
+  case "$topic" in
+    "")
+      usage
+      ;;
+    restore)
+      usage_restore
+      ;;
+    secrets)
+      usage_secrets
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      error "unknown help topic: $topic"
+      usage >&2
+      exit 2
+      ;;
+  esac
 }
 
 
@@ -2118,8 +2216,7 @@ cmd_secrets() {
       cmd_secrets_test
       ;;
     help|-h|--help)
-      info "USAGE:"
-      info "  $SCRIPT_NAME secrets <init|sync|list|restore|test>"
+      usage_secrets
       ;;
     *)
       error "unknown secrets command: $command"
@@ -2510,7 +2607,7 @@ cmd_restore() {
         shift
         ;;
       -h|--help)
-        usage
+        usage_restore
         return 0
         ;;
       *)
@@ -2915,7 +3012,8 @@ main() {
       cmd_status
       ;;
     help|-h|--help)
-      usage
+      shift || true
+      cmd_help "$@"
       ;;
     *)
       error "unknown command: $command"

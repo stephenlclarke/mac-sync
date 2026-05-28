@@ -5,6 +5,7 @@ RESTORE_TEST = tests/restore.sh
 HOMEBREW_TEST = tests/homebrew.sh
 SECRETS_TEST = tests/secrets.sh
 STATUS_TEST = tests/status.sh
+HELP_TEST = tests/help.sh
 
 .PHONY: all check help
 
@@ -17,10 +18,13 @@ check:
 	bash -n $(HOMEBREW_TEST)
 	bash -n $(SECRETS_TEST)
 	bash -n $(STATUS_TEST)
+	bash -n $(HELP_TEST)
 	$(SCRIPT) --help >/dev/null
 	$(SCRIPT) list >/dev/null
 	/bin/bash $(SCRIPT) --help >/dev/null
 	/bin/bash $(SCRIPT) list >/dev/null
+	bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(HOMEBREW_TEST) $(CURDIR)/$(SCRIPT)
