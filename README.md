@@ -16,6 +16,9 @@ The reusable sync command lives in:
 bin/mac-sync
 ```
 
+See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
+restore runbook.
+
 ## Install
 
 From this repo:
