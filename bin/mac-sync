@@ -582,45 +582,65 @@ cmd_uninstall() {
 
 # Write the daily LaunchAgent plist.
 write_launchagent() {
-  {
-    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
-    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-    printf '%s\n' '<plist version="1.0">'
-    printf '%s\n' '  <dict>'
-    printf '%s\n' '    <key>Label</key>'
-    printf '    <string>%s</string>\n' "$LAUNCH_AGENT_LABEL"
-    printf '%s\n' '    <key>ProgramArguments</key>'
-    printf '%s\n' '    <array>'
-    printf '      <string>%s</string>\n' "$(xmlescape "$INSTALL_PATH")"
-    printf '%s\n' '      <string>run</string>'
-    printf '%s\n' '    </array>'
-    printf '%s\n' '    <key>EnvironmentVariables</key>'
-    printf '%s\n' '    <dict>'
-    printf '%s\n' '      <key>MAC_SYNC_REPO</key>'
-    printf '      <string>%s</string>\n' "$(xmlescape "$REPO_DIR")"
-    printf '%s\n' '      <key>MAC_SYNC_MACHINE</key>'
-    printf '      <string>%s</string>\n' "$(xmlescape "$MACHINE_NAME")"
-    if [[ -n "${SCRIPT_COLOUR:-}" ]]; then
-      printf '%s\n' '      <key>SCRIPT_COLOUR</key>'
-      printf '      <string>%s</string>\n' "$(xmlescape "$SCRIPT_COLOUR")"
-    fi
-    printf '%s\n' '    </dict>'
-    printf '%s\n' '    <key>RunAtLoad</key>'
-    printf '%s\n' '    <true/>'
-    printf '%s\n' '    <key>StartCalendarInterval</key>'
-    printf '%s\n' '    <dict>'
-    printf '%s\n' '      <key>Hour</key>'
-    printf '      <integer>%s</integer>\n' "$DAILY_HOUR"
-    printf '%s\n' '      <key>Minute</key>'
-    printf '      <integer>%s</integer>\n' "$DAILY_MINUTE"
-    printf '%s\n' '    </dict>'
-    printf '%s\n' '    <key>StandardOutPath</key>'
-    printf '    <string>%s</string>\n' "$LOG_OUT"
-    printf '%s\n' '    <key>StandardErrorPath</key>'
-    printf '    <string>%s</string>\n' "$LOG_ERR"
-    printf '%s\n' '  </dict>'
-    printf '%s\n' '</plist>'
-  } >"$LAUNCH_AGENT_PLIST"
+  local escaped_install_path
+  local escaped_log_err
+  local escaped_log_out
+  local escaped_machine_name
+  local escaped_repo_dir
+  local escaped_script_colour
+  local script_colour_xml=""
+
+  escaped_install_path="$(xmlescape "$INSTALL_PATH")"
+  escaped_log_err="$(xmlescape "$LOG_ERR")"
+  escaped_log_out="$(xmlescape "$LOG_OUT")"
+  escaped_machine_name="$(xmlescape "$MACHINE_NAME")"
+  escaped_repo_dir="$(xmlescape "$REPO_DIR")"
+
+  if [[ -n "${SCRIPT_COLOUR:-}" ]]; then
+    escaped_script_colour="$(xmlescape "$SCRIPT_COLOUR")"
+    script_colour_xml="$(cat <<EOF
+      <key>SCRIPT_COLOUR</key>
+      <string>${escaped_script_colour}</string>
+EOF
+)"
+  fi
+
+  cat >"$LAUNCH_AGENT_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${LAUNCH_AGENT_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>${escaped_install_path}</string>
+      <string>run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>MAC_SYNC_REPO</key>
+      <string>${escaped_repo_dir}</string>
+      <key>MAC_SYNC_MACHINE</key>
+      <string>${escaped_machine_name}</string>
+${script_colour_xml}
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>${DAILY_HOUR}</integer>
+      <key>Minute</key>
+      <integer>${DAILY_MINUTE}</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>${escaped_log_out}</string>
+    <key>StandardErrorPath</key>
+    <string>${escaped_log_err}</string>
+  </dict>
+</plist>
+EOF
 }
 
 
