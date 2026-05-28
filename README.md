@@ -40,6 +40,8 @@ MAC_SYNC_MACHINE=work-mbp MAC_SYNC_DAILY_HOUR=8 ./bin/mac-sync install
 
 ```sh
 mac-sync sync
+mac-sync restore
+mac-sync restore --from old-mbp
 mac-sync list
 mac-sync status
 mac-sync uninstall
@@ -51,8 +53,41 @@ Commands:
 - `uninstall`: unload the LaunchAgent and remove the installed command
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: LaunchAgent mode; same behavior as `sync`
+- `restore`: copy a machine snapshot from the repo back into `$HOME`
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, and git state
+
+## Restore
+
+Restore the current machine snapshot:
+
+```sh
+mac-sync restore
+```
+
+Restore from another machine:
+
+```sh
+mac-sync restore --from old-mbp
+```
+
+Restore pulls the repo first when the worktree is clean, then copies the curated
+paths from `config/sync-paths.txt` plus the selected machine's persisted dynamic
+paths from `machines/<machine-name>/dynamic-sync-paths.txt`.
+
+By default, restore copies missing files and files that are newer in the repo
+snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
+newer local files and resolve file/directory conflicts in favor of the snapshot:
+
+```sh
+mac-sync restore --from old-mbp --force
+```
+
+Preview a restore without changing local files:
+
+```sh
+MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp
+```
 
 ## Configuration
 
@@ -91,7 +126,8 @@ Environment overrides:
 - `MAC_SYNC_INSTALL_PATH`: installed command path, defaulting to `~/bin/mac-sync`
 - `MAC_SYNC_DAILY_HOUR`: LaunchAgent hour, defaulting to `9`
 - `MAC_SYNC_DAILY_MINUTE`: LaunchAgent minute, defaulting to `0`
-- `MAC_SYNC_DRY_RUN=1`: preview rsync changes without committing or pushing
+- `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
+  committing, or pushing
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
 - `SCRIPT_COLOUR=off`: disable colour output
 

@@ -30,6 +30,9 @@
 #   uninstall   Unload the LaunchAgent and remove the installed command
 #   sync        Sync configured paths, commit machine changes, and push
 #   run         LaunchAgent mode; alias for sync
+#   restore     Restore this machine snapshot back into $HOME
+#   restore --from <machine> [--force]
+#               Restore another machine snapshot back into $HOME
 #   list        Show configured source paths and repo destinations
 #   paths       Alias for list
 #   status      Show install, repo, LaunchAgent, and git state
@@ -42,7 +45,7 @@
 #   MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
 #   MAC_SYNC_DAILY_HOUR    LaunchAgent hour, 0-23. Default: 9
 #   MAC_SYNC_DAILY_MINUTE  LaunchAgent minute, 0-59. Default: 0
-#   MAC_SYNC_DRY_RUN       Set to 1 to preview sync actions
+#   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   SCRIPT_COLOUR          Set to off, false, or 0 to disable colour
 #
@@ -50,6 +53,7 @@
 #   ./bin/mac-sync install
 #   mac-sync list
 #   mac-sync sync
+#   mac-sync restore --from old-mbp
 #   MAC_SYNC_MACHINE=work-mbp mac-sync install
 
 set -euo pipefail
@@ -298,7 +302,9 @@ configured_manifest_paths() {
 
 # Print previously persisted dynamic manifest paths.
 stored_dynamic_manifest_paths() {
-  if [[ ! -f "$DYNAMIC_PATHS_FILE" ]]; then
+  local dynamic_paths_file="${1:-$DYNAMIC_PATHS_FILE}"
+
+  if [[ ! -f "$dynamic_paths_file" ]]; then
     return 0
   fi
 
@@ -309,7 +315,7 @@ stored_dynamic_manifest_paths() {
         ;;
     esac
     printf '%s\n' "$line"
-  done <"$DYNAMIC_PATHS_FILE"
+  done <"$dynamic_paths_file"
 }
 
 
@@ -654,6 +660,49 @@ dest_path_for() {
 }
 
 
+# Convert a manifest path to a source path inside a machine snapshot.
+snapshot_path_for() {
+  local machine="$1"
+  local rel="$2"
+  local machine_dir="${REPO_DIR}/machines/${machine}"
+
+  case "$rel" in
+    /*)
+      printf '%s/absolute%s\n' "$machine_dir" "$rel"
+      ;;
+    *)
+      printf '%s/home/%s\n' "$machine_dir" "$rel"
+      ;;
+  esac
+}
+
+
+# Return true when a machine argument is safe to use as a repo path segment.
+safe_machine_name() {
+  local machine="$1"
+
+  case "$machine" in
+    ""|*[!A-Za-z0-9._-]*)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+
+# Print the restore manifest for a source machine snapshot.
+restore_manifest_paths() {
+  local machine="$1"
+  local dynamic_paths_file="${REPO_DIR}/machines/${machine}/dynamic-sync-paths.txt"
+
+  {
+    configured_manifest_paths
+    stored_dynamic_manifest_paths "$dynamic_paths_file"
+  } | awk 'NF && !seen[$0]++'
+}
+
+
 # Copy one configured path into the machine snapshot.
 sync_one_path() {
   local rel="$1"
@@ -711,6 +760,100 @@ sync_one_path() {
 }
 
 
+# Restore one configured path from a machine snapshot into HOME.
+restore_one_path() {
+  local machine="$1"
+  local rel="$2"
+  local force="$3"
+  local src
+  local dest
+  local parent
+  local dry_arg=()
+  local update_arg=()
+  local exclude_args=()
+
+  src="$(snapshot_path_for "$machine" "$rel")"
+  dest="$(source_path_for "$rel")"
+  parent="$(dirname "$dest")"
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    dry_arg=(-n)
+  fi
+
+  if [[ "$force" != "1" ]]; then
+    update_arg=(--update)
+  fi
+
+  if [[ -f "$EXCLUDES_FILE" ]]; then
+    exclude_args=("--exclude-from=$EXCLUDES_FILE")
+  fi
+
+  if [[ ! -e "$src" && ! -L "$src" ]]; then
+    warning "missing snapshot path: $src"
+    return 0
+  fi
+
+  if [[ -d "$src" ]]; then
+    if [[ -e "$dest" && ! -d "$dest" ]]; then
+      if [[ "$force" = "1" ]]; then
+        if [[ "$DRY_RUN" = "1" ]]; then
+          info "would replace non-directory with directory: $dest"
+        else
+          rm -f "$dest"
+          info "removed non-directory before directory restore: $dest"
+        fi
+      else
+        warning "skip directory restore over non-directory: $dest"
+        return 0
+      fi
+    fi
+
+    if [[ "$DRY_RUN" = "1" ]]; then
+      info "would restore directory: $src -> $dest"
+      return 0
+    else
+      mkdir -p "$dest"
+      info "restore directory: $src -> $dest"
+    fi
+    rsync -a "${dry_arg[@]}" "${update_arg[@]}" "${exclude_args[@]}" "$src/" "$dest/"
+    return 0
+  fi
+
+  if [[ -d "$dest" ]]; then
+    if [[ "$force" = "1" ]]; then
+      if [[ "$DRY_RUN" = "1" ]]; then
+        info "would replace directory with file: $dest"
+      else
+        rm -rf "$dest"
+        info "removed directory before file restore: $dest"
+      fi
+    else
+      warning "skip file restore over directory: $dest"
+      return 0
+    fi
+  fi
+
+  if [[ "$force" != "1" && -e "$dest" && "$dest" -nt "$src" ]]; then
+    info "skip newer local file: $dest"
+    return 0
+  fi
+
+  if [[ "$force" != "1" && -e "$dest" ]] && cmp -s "$src" "$dest"; then
+    info "unchanged local file: $dest"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "would restore file: $src -> $dest"
+    return 0
+  fi
+
+  mkdir -p "$parent"
+  info "restore file: $src -> $dest"
+  rsync -a "${exclude_args[@]}" "$src" "$dest"
+}
+
+
 # Write stable machine metadata that is useful when browsing the repo.
 write_machine_metadata() {
   local target="${MACHINE_DIR}/MACHINE.md"
@@ -752,7 +895,7 @@ pull_repo_if_safe() {
   fi
 
   if ! repo_clean; then
-    warning "repo has local changes before sync; skipping pre-sync git pull"
+    warning "repo has local changes; skipping pre-operation git pull"
     return 0
   fi
 
@@ -897,6 +1040,67 @@ cmd_sync() {
   trap - EXIT INT TERM
 
   commit_and_push
+}
+
+
+# Restore a machine snapshot from the repo back into HOME.
+cmd_restore() {
+  local force=0
+  local from_machine="$MACHINE_NAME"
+  local machine_dir
+  local rel
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        return 0
+        ;;
+      *)
+        error "unknown restore option: $1"
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if ! safe_machine_name "$from_machine"; then
+    error "invalid machine name: $from_machine"
+    exit 2
+  fi
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+
+  machine_dir="${REPO_DIR}/machines/${from_machine}"
+  if [[ ! -d "$machine_dir" ]]; then
+    error "missing machine snapshot: $machine_dir"
+    exit 1
+  fi
+
+  info "restoring from machine: $from_machine"
+  if [[ "$force" = "1" ]]; then
+    warning "force enabled; newer local files may be overwritten"
+  else
+    info "newer local files will be kept; use --force to overwrite them"
+  fi
+
+  while IFS= read -r rel; do
+    restore_one_path "$from_machine" "$rel" "$force"
+  done < <(restore_manifest_paths "$from_machine")
 }
 
 
@@ -1077,6 +1281,10 @@ main() {
       ;;
     sync|run)
       cmd_sync
+      ;;
+    restore)
+      shift || true
+      cmd_restore "$@"
       ;;
     list|paths)
       cmd_list
