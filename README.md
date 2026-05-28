@@ -1,7 +1,7 @@
 # mac-sync
 
-`mac-sync` keeps a curated snapshot of important Mac dotfiles in git, split by
-machine name.
+`mac-sync` keeps a curated snapshot of important Mac dotfiles and Homebrew
+packages in git, split by machine name.
 
 Snapshots are written to:
 
@@ -73,7 +73,8 @@ mac-sync restore --from old-mbp
 
 Restore pulls the repo first when the worktree is clean, then copies the curated
 paths from `config/sync-paths.txt` plus the selected machine's persisted dynamic
-paths from `machines/<machine-name>/dynamic-sync-paths.txt`.
+paths from `machines/<machine-name>/dynamic-sync-paths.txt`. It also compares
+the selected machine's Homebrew snapshot with the local Homebrew state.
 
 By default, restore copies missing files and files that are newer in the repo
 snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
@@ -88,6 +89,11 @@ Preview a restore without changing local files:
 ```sh
 MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp
 ```
+
+When Homebrew packages differ, restore prints the manual commands needed to
+install missing taps, formulae, and casks or upgrade outdated packages from the
+synced list. It does not run those commands for you and it does not uninstall
+extra local packages.
 
 ## Configuration
 
@@ -113,6 +119,16 @@ On later runs, paths that were previously dynamic but are no longer discovered
 are pruned from that machine snapshot, unless they overlap a curated path in
 `config/sync-paths.txt`.
 
+Homebrew package state is captured during sync when `brew` is available. The
+generated per-machine lists are persisted to:
+
+```text
+machines/<machine-name>/homebrew/
+```
+
+That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
+lists, plus a generated `Brewfile` for browsing or reuse.
+
 Rsync excludes are listed in:
 
 ```text
@@ -129,6 +145,8 @@ Environment overrides:
 - `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
   committing, or pushing
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
+- `MAC_SYNC_HOMEBREW=0`: disable Homebrew package snapshotting and restore
+  command suggestions
 - `SCRIPT_COLOUR=off`: disable colour output
 
 ## Self Update
