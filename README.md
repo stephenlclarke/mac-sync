@@ -228,6 +228,8 @@ Environment overrides:
 - `MAC_SYNC_INSTALL_PATH`: installed command path, defaulting to `~/bin/mac-sync`
 - `MAC_SYNC_HOURLY_MINUTE`: LaunchAgent minute, defaulting to `0`
 - `MAC_SYNC_DAILY_MINUTE`: legacy alias for `MAC_SYNC_HOURLY_MINUTE`
+- `MAC_SYNC_LAUNCH_AGENT_PATH`: `PATH` used by the LaunchAgent, defaulting to
+  `~/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`
 - `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
   committing, or pushing
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery

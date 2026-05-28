@@ -46,6 +46,8 @@
 #   MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
 #   MAC_SYNC_HOURLY_MINUTE LaunchAgent minute, 0-59. Default: 0
 #   MAC_SYNC_DAILY_MINUTE  Legacy alias for MAC_SYNC_HOURLY_MINUTE
+#   MAC_SYNC_LAUNCH_AGENT_PATH
+#                          PATH used by the LaunchAgent
 #   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
@@ -75,6 +77,7 @@ readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
 readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
 readonly INSTALL_PATH="${MAC_SYNC_INSTALL_PATH:-${HOME_DIR}/bin/mac-sync}"
 readonly HOURLY_MINUTE="${MAC_SYNC_HOURLY_MINUTE:-${MAC_SYNC_DAILY_MINUTE:-0}}"
+readonly LAUNCH_AGENT_PATH="${MAC_SYNC_LAUNCH_AGENT_PATH:-${HOME_DIR}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
@@ -2270,6 +2273,7 @@ write_launchagent() {
   local escaped_log_err
   local escaped_log_out
   local escaped_machine_name
+  local escaped_path
   local escaped_repo_dir
   local escaped_script_colour
   local script_colour_xml=""
@@ -2278,6 +2282,7 @@ write_launchagent() {
   escaped_log_err="$(xmlescape "$LOG_ERR")"
   escaped_log_out="$(xmlescape "$LOG_OUT")"
   escaped_machine_name="$(xmlescape "$MACHINE_NAME")"
+  escaped_path="$(xmlescape "$LAUNCH_AGENT_PATH")"
   escaped_repo_dir="$(xmlescape "$REPO_DIR")"
 
   if [[ -n "${SCRIPT_COLOUR:-}" ]]; then
@@ -2307,6 +2312,8 @@ EOF
       <string>${escaped_repo_dir}</string>
       <key>MAC_SYNC_MACHINE</key>
       <string>${escaped_machine_name}</string>
+      <key>PATH</key>
+      <string>${escaped_path}</string>
 ${script_colour_xml}
     </dict>
     <key>RunAtLoad</key>
