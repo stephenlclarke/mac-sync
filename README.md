@@ -68,7 +68,15 @@ At runtime, `mac-sync` also scans safe top-level dotfiles in `$HOME` and follows
 safe `$HOME`, `${HOME}`, and `~` references it finds. This keeps sourced files
 such as `~/.shellenv`, `~/.aliases`, `~/.functions`, and referenced plugin
 directories in the sync set without hand-editing the manifest every time a
-startup file changes.
+startup file changes. The generated per-machine dynamic list is persisted to:
+
+```text
+machines/<machine-name>/dynamic-sync-paths.txt
+```
+
+On later runs, paths that were previously dynamic but are no longer discovered
+are pruned from that machine snapshot, unless they overlap a curated path in
+`config/sync-paths.txt`.
 
 Rsync excludes are listed in:
 
