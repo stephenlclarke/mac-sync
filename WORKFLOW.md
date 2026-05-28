@@ -10,24 +10,28 @@ This workflow describes how to download, configure, install, sync, and restore
 
 ## End-to-End Flow
 
+<!-- markdownlint-disable MD013 -->
+
 ```mermaid
 flowchart TD
-  A["Start on a Mac"] --> B["Install prerequisites"]
-  B --> C["Clone mac-sync"]
-  B --> D["Clone dot-files"]
-  C --> E["Review sync config"]
+  A["Start on a Mac"] --> B["Install prerequisites<br/>brew install age gnu-tar"]
+  B --> C["Clone mac-sync<br/>git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync"]
+  B --> D["Clone dot-files<br/>git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files"]
+  C --> E["Review sync config<br/>less ~/github/mac-sync/config/sync-paths.txt"]
   D --> E
-  E --> F["Install mac-sync LaunchAgent"]
-  F --> G{"Existing machine snapshot?"}
-  G -- "No" --> H["Run initial sync"]
-  G -- "Yes" --> I["Preview restore"]
-  I --> J["Restore selected machine snapshot"]
-  J --> K["Apply printed Homebrew commands if needed"]
-  J --> L["Restore encrypted secrets if needed"]
-  H --> M["Hourly automated sync"]
+  E --> F["Install mac-sync LaunchAgent<br/>cd ~/github/mac-sync<br/>./bin/mac-sync install"]
+  F --> G{"Existing machine snapshot?<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"}
+  G -- "No" --> H["Run initial sync<br/>mac-sync sync"]
+  G -- "Yes" --> I["Preview restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp"]
+  I --> J["Restore selected machine snapshot<br/>mac-sync restore --from old-mbp"]
+  J --> K["Apply printed Homebrew commands if needed<br/>brew install ..."]
+  J --> L["Restore encrypted secrets if needed<br/>mac-sync secrets restore --from old-mbp"]
+  H --> M["Check hourly automation<br/>mac-sync status"]
   K --> M
   L --> M
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 ## Download
 
@@ -120,6 +124,8 @@ During sync, `mac-sync`:
 6. Updates an encrypted secrets snapshot when recipients and tools exist.
 7. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
 
+<!-- markdownlint-disable MD013 -->
+
 ```mermaid
 sequenceDiagram
   participant User
@@ -130,15 +136,18 @@ sequenceDiagram
   participant GitHub
 
   User->>CLI: mac-sync sync
-  CLI->>Code: pull when clean
-  CLI->>Snap: pull when clean
+  CLI->>Code: git -C ~/github/mac-sync pull --ff-only
+  CLI->>Snap: git -C ~/github/dot-files pull --ff-only
   CLI->>Home: read configured paths
-  CLI->>Snap: write machines/<machine>/home
-  CLI->>Snap: write dynamic paths and Homebrew snapshot
-  CLI->>Snap: write encrypted secrets snapshot when enabled
-  CLI->>Snap: commit machines/<machine>
-  Snap->>GitHub: push main
+  CLI->>Snap: rsync into machines/machine-name/home
+  CLI->>Snap: brew list and write homebrew snapshot
+  CLI->>Snap: age -R config/age-recipients.txt when enabled
+  CLI->>Snap: git add machines/machine-name
+  CLI->>Snap: git commit -m chore(machine): sync machine state
+  Snap->>GitHub: git push -u origin main
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 Check status after the first run:
 
@@ -212,26 +221,30 @@ Restore copies regular dotfiles and prints Homebrew commands when the selected
 machine snapshot differs from the current Mac. It does not run the Homebrew
 commands for you.
 
+<!-- markdownlint-disable MD013 -->
+
 ```mermaid
 flowchart TD
-  A["Choose source machine"] --> B["Dry-run restore"]
+  A["Choose source machine<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"] --> B["Dry-run restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp"]
   B --> C{"Looks correct?"}
-  C -- "No" --> D["Adjust config or source machine"]
+  C -- "No" --> D["Adjust config or source machine<br/>vim ~/github/mac-sync/config/sync-paths.txt"]
   D --> B
-  C -- "Yes" --> E["Run restore"]
+  C -- "Yes" --> E["Run restore<br/>mac-sync restore --from old-mbp"]
   E --> F{"Homebrew differences?"}
-  F -- "Yes" --> G["Review printed brew commands"]
+  F -- "Yes" --> G["Review printed brew commands<br/>mac-sync restore --from old-mbp"]
   F -- "No" --> H["Skip Homebrew changes"]
-  G --> I["Run desired brew commands manually"]
+  G --> I["Run desired brew commands manually<br/>brew install ..."]
   E --> J{"Encrypted secrets snapshot?"}
-  J -- "Yes" --> K["Inspect secrets archive"]
-  K --> L["Restore secrets if needed"]
+  J -- "Yes" --> K["Inspect secrets archive<br/>mac-sync secrets list --from old-mbp"]
+  K --> L["Restore secrets if needed<br/>mac-sync secrets restore --from old-mbp"]
   J -- "No" --> M["No secrets restore"]
-  I --> N["Run mac-sync status"]
+  I --> N["Check status<br/>mac-sync status"]
   H --> N
   L --> N
   M --> N
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 ## Encrypted Secrets
 
@@ -284,16 +297,20 @@ For a replacement Mac, the usual order is:
 9. Run `mac-sync sync` to create this Mac's own snapshot.
 10. Confirm with `mac-sync status`.
 
+<!-- markdownlint-disable MD013 -->
+
 ```mermaid
 flowchart LR
-  Old["Old Mac snapshot"] --> Dot["dot-files repo"]
-  Dot --> New["New Mac restore"]
-  New --> Brew["Manual Homebrew commands"]
-  New --> Secrets["Optional secrets restore"]
-  Brew --> Sync["New Mac sync"]
+  Old["Old Mac snapshot<br/>mac-sync sync"] --> Dot["dot-files repo<br/>git clone ... ~/github/dot-files"]
+  Dot --> New["New Mac restore<br/>mac-sync restore --from old-mbp"]
+  New --> Brew["Manual Homebrew commands<br/>brew install ..."]
+  New --> Secrets["Optional secrets restore<br/>mac-sync secrets restore --from old-mbp"]
+  Brew --> Sync["New Mac sync<br/>mac-sync sync"]
   Secrets --> Sync
   Sync --> Dot
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 ## Useful Commands
 
