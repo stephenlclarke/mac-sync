@@ -551,6 +551,7 @@ finish_sync_status() {
   local finished_at
   local finished_epoch
   local last_commit
+  local remote_repo
   local result
   local tmp_status
 
@@ -583,6 +584,7 @@ finish_sync_status() {
   fi
 
   last_commit="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+  remote_repo="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || printf 'none')"
   tmp_status="$(mktemp "${STATUS_DIR}/${MACHINE_NAME}.env.XXXXXX")"
   {
     printf 'machine=%s\n' "$MACHINE_NAME"
@@ -600,6 +602,7 @@ finish_sync_status() {
     printf 'storage_byte_count=%s\n' "$MAC_SYNC_LAST_STORAGE_BYTE_COUNT"
     printf 'warning_count=%s\n' "$MAC_SYNC_WARNING_COUNT"
     printf 'error_count=%s\n' "$MAC_SYNC_ERROR_COUNT"
+    printf 'remote_repo=%s\n' "$remote_repo"
     printf 'last_commit=%s\n' "$last_commit"
   } >"$tmp_status"
   mv "$tmp_status" "$SYNC_STATUS_FILE"
@@ -2738,6 +2741,7 @@ cmd_status() {
   local live_byte_count
   local live_file_count
   local net_byte_change
+  local remote_repo
   local result
   local updated_byte_count
   local updated_file_count
@@ -2778,6 +2782,10 @@ cmd_status() {
     net_byte_change="$(sync_status_value net_byte_change)"
     warning_count="$(sync_status_value warning_count)"
     error_count="$(sync_status_value error_count)"
+    remote_repo="$(sync_status_value remote_repo)"
+    if [[ -z "$remote_repo" ]]; then
+      remote_repo="$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || printf 'unknown')"
+    fi
     last_commit="$(sync_status_value last_commit)"
 
     info "last sync: ${result:-unknown}"
@@ -2787,6 +2795,7 @@ cmd_status() {
     info "last sync net storage change: ${net_byte_change:-0} bytes"
     info "last sync warnings: ${warning_count:-0}"
     info "last sync errors: ${error_count:-0}"
+    info "last sync remote repo: ${remote_repo:-unknown}"
     info "last sync commit: ${last_commit:-unknown}"
   else
     info "last sync: unknown (no local status file yet)"
