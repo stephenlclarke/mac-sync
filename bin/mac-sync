@@ -1289,6 +1289,7 @@ ensure_age_recipients_file() {
 # Ensure tools needed for encrypted secrets are available.
 check_secrets_runtime() {
   need age
+  need gzip
   need gtar
 }
 
@@ -1476,12 +1477,36 @@ write_secrets_included_paths_manifest() {
 }
 
 
+# Write the current secret paths to a deterministic tar.gz archive.
+write_plain_secrets_archive() {
+  local included_file="$1"
+  local target="$2"
+
+  gtar -C "$HOME_DIR" \
+    --ignore-failed-read \
+    --warning=no-file-ignored \
+    --sort=name \
+    --exclude='.DS_Store' \
+    --exclude='*/.DS_Store' \
+    --exclude='*.sock' \
+    --exclude='*.socket' \
+    --exclude='.ssh/agent' \
+    --exclude='.ssh/agent/*' \
+    -cf - \
+    -T "$included_file" \
+    | gzip -n >"$target"
+}
+
+
 # Sync configured secret paths into an encrypted machine snapshot.
 sync_secrets_archive() {
   local mode="${1:-auto}"
   local tmp_dir
   local tmp_included
   local tmp_archive
+  local tmp_existing_archive
+  local tmp_identity
+  local tmp_plain_archive
   local rel
   local src
 
@@ -1495,17 +1520,30 @@ sync_secrets_archive() {
     return 0
   fi
 
-  if ! command -v age >/dev/null 2>&1 || ! command -v gtar >/dev/null 2>&1; then
+  if [[ "$mode" = "required" ]]; then
+    check_keychain_runtime
+    require_keychain_identity
+  elif ! command -v security >/dev/null 2>&1 || ! keychain_identity_exists; then
+    warning "missing local Keychain age identity; skipping encrypted secrets snapshot"
+    return 0
+  fi
+
+  if ! command -v age >/dev/null 2>&1 \
+    || ! command -v gzip >/dev/null 2>&1 \
+    || ! command -v gtar >/dev/null 2>&1; then
     if [[ "$mode" = "required" ]]; then
       check_secrets_runtime
     fi
-    warning "age or gtar not found; skipping encrypted secrets snapshot"
+    warning "age, gzip, or gtar not found; skipping encrypted secrets snapshot"
     return 0
   fi
 
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-secrets.XXXXXX")"
   tmp_included="${tmp_dir}/included-paths.txt"
   tmp_archive="${tmp_dir}/secrets.tar.gz.age"
+  tmp_existing_archive="${tmp_dir}/existing-secrets.tar.gz"
+  tmp_identity="${tmp_dir}/identity.txt"
+  tmp_plain_archive="${tmp_dir}/secrets.tar.gz"
   MAC_SYNC_ARCHIVE_TMP_DIR="$tmp_dir"
   trap 'cleanup_archive_tmp_dir' RETURN
 
@@ -1535,14 +1573,23 @@ sync_secrets_archive() {
   fi
 
   mkdir -p "$SECRETS_DIR"
-  gtar -C "$HOME_DIR" \
-    --ignore-failed-read \
-    --exclude='.DS_Store' \
-    --exclude='*/.DS_Store' \
-    --exclude='*.sock' \
-    -czf - \
-    -T "$tmp_included" \
-    | age -R "$AGE_RECIPIENTS_FILE" -o "$tmp_archive"
+  write_plain_secrets_archive "$tmp_included" "$tmp_plain_archive"
+
+  if [[ -f "$SECRETS_ARCHIVE" ]]; then
+    write_keychain_identity_file "$tmp_identity"
+    if age -d -i "$tmp_identity" "$SECRETS_ARCHIVE" >"$tmp_existing_archive"; then
+      if cmp -s "$tmp_plain_archive" "$tmp_existing_archive"; then
+        info "encrypted secrets snapshot unchanged"
+        cleanup_archive_tmp_dir
+        trap - RETURN
+        return 0
+      fi
+    else
+      warning "could not decrypt existing encrypted secrets snapshot; rewriting it"
+    fi
+  fi
+
+  age -R "$AGE_RECIPIENTS_FILE" -o "$tmp_archive" <"$tmp_plain_archive"
   mv "$tmp_archive" "$SECRETS_ARCHIVE"
   write_secrets_included_paths_manifest "$tmp_included"
   info "updated encrypted secrets snapshot: $SECRETS_ARCHIVE"

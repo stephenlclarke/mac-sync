@@ -184,6 +184,8 @@ for arg in "$@"; do
   case "$arg" in
     --ignore-failed-read)
       ;;
+    --sort=*|--warning=*)
+      ;;
     *)
       args+=("$arg")
       ;;
@@ -285,6 +287,12 @@ run_mac_sync secrets sync
 assert_file_contains "$TEST_REPO/machines/target/secrets/included-paths.txt" ".ssh"
 assert_file_contains "$TEST_REPO/machines/target/secrets/included-paths.txt" ".secrets"
 [[ -f "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age" ]] || fail "missing encrypted archive"
+
+archive_checksum="$(cksum "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age")"
+run_mac_sync secrets sync
+assert_stdout_contains "encrypted secrets snapshot unchanged"
+[[ "$(cksum "$TEST_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
+  || fail "unchanged secrets sync rewrote the archive"
 
 run_mac_sync secrets list
 assert_stdout_contains ".ssh/config"
