@@ -29,6 +29,14 @@ assert_file_contains() {
   grep -F "$pattern" "$file" >/dev/null || fail "missing pattern in $file: $pattern"
 }
 
+assert_file_not_contains() {
+  local file="$1"
+  local pattern="$2"
+
+  [[ -f "$file" ]] || fail "missing file: $file"
+  ! grep -F "$pattern" "$file" >/dev/null || fail "unexpected pattern in $file: $pattern"
+}
+
 assert_file_contents() {
   local file="$1"
   local expected="$2"
@@ -53,6 +61,7 @@ run_mac_sync() {
     MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
+    AGE_KEYGEN_FAIL="${AGE_KEYGEN_FAIL:-0}" \
     KEYCHAIN_FAKE_DIR="$FAKE_KEYCHAIN" \
     PATH="${FAKE_BIN}:$PATH" \
     SCRIPT_COLOUR=off \
@@ -64,6 +73,7 @@ run_mac_sync() {
     MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
+    AGE_KEYGEN_FAIL="${AGE_KEYGEN_FAIL:-0}" \
     KEYCHAIN_FAKE_DIR="$FAKE_KEYCHAIN" \
     PATH="${FAKE_BIN}:$PATH" \
     SCRIPT_COLOUR=off \
@@ -92,8 +102,17 @@ cat >"$FAKE_BIN/age-keygen" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${AGE_KEYGEN_FAIL:-0}" == "1" ]]; then
+  printf '%s\n' 'forced age-keygen failure' >&2
+  exit 1
+fi
+
 case "$1" in
   -o)
+    [[ ! -e "$2" ]] || {
+      printf 'refusing to overwrite %s\n' "$2" >&2
+      exit 1
+    }
     {
       printf '%s\n' '# public key: age1fakepublicrecipient'
       printf '%s\n' 'AGE-SECRET-KEY-FAKEIDENTITY'
@@ -149,6 +168,10 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 [[ -n "$out" ]] || exit 2
+[[ ! -e "$out" ]] || {
+  printf 'refusing to overwrite %s\n' "$out" >&2
+  exit 1
+}
 cat >"$out"
 EOF
 
@@ -248,6 +271,10 @@ printf 'token-value\n' >"$TEST_HOME/.secrets/token"
 
 run_mac_sync_expect_failure secrets test
 assert_file_contains "$STDERR_FILE" "missing Keychain age identity"
+
+AGE_KEYGEN_FAIL=1 run_mac_sync_expect_failure secrets init
+assert_file_contains "$STDERR_FILE" "forced age-keygen failure"
+assert_file_not_contains "$STDERR_FILE" "unbound variable"
 
 run_mac_sync secrets init
 assert_file_contains "$TEST_REPO/config/secret-paths.txt" ".ssh"

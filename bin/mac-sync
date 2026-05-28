@@ -313,6 +313,83 @@ readonly SECRETS_ARCHIVE="${SECRETS_DIR}/secrets.tar.gz.age"
 readonly SECRETS_INCLUDED_PATHS_FILE="${SECRETS_DIR}/included-paths.txt"
 readonly LOCK_DIR="${TMPDIR:-/tmp}/mac-sync-${MACHINE_NAME}.lock"
 
+MAC_SYNC_KEYGEN_TMP_DIR=""
+MAC_SYNC_ARCHIVE_TMP_DIR=""
+MAC_SYNC_SECRET_IDENTITY_TMP=""
+MAC_SYNC_SECRET_CONFLICTS_TMP=""
+MAC_SYNC_SECRET_ENTRIES_TMP=""
+MAC_SYNC_SYNC_TMP_CONFIGURED=""
+MAC_SYNC_SYNC_TMP_DYNAMIC=""
+MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA=""
+MAC_SYNC_SYNC_TMP_MANIFEST=""
+
+
+# Remove the temporary age-keygen workspace.
+cleanup_keygen_tmp_dir() {
+  if [[ -n "$MAC_SYNC_KEYGEN_TMP_DIR" ]]; then
+    rm -rf -- "$MAC_SYNC_KEYGEN_TMP_DIR"
+    MAC_SYNC_KEYGEN_TMP_DIR=""
+  fi
+}
+
+
+# Remove the temporary encrypted archive workspace.
+cleanup_archive_tmp_dir() {
+  if [[ -n "$MAC_SYNC_ARCHIVE_TMP_DIR" ]]; then
+    rm -rf -- "$MAC_SYNC_ARCHIVE_TMP_DIR"
+    MAC_SYNC_ARCHIVE_TMP_DIR=""
+  fi
+}
+
+
+# Remove the temporary age identity file.
+cleanup_secret_identity_tmp() {
+  if [[ -n "$MAC_SYNC_SECRET_IDENTITY_TMP" ]]; then
+    rm -f -- "$MAC_SYNC_SECRET_IDENTITY_TMP"
+    MAC_SYNC_SECRET_IDENTITY_TMP=""
+  fi
+}
+
+
+# Remove temporary files used during encrypted secret restore.
+cleanup_secret_restore_tmps() {
+  if [[ -n "$MAC_SYNC_SECRET_CONFLICTS_TMP" ]]; then
+    rm -f -- "$MAC_SYNC_SECRET_CONFLICTS_TMP"
+    MAC_SYNC_SECRET_CONFLICTS_TMP=""
+  fi
+
+  if [[ -n "$MAC_SYNC_SECRET_ENTRIES_TMP" ]]; then
+    rm -f -- "$MAC_SYNC_SECRET_ENTRIES_TMP"
+    MAC_SYNC_SECRET_ENTRIES_TMP=""
+  fi
+
+  cleanup_secret_identity_tmp
+}
+
+
+# Remove temporary files used during normal sync.
+cleanup_sync_tmps() {
+  if [[ -n "$MAC_SYNC_SYNC_TMP_CONFIGURED" ]]; then
+    rm -f -- "$MAC_SYNC_SYNC_TMP_CONFIGURED"
+    MAC_SYNC_SYNC_TMP_CONFIGURED=""
+  fi
+
+  if [[ -n "$MAC_SYNC_SYNC_TMP_DYNAMIC" ]]; then
+    rm -f -- "$MAC_SYNC_SYNC_TMP_DYNAMIC"
+    MAC_SYNC_SYNC_TMP_DYNAMIC=""
+  fi
+
+  if [[ -n "$MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA" ]]; then
+    rm -f -- "$MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA"
+    MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA=""
+  fi
+
+  if [[ -n "$MAC_SYNC_SYNC_TMP_MANIFEST" ]]; then
+    rm -f -- "$MAC_SYNC_SYNC_TMP_MANIFEST"
+    MAC_SYNC_SYNC_TMP_MANIFEST=""
+  fi
+}
+
 
 # Return true when the current LaunchAgent is loaded.
 launchagent_loaded() {
@@ -1248,12 +1325,15 @@ require_keychain_identity() {
 # Write the Keychain age identity to a temporary identity file.
 write_keychain_identity_file() {
   local target="$1"
+  local old_umask
 
+  old_umask="$(umask)"
   umask 077
   security find-generic-password \
     -a "$KEYCHAIN_ACCOUNT" \
     -s "$KEYCHAIN_SERVICE" \
     -w >"$target"
+  umask "$old_umask"
   chmod 600 "$target"
 }
 
@@ -1289,6 +1369,7 @@ recipient_configured() {
 
 # Create or reuse the Keychain age identity and persist its public recipient.
 cmd_secrets_init() {
+  local tmp_dir
   local tmp_identity
   local tmp_keygen
   local identity
@@ -1302,10 +1383,12 @@ cmd_secrets_init() {
   ensure_secret_paths_file
   ensure_age_recipients_file
 
-  tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
-  tmp_keygen="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-keygen.XXXXXX")"
-  chmod 600 "$tmp_identity" "$tmp_keygen"
-  trap 'rm -f "$tmp_identity" "$tmp_keygen"' EXIT INT TERM
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-age-keygen.XXXXXX")"
+  chmod 700 "$tmp_dir"
+  tmp_identity="${tmp_dir}/identity.txt"
+  tmp_keygen="${tmp_dir}/keygen.txt"
+  MAC_SYNC_KEYGEN_TMP_DIR="$tmp_dir"
+  trap 'cleanup_keygen_tmp_dir' EXIT INT TERM
 
   if keychain_identity_exists; then
     write_keychain_identity_file "$tmp_identity"
@@ -1329,7 +1412,7 @@ cmd_secrets_init() {
     info "Configured public age recipient: $recipient"
   fi
 
-  rm -f "$tmp_identity" "$tmp_keygen"
+  cleanup_keygen_tmp_dir
   trap - EXIT INT TERM
 
   commit_config_and_push \
@@ -1396,6 +1479,7 @@ write_secrets_included_paths_manifest() {
 # Sync configured secret paths into an encrypted machine snapshot.
 sync_secrets_archive() {
   local mode="${1:-auto}"
+  local tmp_dir
   local tmp_included
   local tmp_archive
   local rel
@@ -1419,9 +1503,11 @@ sync_secrets_archive() {
     return 0
   fi
 
-  tmp_included="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-paths.XXXXXX")"
-  tmp_archive="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secrets.XXXXXX")"
-  trap 'rm -f "$tmp_included" "$tmp_archive"' RETURN
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-secrets.XXXXXX")"
+  tmp_included="${tmp_dir}/included-paths.txt"
+  tmp_archive="${tmp_dir}/secrets.tar.gz.age"
+  MAC_SYNC_ARCHIVE_TMP_DIR="$tmp_dir"
+  trap 'cleanup_archive_tmp_dir' RETURN
 
   while IFS= read -r rel; do
     src="$(source_path_for "$rel")"
@@ -1436,14 +1522,14 @@ sync_secrets_archive() {
     if [[ "$mode" = "required" ]]; then
       warning "no configured secret paths exist; skipping encrypted secrets snapshot"
     fi
-    rm -f "$tmp_included" "$tmp_archive"
+    cleanup_archive_tmp_dir
     trap - RETURN
     return 0
   fi
 
   if [[ "$DRY_RUN" = "1" ]]; then
     info "would update encrypted secrets snapshot: $SECRETS_ARCHIVE"
-    rm -f "$tmp_included" "$tmp_archive"
+    cleanup_archive_tmp_dir
     trap - RETURN
     return 0
   fi
@@ -1461,7 +1547,7 @@ sync_secrets_archive() {
   write_secrets_included_paths_manifest "$tmp_included"
   info "updated encrypted secrets snapshot: $SECRETS_ARCHIVE"
 
-  rm -f "$tmp_included"
+  cleanup_archive_tmp_dir
   trap - RETURN
 }
 
@@ -1584,10 +1670,11 @@ cmd_secrets_list() {
   }
 
   tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
-  trap 'rm -f "$tmp_identity"' EXIT INT TERM
+  MAC_SYNC_SECRET_IDENTITY_TMP="$tmp_identity"
+  trap 'cleanup_secret_identity_tmp' EXIT INT TERM
   write_keychain_identity_file "$tmp_identity"
   age -d -i "$tmp_identity" "$archive" | gtar -tzf -
-  rm -f "$tmp_identity"
+  cleanup_secret_identity_tmp
   trap - EXIT INT TERM
 }
 
@@ -1641,7 +1728,10 @@ cmd_secrets_restore() {
   tmp_conflicts="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-conflicts.XXXXXX")"
   tmp_entries="$(mktemp "${TMPDIR:-/tmp}/mac-sync-secret-entries.XXXXXX")"
   tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
-  trap 'rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"' EXIT INT TERM
+  MAC_SYNC_SECRET_CONFLICTS_TMP="$tmp_conflicts"
+  MAC_SYNC_SECRET_ENTRIES_TMP="$tmp_entries"
+  MAC_SYNC_SECRET_IDENTITY_TMP="$tmp_identity"
+  trap 'cleanup_secret_restore_tmps' EXIT INT TERM
 
   write_keychain_identity_file "$tmp_identity"
   write_secret_archive_entries "$archive" "$tmp_identity" "$tmp_entries"
@@ -1656,7 +1746,7 @@ cmd_secrets_restore() {
 
   if [[ "$DRY_RUN" = "1" ]]; then
     info "would restore encrypted secrets from: $archive"
-    rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"
+    cleanup_secret_restore_tmps
     trap - EXIT INT TERM
     return 0
   fi
@@ -1664,7 +1754,7 @@ cmd_secrets_restore() {
   info "restoring encrypted secrets from: $archive"
   age -d -i "$tmp_identity" "$archive" | gtar -xzf - -C "$HOME_DIR"
 
-  rm -f "$tmp_conflicts" "$tmp_entries" "$tmp_identity"
+  cleanup_secret_restore_tmps
   trap - EXIT INT TERM
 }
 
@@ -1682,7 +1772,8 @@ cmd_secrets_test() {
   require_keychain_identity
 
   tmp_identity="$(mktemp "${TMPDIR:-/tmp}/mac-sync-age-identity.XXXXXX")"
-  trap 'rm -f "$tmp_identity"' EXIT INT TERM
+  MAC_SYNC_SECRET_IDENTITY_TMP="$tmp_identity"
+  trap 'cleanup_secret_identity_tmp' EXIT INT TERM
   write_keychain_identity_file "$tmp_identity"
   recipient="$(recipient_from_identity_file "$tmp_identity")"
 
@@ -1699,7 +1790,7 @@ cmd_secrets_test() {
     info "No current machine encrypted secrets snapshot found yet."
   fi
 
-  rm -f "$tmp_identity"
+  cleanup_secret_identity_tmp
   trap - EXIT INT TERM
 }
 
@@ -2084,7 +2175,11 @@ cmd_sync() {
   tmp_dynamic="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic.XXXXXX")"
   tmp_dynamic_extra="$(mktemp "${TMPDIR:-/tmp}/mac-sync-dynamic-extra.XXXXXX")"
   tmp_manifest="$(mktemp "${TMPDIR:-/tmp}/mac-sync-manifest.XXXXXX")"
-  trap 'rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"; release_lock' EXIT INT TERM
+  MAC_SYNC_SYNC_TMP_CONFIGURED="$tmp_configured"
+  MAC_SYNC_SYNC_TMP_DYNAMIC="$tmp_dynamic"
+  MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA="$tmp_dynamic_extra"
+  MAC_SYNC_SYNC_TMP_MANIFEST="$tmp_manifest"
+  trap 'cleanup_sync_tmps; release_lock' EXIT INT TERM
 
   configured_manifest_paths >"$tmp_configured"
   dynamic_manifest_paths >"$tmp_dynamic"
@@ -2110,7 +2205,7 @@ cmd_sync() {
     write_machine_metadata
   fi
 
-  rm -f "$tmp_configured" "$tmp_dynamic" "$tmp_dynamic_extra" "$tmp_manifest"
+  cleanup_sync_tmps
 
   commit_and_push
   release_lock
