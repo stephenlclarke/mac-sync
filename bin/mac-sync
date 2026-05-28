@@ -1006,7 +1006,7 @@ sync_one_path() {
         info "removed missing source snapshot: $dest"
       fi
     else
-      warning "missing source: $src"
+      info "skip missing source: $src"
     fi
     return 0
   fi
@@ -1055,7 +1055,7 @@ restore_one_path() {
   parent="$(dirname "$dest")"
 
   if [[ ! -e "$src" && ! -L "$src" ]]; then
-    warning "missing snapshot path: $src"
+    info "skip missing snapshot path: $src"
     return 0
   fi
 
