@@ -357,10 +357,10 @@ write_machine_metadata() {
   {
     printf '# %s\n\n' "$MACHINE_NAME"
     printf 'This directory contains the curated dotfile snapshot for `%s`.\n\n' "$MACHINE_NAME"
-    printf '- ComputerName: `%s`\n' "${computer_name:-unknown}"
-    printf '- LocalHostName: `%s`\n' "${local_host_name:-unknown}"
-    printf '- OS: `%s %s`\n' "${os_name:-unknown}" "${os_version:-unknown}"
-    printf '- Architecture: `%s`\n' "${arch:-unknown}"
+    printf '%s\n' "- ComputerName: \`${computer_name:-unknown}\`"
+    printf '%s\n' "- LocalHostName: \`${local_host_name:-unknown}\`"
+    printf '%s\n' "- OS: \`${os_name:-unknown} ${os_version:-unknown}\`"
+    printf '%s\n' "- Architecture: \`${arch:-unknown}\`"
   } >"$target"
 }
 
