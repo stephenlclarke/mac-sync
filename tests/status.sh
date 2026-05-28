@@ -35,6 +35,19 @@ assert_stdout_lacks() {
   fi
 }
 
+assert_stdout_before() {
+  local first="$1"
+  local second="$2"
+  local first_line
+  local second_line
+
+  first_line="$(grep -n -F "$first" "$STDOUT_FILE" | sed -n '1s/:.*//p')"
+  second_line="$(grep -n -F "$second" "$STDOUT_FILE" | sed -n '1s/:.*//p')"
+  [[ -n "$first_line" ]] || fail "missing stdout pattern: $first"
+  [[ -n "$second_line" ]] || fail "missing stdout pattern: $second"
+  (( first_line < second_line )) || fail "expected '$first' before '$second'"
+}
+
 run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
@@ -110,6 +123,8 @@ assert_stdout_lacks "last sync started storage:"
 assert_stdout_contains "last sync warnings: 2"
 assert_stdout_contains "last sync errors: 0"
 assert_stdout_contains "machine snapshot stored:"
+assert_stdout_before "machine snapshot stored:" "last sync: success"
+assert_stdout_before "last sync errors: 0" "last sync warning messages:"
 assert_stdout_contains "last sync warning messages:"
 assert_stdout_contains "WARN: no origin remote configured; skipping git pull"
 assert_stdout_contains "WARN: no origin remote configured; skipping git push"

@@ -2765,6 +2765,10 @@ cmd_status() {
     info "LaunchAgent state: not loaded"
   fi
 
+  live_file_count="$(tree_file_count "$MACHINE_DIR")"
+  live_byte_count="$(tree_byte_count "$MACHINE_DIR")"
+  info "machine snapshot stored: ${live_byte_count} bytes across ${live_file_count} files"
+
   if [[ -f "$SYNC_STATUS_FILE" ]]; then
     result="$(sync_status_value result)"
     finished_at="$(sync_status_value finished_at)"
@@ -2787,10 +2791,6 @@ cmd_status() {
   else
     info "last sync: unknown (no local status file yet)"
   fi
-
-  live_file_count="$(tree_file_count "$MACHINE_DIR")"
-  live_byte_count="$(tree_byte_count "$MACHINE_DIR")"
-  info "machine snapshot stored: ${live_byte_count} bytes across ${live_file_count} files"
 
   print_status_messages "last sync warning messages" "$SYNC_WARNINGS_FILE"
   print_status_messages "last sync error messages" "$SYNC_ERRORS_FILE"
