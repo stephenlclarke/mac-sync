@@ -9,10 +9,14 @@ all: check
 
 check:
 	bash -n $(SCRIPT)
+	/bin/bash -n $(SCRIPT)
 	bash -n $(RESTORE_TEST)
 	$(SCRIPT) --help >/dev/null
 	$(SCRIPT) list >/dev/null
+	/bin/bash $(SCRIPT) --help >/dev/null
+	/bin/bash $(SCRIPT) list >/dev/null
 	bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
 
 help:
 	@$(SCRIPT) --help

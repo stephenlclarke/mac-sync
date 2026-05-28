@@ -3,6 +3,7 @@
 set -euo pipefail
 
 readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 readonly TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-restore.XXXXXX")"
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
@@ -26,13 +27,23 @@ assert_file_contents() {
 }
 
 run_mac_sync() {
-  HOME="$TEST_HOME" \
-  MAC_SYNC_REPO="$TEST_REPO" \
-  MAC_SYNC_MACHINE=target \
-  MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
-  MAC_SYNC_DRY_RUN="${MAC_SYNC_DRY_RUN:-0}" \
-  SCRIPT_COLOUR=off \
-    "$SCRIPT_PATH" "$@" >"${TMP_ROOT}/stdout" 2>"${TMP_ROOT}/stderr"
+  if [[ -n "$SCRIPT_RUNNER" ]]; then
+    HOME="$TEST_HOME" \
+    MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_MACHINE=target \
+    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
+    MAC_SYNC_DRY_RUN="${MAC_SYNC_DRY_RUN:-0}" \
+    SCRIPT_COLOUR=off \
+      "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@" >"${TMP_ROOT}/stdout" 2>"${TMP_ROOT}/stderr"
+  else
+    HOME="$TEST_HOME" \
+    MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_MACHINE=target \
+    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
+    MAC_SYNC_DRY_RUN="${MAC_SYNC_DRY_RUN:-0}" \
+    SCRIPT_COLOUR=off \
+      "$SCRIPT_PATH" "$@" >"${TMP_ROOT}/stdout" 2>"${TMP_ROOT}/stderr"
+  fi
 }
 
 mkdir -p \

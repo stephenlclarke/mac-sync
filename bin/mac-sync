@@ -538,7 +538,9 @@ dynamic_manifest_paths() {
     scan_file="${scan_queue[$i]}"
     ((i += 1))
 
-    array_contains "$scan_file" "${seen_files[@]}" && continue
+    if (( ${#seen_files[@]} > 0 )) && array_contains "$scan_file" "${seen_files[@]}"; then
+      continue
+    fi
     seen_files+=("$scan_file")
 
     is_text_file "$scan_file" || continue
@@ -551,18 +553,21 @@ dynamic_manifest_paths() {
       safe_dynamic_rel_path "$sync_rel" || continue
       [[ -e "$(source_path_for "$sync_rel")" ]] || continue
 
-      if ! array_contains "$sync_rel" "${discovered[@]}"; then
+      if (( ${#discovered[@]} == 0 )) || ! array_contains "$sync_rel" "${discovered[@]}"; then
         discovered+=("$sync_rel")
       fi
 
       ref_src="$(source_path_for "$rel")"
-      if [[ -f "$ref_src" ]] && ! array_contains "$ref_src" "${scan_queue[@]}"; then
+      if [[ -f "$ref_src" ]] \
+        && { (( ${#scan_queue[@]} == 0 )) || ! array_contains "$ref_src" "${scan_queue[@]}"; }; then
         scan_queue+=("$ref_src")
       fi
     done < <(extract_reference_candidates "$scan_file")
   done
 
-  printf '%s\n' "${discovered[@]}"
+  if (( ${#discovered[@]} > 0 )); then
+    printf '%s\n' "${discovered[@]}"
+  fi
 }
 
 
@@ -709,20 +714,10 @@ sync_one_path() {
   local src
   local dest
   local parent
-  local dry_arg=()
-  local exclude_args=()
 
   src="$(source_path_for "$rel")"
   dest="$(dest_path_for "$rel")"
   parent="$(dirname "$dest")"
-
-  if [[ "$DRY_RUN" = "1" ]]; then
-    dry_arg=(-n)
-  fi
-
-  if [[ -f "$EXCLUDES_FILE" ]]; then
-    exclude_args=("--exclude-from=$EXCLUDES_FILE")
-  fi
 
   if [[ ! -e "$src" ]]; then
     if [[ -e "$dest" ]]; then
@@ -752,10 +747,18 @@ sync_one_path() {
   if [[ -d "$src" ]]; then
     mkdir -p "$dest"
     info "sync directory: $src -> $dest"
-    rsync -a "${dry_arg[@]}" --delete "${exclude_args[@]}" "$src/" "$dest/"
+    set -- -a --delete
+    if [[ -f "$EXCLUDES_FILE" ]]; then
+      set -- "$@" "--exclude-from=$EXCLUDES_FILE"
+    fi
+    rsync "$@" "$src/" "$dest/"
   else
     info "sync file: $src -> $dest"
-    rsync -aL "${dry_arg[@]}" "${exclude_args[@]}" "$src" "$dest"
+    set -- -aL
+    if [[ -f "$EXCLUDES_FILE" ]]; then
+      set -- "$@" "--exclude-from=$EXCLUDES_FILE"
+    fi
+    rsync "$@" "$src" "$dest"
   fi
 }
 
@@ -768,25 +771,10 @@ restore_one_path() {
   local src
   local dest
   local parent
-  local dry_arg=()
-  local update_arg=()
-  local exclude_args=()
 
   src="$(snapshot_path_for "$machine" "$rel")"
   dest="$(source_path_for "$rel")"
   parent="$(dirname "$dest")"
-
-  if [[ "$DRY_RUN" = "1" ]]; then
-    dry_arg=(-n)
-  fi
-
-  if [[ "$force" != "1" ]]; then
-    update_arg=(--update)
-  fi
-
-  if [[ -f "$EXCLUDES_FILE" ]]; then
-    exclude_args=("--exclude-from=$EXCLUDES_FILE")
-  fi
 
   if [[ ! -e "$src" && ! -L "$src" ]]; then
     warning "missing snapshot path: $src"
@@ -815,7 +803,14 @@ restore_one_path() {
       mkdir -p "$dest"
       info "restore directory: $src -> $dest"
     fi
-    rsync -a "${dry_arg[@]}" "${update_arg[@]}" "${exclude_args[@]}" "$src/" "$dest/"
+    set -- -a
+    if [[ "$force" != "1" ]]; then
+      set -- "$@" --update
+    fi
+    if [[ -f "$EXCLUDES_FILE" ]]; then
+      set -- "$@" "--exclude-from=$EXCLUDES_FILE"
+    fi
+    rsync "$@" "$src/" "$dest/"
     return 0
   fi
 
@@ -850,7 +845,11 @@ restore_one_path() {
 
   mkdir -p "$parent"
   info "restore file: $src -> $dest"
-  rsync -a "${exclude_args[@]}" "$src" "$dest"
+  set -- -a
+  if [[ -f "$EXCLUDES_FILE" ]]; then
+    set -- "$@" "--exclude-from=$EXCLUDES_FILE"
+  fi
+  rsync "$@" "$src" "$dest"
 }
 
 
