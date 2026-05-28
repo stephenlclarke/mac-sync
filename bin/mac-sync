@@ -2868,15 +2868,14 @@ cmd_status() {
     info "last sync updated: ${updated_byte_count:-0} bytes across ${updated_file_count:-0} files"
     info "last sync net storage change: ${net_byte_change:-0} bytes"
     info "last sync warnings: ${warning_count:-0}"
+    print_status_messages "last sync warning messages" "$SYNC_WARNINGS_FILE"
     info "last sync errors: ${error_count:-0}"
+    print_status_messages "last sync error messages" "$SYNC_ERRORS_FILE"
     info "last sync remote repo: ${remote_repo:-unknown}"
     info "last sync commit: ${last_commit:-unknown}"
   else
     info "last sync: unknown (no local status file yet)"
   fi
-
-  print_status_messages "last sync warning messages" "$SYNC_WARNINGS_FILE"
-  print_status_messages "last sync error messages" "$SYNC_ERRORS_FILE"
 
   if [[ -d "$REPO_DIR/.git" ]]; then
     info "git branch: $(git -C "$REPO_DIR" branch --show-current 2>/dev/null || true)"
