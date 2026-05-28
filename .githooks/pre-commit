@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+blocked=0
+
+while IFS= read -r -d '' path; do
+  case "$path" in
+    machines/*/home/.aws/credentials|\
+    machines/*/home/.codex/auth.json|\
+    machines/*/home/.codex/installation_id|\
+    machines/*/home/.codex-secrets/*|\
+    machines/*/home/.config/ansible/vault.pass|\
+    machines/*/home/.config/argocd/config|\
+    machines/*/home/.config/gh/hosts.yml|\
+    machines/*/home/.gnupg/private-keys-v1.d/*|\
+    machines/*/home/.secrets/*|\
+    machines/*/home/.ssh/id_*|\
+    machines/*/home/.vault-pass|\
+    *.pem|*.ppk|*.p12|*.pfx|*.key)
+      printf 'blocked staged sensitive file: %s\n' "$path" >&2
+      blocked=1
+      ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [[ "$blocked" -ne 0 ]]; then
+  cat >&2 <<'EOF'
+Commit blocked.
+
+mac-sync snapshots should not contain raw private keys, cloud credentials,
+token files, decrypted secret directories, or shell history.
+EOF
+  exit 1
+fi

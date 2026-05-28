@@ -1,0 +1,17 @@
+.DS_Store
+*.tmp
+*.log
+
+# The sync output is intended to be tracked, but keep obvious decrypted or
+# credential-bearing paths out even if someone adds them to config/sync-paths.txt.
+machines/*/home/.aws/credentials
+machines/*/home/.codex/auth.json
+machines/*/home/.codex/installation_id
+machines/*/home/.codex-secrets/
+machines/*/home/.config/ansible/vault.pass
+machines/*/home/.config/argocd/config
+machines/*/home/.config/gh/hosts.yml
+machines/*/home/.gnupg/private-keys-v1.d/
+machines/*/home/.secrets/
+machines/*/home/.ssh/id_*
+machines/*/home/.vault-pass

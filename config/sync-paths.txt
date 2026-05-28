@@ -1,0 +1,69 @@
+# Paths are relative to $HOME unless they start with /.
+# Keep this list explicit so secrets and machine-generated state do not drift in.
+.agents
+.ansible.cfg
+.aws/config
+.bash_profile
+.bashrc
+.cargo/env
+.codex/AGENTS.md
+.codex/config.toml
+.colima/ssh_config
+.gitconfig
+.gnupg/common.conf
+.p10k.zsh
+.profile
+.ssh/config
+.tmux.conf
+.vscode/argv.json
+.vscode/settings.json
+.warp/.mcp.json
+.warp/tab_configs/startup_config.toml
+.zprofile
+.zshenv
+.zshrc
+Library/Application Support/Code/User/keybindings.json
+Library/Application Support/Code/User/mcp.json
+Library/Application Support/Code/User/settings.json
+Library/Application Support/Code/User/snippets
+Library/Application Support/Code/User/tasks.json
+.config/atuin
+.config/btop
+.config/gh/config.yml
+.config/git/allowed_signers
+.config/ghostty
+.config/htop
+.config/mdless
+.config/neofetch
+.config/starship.toml
+bin/aws-list-ami-names.sh
+bin/aws-resource-summary.sh
+bin/detect_arch.sh
+bin/detect_os.sh
+bin/find_all_aws_malware_in_ecr_images.sh
+bin/find_fix_log.sh
+bin/format_last.awk
+bin/get_aws_pem_for_instance.sh
+bin/get_docker_image_tags.sh
+bin/get_single_docker_image_tags.sh
+bin/gpt_scrub.sh
+bin/lastlog.sh
+bin/list_network_interfaces.sh
+bin/load_averages.sh
+bin/load_secrets.sh
+bin/machine_model.sh
+bin/nmap-vpn-scan.sh
+bin/ping-sweep.sh
+bin/prod-snapshot.sh
+bin/run_on_all_blades.sh
+bin/run_on_all_gt_servers.sh
+bin/run_on_all_vision_servers.sh
+bin/run_remote_command.sh
+bin/show_machine_info.sh
+bin/ssh-scan.sh
+bin/sync_ssh_hosts.py
+bin/tcp-sweep-nc.sh
+bin/terminal-setup.sh
+bin/version.sh
+bin/warp-github-mcp
+bin/warp-sonarqube-cloud-mcp

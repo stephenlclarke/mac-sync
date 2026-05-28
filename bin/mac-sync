@@ -1,0 +1,669 @@
+#!/usr/bin/env bash
+#
+# mac-sync - sync curated Mac dotfiles into a machine-specific repo snapshot.
+#
+# USAGE:
+#   mac-sync <command>
+#
+# COMMANDS:
+#   install     Install or refresh mac-sync and its daily LaunchAgent
+#   bootstrap   Alias for install
+#   uninstall   Unload the LaunchAgent and remove the installed command
+#   sync        Sync configured paths, commit machine changes, and push
+#   run         LaunchAgent mode; alias for sync
+#   list        Show configured source paths and repo destinations
+#   paths       Alias for list
+#   status      Show install, repo, LaunchAgent, and git state
+#   help        Show this help text
+#   -h, --help  Show this help text
+#
+# ENVIRONMENT:
+#   MAC_SYNC_REPO          Repo path. Default: $HOME/github/mac-sync
+#   MAC_SYNC_MACHINE       Machine directory name. Default: macOS host name
+#   MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
+#   MAC_SYNC_DAILY_HOUR    LaunchAgent hour, 0-23. Default: 9
+#   MAC_SYNC_DAILY_MINUTE  LaunchAgent minute, 0-59. Default: 0
+#   MAC_SYNC_DRY_RUN       Set to 1 to preview sync actions
+#   SCRIPT_COLOUR          Set to off, false, or 0 to disable colour
+#
+# EXAMPLES:
+#   ./bin/mac-sync install
+#   mac-sync list
+#   mac-sync sync
+#   MAC_SYNC_MACHINE=work-mbp mac-sync install
+
+set -euo pipefail
+
+readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
+readonly SCRIPT_NAME="$(basename "$SELF_PATH")"
+readonly HOME_DIR="${HOME:?HOME is not set}"
+readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
+readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
+readonly INSTALL_PATH="${MAC_SYNC_INSTALL_PATH:-${HOME_DIR}/bin/mac-sync}"
+readonly DAILY_HOUR="${MAC_SYNC_DAILY_HOUR:-9}"
+readonly DAILY_MINUTE="${MAC_SYNC_DAILY_MINUTE:-0}"
+readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
+readonly PATHS_FILE="${MAC_SYNC_PATHS_FILE:-${REPO_DIR}/config/sync-paths.txt}"
+readonly EXCLUDES_FILE="${MAC_SYNC_EXCLUDES_FILE:-${REPO_DIR}/config/excludes.txt}"
+readonly REPO_SCRIPT="${REPO_DIR}/bin/mac-sync"
+readonly LAUNCH_AGENT_LABEL="tools.xyzzy.mac-sync"
+readonly LAUNCH_AGENT_PLIST="${HOME_DIR}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+readonly LOG_OUT="/tmp/mac-sync.out"
+readonly LOG_ERR="/tmp/mac-sync.err"
+
+case "${SCRIPT_COLOUR:-}" in
+  off|OFF|false|FALSE|0)
+    readonly COLOUR_ENABLED=0
+    ;;
+  *)
+    readonly COLOUR_ENABLED=1
+    ;;
+esac
+
+if [[ -t 2 && "$COLOUR_ENABLED" = "1" ]]; then
+  readonly COLOUR_ERROR=$'\033[31m'
+  readonly COLOUR_WARN=$'\033[38;5;214m'
+  readonly COLOUR_RESET=$'\033[0m'
+else
+  readonly COLOUR_ERROR=""
+  readonly COLOUR_WARN=""
+  readonly COLOUR_RESET=""
+fi
+
+if [[ -t 1 && "$COLOUR_ENABLED" = "1" ]]; then
+  readonly COLOUR_HEADER=$'\033[33m'
+  readonly COLOUR_HEADER_RESET=$'\033[0m'
+else
+  readonly COLOUR_HEADER=""
+  readonly COLOUR_HEADER_RESET=""
+fi
+
+
+# Print the embedded usage block from this script.
+usage() {
+  awk -v script_name="$SCRIPT_NAME" \
+      -v header="$COLOUR_HEADER" \
+      -v reset="$COLOUR_HEADER_RESET" '
+    /^# USAGE:/ { inblock = 1 }
+    inblock {
+      if ($0 !~ /^#/) exit
+      line = $0
+      sub(/^#[ ]?/, "", line)
+      gsub(/mac-sync/, script_name, line)
+      if (line ~ /^[A-Z0-9][A-Z0-9 _-]*:$/) {
+        printf "%s%s%s\n", header, line, reset
+      } else {
+        print line
+      }
+    }
+  ' "$SELF_PATH"
+}
+
+
+# Print a fatal error message to stderr.
+error() {
+  printf '%sERROR%s: %s\n' "$COLOUR_ERROR" "$COLOUR_RESET" "$*" >&2
+}
+
+
+# Print a non-fatal warning to stderr.
+warning() {
+  printf '%sWARN%s: %s\n' "$COLOUR_WARN" "$COLOUR_RESET" "$*" >&2
+}
+
+
+# Print a human-facing informational message to stdout.
+info() {
+  printf '%s\n' "$*"
+}
+
+
+# Return a timestamp suitable for log-file entries.
+ts() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+
+# Append a message to the standard output log.
+log() {
+  printf '[%s] %s\n' "$(ts)" "$*" >>"$LOG_OUT"
+}
+
+
+# Ensure a required command is available.
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    error "missing required command: $1"
+    exit 1
+  }
+}
+
+
+# Return the physical path for an existing file or directory.
+realpath_existing() {
+  local path="$1"
+  local dir
+  local base
+
+  if [[ -d "$path" ]]; then
+    (cd "$path" && pwd -P)
+    return 0
+  fi
+
+  dir="$(dirname "$path")"
+  base="$(basename "$path")"
+  if [[ -d "$dir" ]]; then
+    (cd "$dir" && printf '%s/%s\n' "$(pwd -P)" "$base")
+    return 0
+  fi
+
+  printf '%s\n' "$path"
+}
+
+
+# Escape XML special characters for LaunchAgent values.
+xmlescape() {
+  local value="$1"
+
+  value=${value//&/&amp;}
+  value=${value//</&lt;}
+  value=${value//>/&gt;}
+  value=${value//\"/&quot;}
+  value=${value//\'/&apos;}
+
+  printf '%s' "$value"
+}
+
+
+# Return a stable, filesystem-safe machine name.
+machine_name() {
+  local raw="${MAC_SYNC_MACHINE:-}"
+
+  if [[ -z "$raw" ]] && command -v scutil >/dev/null 2>&1; then
+    raw="$(scutil --get LocalHostName 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$raw" ]] && command -v scutil >/dev/null 2>&1; then
+    raw="$(scutil --get ComputerName 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$raw" ]]; then
+    raw="$(hostname -s 2>/dev/null || hostname)"
+  fi
+
+  printf '%s\n' "$raw" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//'
+}
+
+
+readonly MACHINE_NAME="$(machine_name)"
+readonly MACHINE_DIR="${REPO_DIR}/machines/${MACHINE_NAME}"
+readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
+readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
+
+
+# Return true when the current LaunchAgent is loaded.
+launchagent_loaded() {
+  launchctl print "gui/$(id -u)/${LAUNCH_AGENT_LABEL}" >/dev/null 2>&1
+}
+
+
+# Return true when the repo has an origin remote.
+repo_has_origin() {
+  git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1
+}
+
+
+# Return true when the repo worktree is clean.
+repo_clean() {
+  [[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]]
+}
+
+
+# Return true when the current branch has an upstream branch.
+branch_has_upstream() {
+  git -C "$REPO_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1
+}
+
+
+# Print one normalized manifest path per line.
+manifest_paths() {
+  if [[ ! -f "$PATHS_FILE" ]]; then
+    error "missing paths file: $PATHS_FILE"
+    exit 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done <"$PATHS_FILE"
+}
+
+
+# Convert a manifest path to a source path under HOME or an absolute path.
+source_path_for() {
+  local rel="$1"
+
+  case "$rel" in
+    /*)
+      printf '%s\n' "$rel"
+      ;;
+    *)
+      printf '%s/%s\n' "$HOME_DIR" "$rel"
+      ;;
+  esac
+}
+
+
+# Convert a manifest path to the destination path inside the machine snapshot.
+dest_path_for() {
+  local rel="$1"
+
+  case "$rel" in
+    /*)
+      printf '%s%s\n' "$MACHINE_ABSOLUTE_DIR" "$rel"
+      ;;
+    *)
+      printf '%s/%s\n' "$MACHINE_HOME_DIR" "$rel"
+      ;;
+  esac
+}
+
+
+# Copy one configured path into the machine snapshot.
+sync_one_path() {
+  local rel="$1"
+  local src
+  local dest
+  local parent
+  local dry_arg=()
+  local exclude_args=()
+
+  src="$(source_path_for "$rel")"
+  dest="$(dest_path_for "$rel")"
+  parent="$(dirname "$dest")"
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    dry_arg=(-n)
+  fi
+
+  if [[ -f "$EXCLUDES_FILE" ]]; then
+    exclude_args=("--exclude-from=$EXCLUDES_FILE")
+  fi
+
+  if [[ ! -e "$src" ]]; then
+    if [[ -e "$dest" ]]; then
+      if [[ "$DRY_RUN" = "1" ]]; then
+        info "would remove missing source snapshot: $dest"
+      else
+        rm -rf "$dest"
+        info "removed missing source snapshot: $dest"
+      fi
+    else
+      warning "missing source: $src"
+    fi
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    if [[ -d "$src" ]]; then
+      info "would sync directory: $src -> $dest"
+    else
+      info "would sync file: $src -> $dest"
+    fi
+    return 0
+  fi
+
+  mkdir -p "$parent"
+
+  if [[ -d "$src" ]]; then
+    mkdir -p "$dest"
+    info "sync directory: $src -> $dest"
+    rsync -a "${dry_arg[@]}" --delete "${exclude_args[@]}" "$src/" "$dest/"
+  else
+    info "sync file: $src -> $dest"
+    rsync -aL "${dry_arg[@]}" "${exclude_args[@]}" "$src" "$dest"
+  fi
+}
+
+
+# Write stable machine metadata that is useful when browsing the repo.
+write_machine_metadata() {
+  local target="${MACHINE_DIR}/MACHINE.md"
+  local computer_name=""
+  local local_host_name=""
+  local os_name=""
+  local os_version=""
+  local arch=""
+
+  if command -v scutil >/dev/null 2>&1; then
+    computer_name="$(scutil --get ComputerName 2>/dev/null || true)"
+    local_host_name="$(scutil --get LocalHostName 2>/dev/null || true)"
+  fi
+
+  if command -v sw_vers >/dev/null 2>&1; then
+    os_name="$(sw_vers -productName 2>/dev/null || true)"
+    os_version="$(sw_vers -productVersion 2>/dev/null || true)"
+  fi
+
+  arch="$(uname -m 2>/dev/null || true)"
+
+  mkdir -p "$MACHINE_DIR"
+  {
+    printf '# %s\n\n' "$MACHINE_NAME"
+    printf 'This directory contains the curated dotfile snapshot for `%s`.\n\n' "$MACHINE_NAME"
+    printf '- ComputerName: `%s`\n' "${computer_name:-unknown}"
+    printf '- LocalHostName: `%s`\n' "${local_host_name:-unknown}"
+    printf '- OS: `%s %s`\n' "${os_name:-unknown}" "${os_version:-unknown}"
+    printf '- Architecture: `%s`\n' "${arch:-unknown}"
+  } >"$target"
+}
+
+
+# Pull the repo when safe, keeping the installed command in step with repo code.
+pull_repo_if_safe() {
+  if ! repo_has_origin; then
+    warning "no origin remote configured; skipping git pull"
+    return 0
+  fi
+
+  if ! repo_clean; then
+    warning "repo has local changes before sync; skipping pre-sync git pull"
+    return 0
+  fi
+
+  info "pulling latest repo changes"
+  git -C "$REPO_DIR" pull --ff-only
+  update_installed_self_or_exit
+}
+
+
+# Update the installed script from the repo copy when a pull changed it.
+update_installed_self_or_exit() {
+  local self_real
+  local install_real
+
+  if [[ ! -f "$REPO_SCRIPT" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "$INSTALL_PATH" ]]; then
+    return 0
+  fi
+
+  if cmp -s "$REPO_SCRIPT" "$INSTALL_PATH"; then
+    return 0
+  fi
+
+  self_real="$(realpath_existing "$SELF_PATH")"
+  install_real="$(realpath_existing "$INSTALL_PATH")"
+
+  if [[ "$self_real" != "$install_real" ]]; then
+    return 0
+  fi
+
+  install -m 755 "$REPO_SCRIPT" "$INSTALL_PATH"
+  warning "mac-sync updated itself from $REPO_SCRIPT"
+  warning "Please re-run the sync using the new script: $INSTALL_PATH sync"
+  log "self-updated installed script from repo and exited before continuing"
+  exit 75
+}
+
+
+# Commit the machine snapshot when it changed and push it to origin.
+commit_and_push() {
+  local branch
+  local commit_message
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "dry run enabled; skipping git commit and push"
+    return 0
+  fi
+
+  git -C "$REPO_DIR" add "machines/${MACHINE_NAME}"
+
+  if git -C "$REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
+    info "no machine snapshot changes to commit"
+  else
+    commit_message="chore(${MACHINE_NAME}): sync dotfiles"
+    git -C "$REPO_DIR" commit -m "$commit_message"
+  fi
+
+  if ! repo_has_origin; then
+    warning "no origin remote configured; skipping git push"
+    return 0
+  fi
+
+  branch="$(git -C "$REPO_DIR" branch --show-current)"
+  if [[ -z "$branch" ]]; then
+    warning "detached HEAD; skipping git push"
+    return 0
+  fi
+
+  if repo_clean && branch_has_upstream; then
+    git -C "$REPO_DIR" pull --rebase --autostash
+    update_installed_self_or_exit
+  elif repo_clean; then
+    info "no upstream branch yet; skipping pre-push pull"
+  else
+    warning "repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
+  fi
+
+  info "pushing ${branch} to origin"
+  git -C "$REPO_DIR" push -u origin "$branch"
+}
+
+
+# Ensure the repo and runtime commands are available.
+check_runtime() {
+  need git
+  need rsync
+  need sed
+  need awk
+
+  if [[ ! -d "$REPO_DIR/.git" ]]; then
+    error "not a git repository: $REPO_DIR"
+    error "clone or create the repo there, or set MAC_SYNC_REPO"
+    exit 1
+  fi
+}
+
+
+# Sync configured paths into the machine directory and push changes.
+cmd_sync() {
+  local rel
+
+  check_runtime
+  pull_repo_if_safe
+  update_installed_self_or_exit
+
+  if [[ "$DRY_RUN" != "1" ]]; then
+    mkdir -p "$MACHINE_HOME_DIR" "$MACHINE_ABSOLUTE_DIR"
+  fi
+
+  while IFS= read -r rel; do
+    sync_one_path "$rel"
+  done < <(manifest_paths)
+
+  if [[ "$DRY_RUN" != "1" ]]; then
+    write_machine_metadata
+  fi
+  commit_and_push
+}
+
+
+# Show configured paths and where they land in the repo.
+cmd_list() {
+  local rel
+  local src
+  local dest
+  local state
+
+  info "repo: $REPO_DIR"
+  info "machine: $MACHINE_NAME"
+  info "paths file: $PATHS_FILE"
+  printf '\n'
+
+  while IFS= read -r rel; do
+    src="$(source_path_for "$rel")"
+    dest="$(dest_path_for "$rel")"
+    if [[ -e "$src" ]]; then
+      if [[ -d "$src" ]]; then
+        state="dir"
+      else
+        state="file"
+      fi
+    else
+      state="missing"
+    fi
+    printf '%-8s %s -> %s\n' "$state" "$src" "$dest"
+  done < <(manifest_paths)
+}
+
+
+# Install or refresh the command and its LaunchAgent.
+cmd_install() {
+  local install_dir
+
+  need install
+  need launchctl
+
+  install_dir="$(dirname "$INSTALL_PATH")"
+  mkdir -p "$install_dir" "$(dirname "$LAUNCH_AGENT_PLIST")"
+
+  install -m 755 "$SELF_PATH" "$INSTALL_PATH"
+  write_launchagent
+
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
+
+  info "installed $INSTALL_PATH"
+  info "loaded $LAUNCH_AGENT_PLIST"
+}
+
+
+# Uninstall the LaunchAgent and installed command.
+cmd_uninstall() {
+  launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
+  rm -f "$LAUNCH_AGENT_PLIST"
+
+  if [[ -e "$INSTALL_PATH" ]]; then
+    rm -f "$INSTALL_PATH"
+  fi
+
+  info "removed $LAUNCH_AGENT_PLIST"
+  info "removed $INSTALL_PATH"
+}
+
+
+# Write the daily LaunchAgent plist.
+write_launchagent() {
+  {
+    printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+    printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    printf '%s\n' '<plist version="1.0">'
+    printf '%s\n' '  <dict>'
+    printf '%s\n' '    <key>Label</key>'
+    printf '    <string>%s</string>\n' "$LAUNCH_AGENT_LABEL"
+    printf '%s\n' '    <key>ProgramArguments</key>'
+    printf '%s\n' '    <array>'
+    printf '      <string>%s</string>\n' "$(xmlescape "$INSTALL_PATH")"
+    printf '%s\n' '      <string>run</string>'
+    printf '%s\n' '    </array>'
+    printf '%s\n' '    <key>EnvironmentVariables</key>'
+    printf '%s\n' '    <dict>'
+    printf '%s\n' '      <key>MAC_SYNC_REPO</key>'
+    printf '      <string>%s</string>\n' "$(xmlescape "$REPO_DIR")"
+    printf '%s\n' '      <key>MAC_SYNC_MACHINE</key>'
+    printf '      <string>%s</string>\n' "$(xmlescape "$MACHINE_NAME")"
+    if [[ -n "${SCRIPT_COLOUR:-}" ]]; then
+      printf '%s\n' '      <key>SCRIPT_COLOUR</key>'
+      printf '      <string>%s</string>\n' "$(xmlescape "$SCRIPT_COLOUR")"
+    fi
+    printf '%s\n' '    </dict>'
+    printf '%s\n' '    <key>RunAtLoad</key>'
+    printf '%s\n' '    <true/>'
+    printf '%s\n' '    <key>StartCalendarInterval</key>'
+    printf '%s\n' '    <dict>'
+    printf '%s\n' '      <key>Hour</key>'
+    printf '      <integer>%s</integer>\n' "$DAILY_HOUR"
+    printf '%s\n' '      <key>Minute</key>'
+    printf '      <integer>%s</integer>\n' "$DAILY_MINUTE"
+    printf '%s\n' '    </dict>'
+    printf '%s\n' '    <key>StandardOutPath</key>'
+    printf '    <string>%s</string>\n' "$LOG_OUT"
+    printf '%s\n' '    <key>StandardErrorPath</key>'
+    printf '    <string>%s</string>\n' "$LOG_ERR"
+    printf '%s\n' '  </dict>'
+    printf '%s\n' '</plist>'
+  } >"$LAUNCH_AGENT_PLIST"
+}
+
+
+# Show current repo, launchd, and git state.
+cmd_status() {
+  info "repo: $REPO_DIR"
+  info "machine: $MACHINE_NAME"
+  info "machine dir: $MACHINE_DIR"
+  info "installed command: $INSTALL_PATH"
+  info "paths file: $PATHS_FILE"
+  info "LaunchAgent: $LAUNCH_AGENT_PLIST"
+
+  if [[ -x "$INSTALL_PATH" ]]; then
+    info "install state: installed"
+  else
+    info "install state: not installed"
+  fi
+
+  if launchagent_loaded; then
+    info "LaunchAgent state: loaded"
+  else
+    info "LaunchAgent state: not loaded"
+  fi
+
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    info "git branch: $(git -C "$REPO_DIR" branch --show-current 2>/dev/null || true)"
+    git -C "$REPO_DIR" status --short
+  else
+    warning "repo is not initialized yet"
+  fi
+}
+
+
+# Dispatch the requested command.
+main() {
+  local command="${1:-help}"
+
+  case "$command" in
+    install|bootstrap)
+      cmd_install
+      ;;
+    uninstall)
+      cmd_uninstall
+      ;;
+    sync|run)
+      cmd_sync
+      ;;
+    list|paths)
+      cmd_list
+      ;;
+    status)
+      cmd_status
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      error "unknown command: $command"
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"

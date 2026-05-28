@@ -1,0 +1,17 @@
+.DS_Store
+.git/
+.github/
+*.pem
+*.ppk
+*.p12
+*.pfx
+*.key
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+known_hosts.old
+*/History/
+*/workspaceStorage/
+*/globalStorage/
+*/sync/
