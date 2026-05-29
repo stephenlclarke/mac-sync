@@ -134,7 +134,7 @@ else
   readonly COLOUR_INFO_RESET=""
 fi
 
-readonly PROGRESS_PENDING_MARK="::"
+readonly PROGRESS_PENDING_BAR="::::::::::::::::::::::::::::::::::::::::"
 readonly PROGRESS_DONE_MARK=$'\342\234\223'
 
 MAC_SYNC_RUN_ACTIVE=0
@@ -299,7 +299,7 @@ info() {
 
 # Print a pending-style progress line to stdout.
 progress_pending() {
-  printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
+  printf '%s[00:00] [%s]%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_BAR" "$COLOUR_INFO_RESET" "$*"
 }
 
 
@@ -1369,16 +1369,17 @@ sync_homebrew_packages() {
   fi
 
   if [[ "$DRY_RUN" = "1" ]]; then
-    info "would update Homebrew package snapshot: $HOMEBREW_DIR"
+    progress_pending "would update Homebrew package snapshot: $HOMEBREW_DIR"
     return 0
   fi
 
+  progress_pending "updating Homebrew package snapshot"
   mkdir -p "$HOMEBREW_DIR"
   write_homebrew_list_file "$HOMEBREW_DIR/taps.txt" "Installed Homebrew taps." homebrew_taps
   write_homebrew_list_file "$HOMEBREW_DIR/formulae.txt" "Installed Homebrew formulae." homebrew_formulae
   write_homebrew_list_file "$HOMEBREW_DIR/casks.txt" "Installed Homebrew casks." homebrew_casks
   write_homebrew_brewfile "$HOMEBREW_DIR"
-  info "updated Homebrew package snapshot: $HOMEBREW_DIR"
+  progress_done "updated Homebrew package snapshot: $HOMEBREW_DIR"
 }
 
 
@@ -1917,12 +1918,13 @@ sync_secrets_archive() {
   fi
 
   if [[ "$DRY_RUN" = "1" ]]; then
-    info "would update encrypted secrets snapshot: $SECRETS_ARCHIVE"
+    progress_pending "would update encrypted secrets snapshot: $SECRETS_ARCHIVE"
     cleanup_archive_tmp_dir
     trap - RETURN
     return 0
   fi
 
+  progress_pending "updating encrypted secrets snapshot"
   mkdir -p "$SECRETS_DIR"
   write_plain_secrets_archive "$tmp_included" "$tmp_plain_archive"
 
@@ -1930,7 +1932,7 @@ sync_secrets_archive() {
     write_keychain_identity_file "$tmp_identity"
     if age -d -i "$tmp_identity" "$SECRETS_ARCHIVE" >"$tmp_existing_archive"; then
       if cmp -s "$tmp_plain_archive" "$tmp_existing_archive"; then
-        info "encrypted secrets snapshot unchanged"
+        progress_done "encrypted secrets snapshot unchanged"
         cleanup_archive_tmp_dir
         trap - RETURN
         return 0
@@ -1943,7 +1945,7 @@ sync_secrets_archive() {
   age -R "$AGE_RECIPIENTS_FILE" -o "$tmp_archive" <"$tmp_plain_archive"
   mv "$tmp_archive" "$SECRETS_ARCHIVE"
   write_secrets_included_paths_manifest "$tmp_included"
-  info "updated encrypted secrets snapshot: $SECRETS_ARCHIVE"
+  progress_done "updated encrypted secrets snapshot: $SECRETS_ARCHIVE"
 
   cleanup_archive_tmp_dir
   trap - RETURN
@@ -2472,6 +2474,7 @@ write_machine_metadata() {
 pull_git_repo_if_safe() {
   local repo="$1"
   local label="$2"
+  local output
 
   if ! repo_has_origin "$repo"; then
     warning "no origin remote configured for ${label}; skipping git pull"
@@ -2483,8 +2486,20 @@ pull_git_repo_if_safe() {
     return 0
   fi
 
-  info "pulling latest ${label} changes"
-  git -C "$repo" pull --ff-only
+  progress_pending "pulling latest ${label} changes"
+  if ! output="$(git -C "$repo" pull --ff-only 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    return 1
+  fi
+
+  case "$output" in
+    *"Already up to date."*)
+      progress_done "${label} already up to date"
+      ;;
+    *)
+      progress_done "pulled latest ${label} changes"
+      ;;
+  esac
 }
 
 
@@ -2540,17 +2555,20 @@ commit_and_push() {
   local committed=0
 
   if [[ "$DRY_RUN" = "1" ]]; then
-    info "dry run enabled; skipping git commit and push"
+    progress_pending "dry run enabled; skipping git commit and push"
     return 0
   fi
 
+  progress_pending "checking machine snapshot changes"
   git -C "$MACHINES_REPO_DIR" add "machines/${MACHINE_NAME}"
 
   if git -C "$MACHINES_REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
-    info "no machine snapshot changes to commit"
+    progress_done "no machine snapshot changes to commit"
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
+    progress_pending "committing machine snapshot changes"
     git -C "$MACHINES_REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
+    progress_done "committed machine snapshot changes"
     committed=1
   fi
 
@@ -2566,20 +2584,23 @@ commit_and_push() {
   fi
 
   if [[ "$committed" = "0" ]] && ! branch_ahead_of_upstream "$MACHINES_REPO_DIR"; then
-    info "no local commits to push"
+    progress_done "no local commits to push"
     return 0
   fi
 
   if repo_clean "$MACHINES_REPO_DIR" && branch_has_upstream "$MACHINES_REPO_DIR"; then
+    progress_pending "rebasing machines repo before push"
     git -C "$MACHINES_REPO_DIR" pull --rebase --autostash
+    progress_done "rebased machines repo before push"
   elif repo_clean "$MACHINES_REPO_DIR"; then
-    info "no upstream branch yet; skipping pre-push pull"
+    progress_done "no upstream branch yet; skipping pre-push pull"
   else
     warning "machines repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
   fi
 
-  info "pushing ${branch} to origin"
+  progress_pending "pushing ${branch} to origin"
   git -C "$MACHINES_REPO_DIR" push -u origin "$branch"
+  progress_done "pushed ${branch} to origin"
 }
 
 
@@ -2635,18 +2656,22 @@ cmd_sync() {
   MAC_SYNC_SYNC_TMP_MANIFEST="$tmp_manifest"
   trap 'cleanup_sync_tmps; release_lock' EXIT INT TERM
 
+  progress_pending "building sync manifest"
   configured_manifest_paths >"$tmp_configured"
   dynamic_manifest_paths >"$tmp_dynamic"
   dynamic_extra_paths "$tmp_dynamic" "$tmp_configured" >"$tmp_dynamic_extra"
   awk 'NF && !seen[$0]++' "$tmp_configured" "$tmp_dynamic_extra" >"$tmp_manifest"
+  progress_done "built sync manifest"
 
   if [[ "$DRY_RUN" != "1" ]]; then
     mkdir -p "$MACHINE_HOME_DIR" "$MACHINE_ABSOLUTE_DIR"
   fi
 
+  progress_pending "syncing configured paths"
   while IFS= read -r rel; do
     sync_one_path "$rel"
   done <"$tmp_manifest"
+  progress_done "synced configured paths"
 
   prune_stale_dynamic_paths "$tmp_dynamic_extra" "$tmp_configured"
   sync_homebrew_packages
