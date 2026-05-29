@@ -2236,12 +2236,43 @@ cmd_secrets() {
 }
 
 
+# Print changed files reported by rsync for a directory sync.
+print_synced_directory_changes() {
+  local src_root="$1"
+  local dest_root="$2"
+  local changes="$3"
+  local sync_label="$4"
+  local remove_label="$5"
+  local code
+  local rel
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+
+    code="${line%%[[:space:]]*}"
+    rel="${line#"$code"}"
+    rel="${rel#"${rel%%[![:space:]]*}"}"
+    [[ -n "$rel" && "$rel" != "." && "$rel" != "./" ]] || continue
+
+    if [[ "$code" == "*deleting" ]]; then
+      info "${remove_label}: ${dest_root%/}/$rel"
+      continue
+    fi
+
+    [[ "${code:1:1}" != "d" ]] || continue
+    info "${sync_label}: ${src_root%/}/$rel -> ${dest_root%/}/$rel"
+  done <<<"$changes"
+}
+
+
 # Copy one configured path into the machine snapshot.
 sync_one_path() {
   local rel="$1"
   local src
   local dest
   local parent
+  local changes
 
   src="$(source_path_for "$rel")"
   dest="$(dest_path_for "$rel")"
@@ -2256,7 +2287,7 @@ sync_one_path() {
         info "removed missing source snapshot: $dest"
       fi
     else
-      info "skip missing source: $src"
+      return 0
     fi
     return 0
   fi
@@ -2274,19 +2305,21 @@ sync_one_path() {
 
   if [[ -d "$src" ]]; then
     mkdir -p "$dest"
-    info "sync directory: $src -> $dest"
-    set -- -a --delete
+    set -- -a --delete --itemize-changes "--out-format=%i %n"
     if [[ -f "$EXCLUDES_FILE" ]]; then
       set -- "$@" "--exclude-from=$EXCLUDES_FILE"
     fi
-    rsync "$@" "$src/" "$dest/"
+    changes="$(rsync "$@" "$src/" "$dest/")"
+    print_synced_directory_changes "$src" "$dest" "$changes" "sync file" "removed snapshot path"
   else
-    info "sync file: $src -> $dest"
-    set -- -aL
+    set -- -aL --itemize-changes "--out-format=%i %n"
     if [[ -f "$EXCLUDES_FILE" ]]; then
       set -- "$@" "--exclude-from=$EXCLUDES_FILE"
     fi
-    rsync "$@" "$src" "$dest"
+    changes="$(rsync "$@" "$src" "$dest")"
+    if [[ -n "$changes" ]]; then
+      info "sync file: $src -> $dest"
+    fi
   fi
 }
 

@@ -109,14 +109,29 @@ git -C "$TEST_MACHINES_REPO" config user.email "mac-sync@example.invalid"
 
 cat >"$TEST_REPO/config/sync-paths.txt" <<'EOF'
 .bashrc
+.config/tool
 EOF
 
 : >"$TEST_REPO/config/excludes.txt"
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
+mkdir -p "$TEST_HOME/.config/tool"
+printf 'tool setting\n' >"$TEST_HOME/.config/tool/settings"
 
 run_mac_sync sync
+assert_stdout_contains "sync file: $TEST_HOME/.bashrc -> $TEST_MACHINES_REPO/machines/target/home/.bashrc"
+assert_stdout_contains "sync file: $TEST_HOME/.config/tool/settings -> $TEST_MACHINES_REPO/machines/target/home/.config/tool/settings"
+assert_stdout_lacks "sync directory:"
 [[ -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.env" ]] \
   || fail "missing local status file"
+
+run_mac_sync sync
+assert_stdout_lacks "sync file:"
+assert_stdout_lacks "sync directory:"
+
+printf 'home bash updated\n' >"$TEST_HOME/.bashrc"
+run_mac_sync sync
+assert_stdout_contains "sync file: $TEST_HOME/.bashrc -> $TEST_MACHINES_REPO/machines/target/home/.bashrc"
+assert_stdout_lacks "sync directory:"
 
 printf 'local machines repo note\n' >"$TEST_MACHINES_REPO/README.md"
 
