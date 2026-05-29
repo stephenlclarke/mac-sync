@@ -134,8 +134,21 @@ else
   readonly COLOUR_INFO_RESET=""
 fi
 
-readonly PROGRESS_PENDING_BAR="::::::::::::::::::::::::::::::::::::::::"
-readonly PROGRESS_DONE_MARK=$'\342\234\223'
+readonly PROGRESS_PENDING_MARK=$'\342\240\213'
+readonly PROGRESS_DONE_MARK=$'\342\234\224\357\270\216'
+PROGRESS_SPINNER_FRAMES=(
+  $'\342\240\213'
+  $'\342\240\231'
+  $'\342\240\232'
+  $'\342\240\236'
+  $'\342\240\226'
+  $'\342\240\246'
+  $'\342\240\264'
+  $'\342\240\262'
+  $'\342\240\263'
+  $'\342\240\223'
+)
+PROGRESS_SPINNER_PID=""
 
 MAC_SYNC_RUN_ACTIVE=0
 MAC_SYNC_RUN_STARTED_AT=""
@@ -299,12 +312,59 @@ info() {
 
 # Print a pending-style progress line to stdout.
 progress_pending() {
-  printf '%s[00:00] [%s]%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_BAR" "$COLOUR_INFO_RESET" "$*"
+  printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
+}
+
+
+# Animate a compact Braille-cell progress marker until stopped.
+progress_spinner_loop() {
+  local message="$1"
+  local index=0
+  local frame
+
+  while true; do
+    frame="${PROGRESS_SPINNER_FRAMES[$((index % ${#PROGRESS_SPINNER_FRAMES[@]}))]}"
+    printf '\r%s%s%s %s' "$COLOUR_PROGRESS" "$frame" "$COLOUR_INFO_RESET" "$message"
+    ((index += 1))
+    sleep 0.1 || break
+  done
+}
+
+
+# Start an in-place progress spinner for an in-flight operation.
+progress_start() {
+  local message="$1"
+
+  progress_stop
+  if [[ -t 1 ]]; then
+    progress_spinner_loop "$message" &
+    PROGRESS_SPINNER_PID="$!"
+  else
+    progress_pending "$message"
+  fi
+}
+
+
+# Stop the active progress spinner and clear its terminal row.
+progress_stop() {
+  local pid="${PROGRESS_SPINNER_PID:-}"
+
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" 2>/dev/null || true
+  PROGRESS_SPINNER_PID=""
+  if [[ -t 1 ]]; then
+    printf '\r\033[K'
+  fi
 }
 
 
 # Print a completed progress line to stdout.
 progress_done() {
+  progress_stop
   printf '%s%s%s %s\n' "$COLOUR_SUCCESS" "$PROGRESS_DONE_MARK" "$COLOUR_INFO_RESET" "$*"
 }
 
@@ -1373,7 +1433,7 @@ sync_homebrew_packages() {
     return 0
   fi
 
-  progress_pending "updating Homebrew package snapshot"
+  progress_start "updating Homebrew package snapshot"
   mkdir -p "$HOMEBREW_DIR"
   write_homebrew_list_file "$HOMEBREW_DIR/taps.txt" "Installed Homebrew taps." homebrew_taps
   write_homebrew_list_file "$HOMEBREW_DIR/formulae.txt" "Installed Homebrew formulae." homebrew_formulae
@@ -1924,7 +1984,7 @@ sync_secrets_archive() {
     return 0
   fi
 
-  progress_pending "updating encrypted secrets snapshot"
+  progress_start "updating encrypted secrets snapshot"
   mkdir -p "$SECRETS_DIR"
   write_plain_secrets_archive "$tmp_included" "$tmp_plain_archive"
 
@@ -2486,8 +2546,9 @@ pull_git_repo_if_safe() {
     return 0
   fi
 
-  progress_pending "pulling latest ${label} changes"
+  progress_start "pulling latest ${label} changes"
   if ! output="$(git -C "$repo" pull --ff-only 2>&1)"; then
+    progress_stop
     printf '%s\n' "$output" >&2
     return 1
   fi
@@ -2559,14 +2620,14 @@ commit_and_push() {
     return 0
   fi
 
-  progress_pending "checking machine snapshot changes"
+  progress_start "checking machine snapshot changes"
   git -C "$MACHINES_REPO_DIR" add "machines/${MACHINE_NAME}"
 
   if git -C "$MACHINES_REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
     progress_done "no machine snapshot changes to commit"
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
-    progress_pending "committing machine snapshot changes"
+    progress_start "committing machine snapshot changes"
     git -C "$MACHINES_REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
     progress_done "committed machine snapshot changes"
     committed=1
@@ -2589,7 +2650,7 @@ commit_and_push() {
   fi
 
   if repo_clean "$MACHINES_REPO_DIR" && branch_has_upstream "$MACHINES_REPO_DIR"; then
-    progress_pending "rebasing machines repo before push"
+    progress_start "rebasing machines repo before push"
     git -C "$MACHINES_REPO_DIR" pull --rebase --autostash
     progress_done "rebased machines repo before push"
   elif repo_clean "$MACHINES_REPO_DIR"; then
@@ -2598,7 +2659,7 @@ commit_and_push() {
     warning "machines repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
   fi
 
-  progress_pending "pushing ${branch} to origin"
+  progress_start "pushing ${branch} to origin"
   git -C "$MACHINES_REPO_DIR" push -u origin "$branch"
   progress_done "pushed ${branch} to origin"
 }
@@ -2640,7 +2701,7 @@ cmd_sync() {
   check_runtime
   acquire_lock
   start_sync_status
-  trap 'status=$?; finish_sync_status "$status"; cleanup_sync_tmps; release_lock; exit "$status"' EXIT INT TERM
+  trap 'status=$?; progress_stop; finish_sync_status "$status"; cleanup_sync_tmps; release_lock; exit "$status"' EXIT INT TERM
 
   pull_repo_if_safe
   pull_machines_repo_if_safe
@@ -2654,9 +2715,9 @@ cmd_sync() {
   MAC_SYNC_SYNC_TMP_DYNAMIC="$tmp_dynamic"
   MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA="$tmp_dynamic_extra"
   MAC_SYNC_SYNC_TMP_MANIFEST="$tmp_manifest"
-  trap 'cleanup_sync_tmps; release_lock' EXIT INT TERM
+  trap 'progress_stop; cleanup_sync_tmps; release_lock' EXIT INT TERM
 
-  progress_pending "building sync manifest"
+  progress_start "building sync manifest"
   configured_manifest_paths >"$tmp_configured"
   dynamic_manifest_paths >"$tmp_dynamic"
   dynamic_extra_paths "$tmp_dynamic" "$tmp_configured" >"$tmp_dynamic_extra"
@@ -2667,7 +2728,7 @@ cmd_sync() {
     mkdir -p "$MACHINE_HOME_DIR" "$MACHINE_ABSOLUTE_DIR"
   fi
 
-  progress_pending "syncing configured paths"
+  progress_start "syncing configured paths"
   while IFS= read -r rel; do
     sync_one_path "$rel"
   done <"$tmp_manifest"
