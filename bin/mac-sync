@@ -77,12 +77,17 @@ set -euo pipefail
 readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
 SCRIPT_NAME="$(basename "$SELF_PATH")"
 readonly SCRIPT_NAME
+SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd -P || dirname "$SELF_PATH")"
+readonly SELF_DIR
 readonly HOME_DIR="${HOME:?HOME is not set}"
 readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
 readonly DEFAULT_MACHINES_REPO_DIR="${HOME_DIR}/github/dot-files"
 readonly REPO_DIR="${MAC_SYNC_REPO:-$DEFAULT_REPO_DIR}"
 readonly MACHINES_REPO_DIR="${MAC_SYNC_MACHINES_REPO:-$DEFAULT_MACHINES_REPO_DIR}"
 readonly INSTALL_PATH="${MAC_SYNC_INSTALL_PATH:-${HOME_DIR}/bin/mac-sync}"
+INSTALL_DIR="$(dirname "$INSTALL_PATH")"
+readonly INSTALL_DIR
+readonly SPINNER_INSTALL_PATH="${INSTALL_DIR}/mac-spinner"
 readonly HOURLY_MINUTE="${MAC_SYNC_HOURLY_MINUTE:-${MAC_SYNC_DAILY_MINUTE:-0}}"
 readonly LAUNCH_AGENT_PATH="${MAC_SYNC_LAUNCH_AGENT_PATH:-${HOME_DIR}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
@@ -96,6 +101,8 @@ readonly AGE_RECIPIENTS_FILE="${MAC_SYNC_AGE_RECIPIENTS_FILE:-${REPO_DIR}/config
 readonly KEYCHAIN_SERVICE="${MAC_SYNC_KEYCHAIN_SERVICE:-mac-sync age identity}"
 readonly KEYCHAIN_ACCOUNT="${MAC_SYNC_KEYCHAIN_ACCOUNT:-${USER:-$(id -un)}}"
 readonly REPO_SCRIPT="${REPO_DIR}/bin/mac-sync"
+readonly REPO_SPINNER="${REPO_DIR}/bin/mac-spinner"
+readonly SELF_SPINNER="${SELF_DIR}/mac-spinner"
 readonly LAUNCH_AGENT_LABEL="tools.xyzzy.mac-sync"
 readonly LAUNCH_AGENT_PLIST="${HOME_DIR}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
 readonly LOG_OUT="/tmp/mac-sync.out"
@@ -136,18 +143,6 @@ fi
 
 readonly PROGRESS_PENDING_MARK=$'\342\240\213'
 readonly PROGRESS_DONE_MARK=$'\342\234\224\357\270\216'
-PROGRESS_SPINNER_FRAMES=(
-  $'\342\240\213'
-  $'\342\240\231'
-  $'\342\240\232'
-  $'\342\240\236'
-  $'\342\240\226'
-  $'\342\240\246'
-  $'\342\240\264'
-  $'\342\240\262'
-  $'\342\240\263'
-  $'\342\240\223'
-)
 PROGRESS_SPINNER_PID=""
 PROGRESS_COMMAND_OUTPUT=""
 
@@ -311,34 +306,37 @@ info() {
 }
 
 
+# Print the spinner helper command to use when one is available.
+spinner_app_path() {
+  local path
+
+  for path in "$SELF_SPINNER" "$REPO_SPINNER" "$SPINNER_INSTALL_PATH"; do
+    if [[ -x "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+
 # Print a pending-style progress line to stdout.
 progress_pending() {
   printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
 }
 
 
-# Animate a compact Braille-cell progress marker until stopped.
-progress_spinner_loop() {
-  local message="$1"
-  local index=0
-  local frame
-
-  while true; do
-    frame="${PROGRESS_SPINNER_FRAMES[$((index % ${#PROGRESS_SPINNER_FRAMES[@]}))]}"
-    printf '\r%s%s%s %s' "$COLOUR_PROGRESS" "$frame" "$COLOUR_INFO_RESET" "$message"
-    ((index += 1))
-    sleep 0.1 || break
-  done
-}
-
-
 # Start an in-place progress spinner for an in-flight operation.
 progress_start() {
   local message="$1"
+  local spinner
 
   progress_stop
-  if [[ -t 1 ]]; then
-    progress_spinner_loop "$message" &
+  if [[ ! -t 1 ]]; then
+    progress_pending "$message"
+  elif spinner="$(spinner_app_path)"; then
+    "$spinner" --message "$message" --spin-only &
     PROGRESS_SPINNER_PID="$!"
   else
     progress_pending "$message"
@@ -374,13 +372,19 @@ progress_done() {
 run_with_spinner() {
   local message="$1"
   local output_file
+  local spinner
   local status=0
   shift
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/mac-sync-command.XXXXXX")"
-  progress_start "$message"
-  "$@" >"$output_file" 2>&1 || status=$?
-  progress_stop
+  PROGRESS_COMMAND_OUTPUT=""
+  if spinner="$(spinner_app_path)" && ! declare -F "$1" >/dev/null 2>&1; then
+    "$spinner" --message "$message" --output "$output_file" -- "$@" || status=$?
+  else
+    progress_start "$message"
+    "$@" >"$output_file" 2>&1 || status=$?
+    progress_stop
+  fi
   PROGRESS_COMMAND_OUTPUT="$(cat "$output_file")"
   rm -f -- "$output_file"
 
@@ -2610,13 +2614,63 @@ pull_git_repo_if_safe() {
 # Pull the mac-sync repo when safe, keeping the installed command in step.
 pull_repo_if_safe() {
   pull_git_repo_if_safe "$REPO_DIR" "local repo"
-  update_installed_self_or_exit
+  update_installed_commands_or_exit
 }
 
 
 # Pull the machine snapshot repo when safe.
 pull_machines_repo_if_safe() {
   pull_git_repo_if_safe "$MACHINES_REPO_DIR" "machines repo"
+}
+
+
+# Print the spinner helper source path to install when one is available.
+spinner_source_path() {
+  local path
+
+  for path in "$REPO_SPINNER" "$SELF_SPINNER"; do
+    if [[ -f "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+
+# Install or refresh the spinner helper command.
+install_spinner_command() {
+  local source
+
+  if ! source="$(spinner_source_path)"; then
+    warning "spinner helper not found; skipping install: $REPO_SPINNER"
+    return 0
+  fi
+
+  install -m 755 "$source" "$SPINNER_INSTALL_PATH"
+}
+
+
+# Update installed helper commands from the repo copy when needed.
+update_installed_spinner() {
+  local source
+
+  source="$(spinner_source_path)" || return 0
+  if [[ -f "$SPINNER_INSTALL_PATH" ]] && cmp -s "$source" "$SPINNER_INSTALL_PATH"; then
+    return 0
+  fi
+
+  mkdir -p "$INSTALL_DIR"
+  install -m 755 "$source" "$SPINNER_INSTALL_PATH"
+  log "updated installed spinner helper from $source"
+}
+
+
+# Update installed helper commands, exiting when the running mac-sync changed.
+update_installed_commands_or_exit() {
+  update_installed_spinner
+  update_installed_self_or_exit
 }
 
 
@@ -2930,22 +2984,21 @@ cmd_list() {
 
 # Install or refresh the command and its hourly LaunchAgent.
 cmd_install() {
-  local install_dir
-
   need install
   need launchctl
   validate_int_range "MAC_SYNC_HOURLY_MINUTE" "$HOURLY_MINUTE" 0 59
 
-  install_dir="$(dirname "$INSTALL_PATH")"
-  mkdir -p "$install_dir" "$(dirname "$LAUNCH_AGENT_PLIST")"
+  mkdir -p "$INSTALL_DIR" "$(dirname "$LAUNCH_AGENT_PLIST")"
 
   install -m 755 "$SELF_PATH" "$INSTALL_PATH"
+  install_spinner_command
   write_launchagent
 
   launchctl bootout "gui/$(id -u)" "$LAUNCH_AGENT_PLIST" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
 
   info "installed $INSTALL_PATH"
+  info "installed $SPINNER_INSTALL_PATH"
   info "loaded $LAUNCH_AGENT_PLIST"
 }
 
@@ -2958,9 +3011,13 @@ cmd_uninstall() {
   if [[ -e "$INSTALL_PATH" ]]; then
     rm -f "$INSTALL_PATH"
   fi
+  if [[ -e "$SPINNER_INSTALL_PATH" ]]; then
+    rm -f "$SPINNER_INSTALL_PATH"
+  fi
 
   info "removed $LAUNCH_AGENT_PLIST"
   info "removed $INSTALL_PATH"
+  info "removed $SPINNER_INSTALL_PATH"
 }
 
 
@@ -3172,6 +3229,7 @@ cmd_status() {
   info "machines repo: $MACHINES_REPO_DIR"
   info "machine: $MACHINE_NAME"
   info "installed command: $INSTALL_PATH"
+  info "spinner command: $SPINNER_INSTALL_PATH"
   info "paths file: $PATHS_FILE"
   info "LaunchAgent: $LAUNCH_AGENT_PLIST"
   info "status file: $SYNC_STATUS_FILE"

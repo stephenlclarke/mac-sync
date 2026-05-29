@@ -36,6 +36,7 @@ git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
 That command:
 
 - installs `mac-sync` to `~/bin/mac-sync`
+- installs the spinner helper to `~/bin/mac-spinner`
 - writes `~/Library/LaunchAgents/tools.xyzzy.mac-sync.plist`
 - loads the LaunchAgent into the current GUI session
 - schedules an hourly run at minute `0`
@@ -75,8 +76,8 @@ Commands:
 - `help [topic]`: show general help or command-specific help
 
 During `sync`, in-progress work is shown with a compact rotating Braille-dot
-marker, and completed work is printed with a tick marker. Paths that are already
-unchanged stay quiet.
+marker from `mac-spinner`, and completed work is printed with a tick marker.
+Paths that are already unchanged stay quiet.
 
 ## Status
 
@@ -298,10 +299,11 @@ Environment overrides:
 
 ## Self Update
 
-The repo copy at `bin/mac-sync` is canonical. Each sync pulls the mac-sync repo
-first when the worktree is clean. If that updates `bin/mac-sync` while the
-installed `~/bin/mac-sync` command is running, the command updates itself,
-exits, and asks you to re-run the sync with the new script.
+The repo copies at `bin/mac-sync` and `bin/mac-spinner` are canonical. Each sync
+pulls the mac-sync repo first when the worktree is clean. If that updates
+`bin/mac-sync` while the installed `~/bin/mac-sync` command is running, the
+command updates itself, exits, and asks you to re-run the sync with the new
+script. The spinner helper is refreshed automatically when it changes.
 
 ## Security Notes
 

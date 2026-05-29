@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+#
+# mac-spinner - run commands behind a compact Braille progress spinner.
+#
+# USAGE:
+#   mac-spinner --message <text> --output <file> -- <command> [args...]
+#   mac-spinner --message <text> --spin-only
+#   mac-spinner -h|--help
+#
+# OPTIONS:
+#   --message <text>  Text to show next to the spinner.
+#   --output <file>   File that receives combined stdout and stderr.
+#   --spin-only       Show the spinner until this process is stopped.
+#   -h, --help        Show this help text.
+#
+# ENVIRONMENT:
+#   SCRIPT_COLOUR     Set to off, false, or 0 to disable colour.
+
+set -euo pipefail
+
+readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
+SCRIPT_NAME="$(basename "$SELF_PATH")"
+readonly SCRIPT_NAME
+
+case "${SCRIPT_COLOUR:-}" in
+  off|OFF|false|FALSE|0)
+    readonly COLOUR_ENABLED=0
+    ;;
+  *)
+    readonly COLOUR_ENABLED=1
+    ;;
+esac
+
+if [[ -t 1 && "$COLOUR_ENABLED" = "1" ]]; then
+  readonly COLOUR_PROGRESS=$'\033[38;5;63m'
+  readonly COLOUR_INFO_RESET=$'\033[0m'
+else
+  readonly COLOUR_PROGRESS=""
+  readonly COLOUR_INFO_RESET=""
+fi
+
+readonly SPINNER_PENDING_MARK=$'\342\240\213'
+SPINNER_FRAMES=(
+  $'\342\240\213'
+  $'\342\240\231'
+  $'\342\240\232'
+  $'\342\240\236'
+  $'\342\240\226'
+  $'\342\240\246'
+  $'\342\240\264'
+  $'\342\240\262'
+  $'\342\240\263'
+  $'\342\240\223'
+)
+SPINNER_PID=""
+
+
+# Print script usage.
+usage() {
+  awk -v script_name="$SCRIPT_NAME" '
+    /^# USAGE:/ { inblock = 1 }
+    inblock {
+      if ($0 !~ /^#/) exit
+      line = $0
+      sub(/^#[ ]?/, "", line)
+      gsub(/mac-spinner/, script_name, line)
+      print line
+    }
+  ' "$SELF_PATH"
+}
+
+
+# Print a fatal error message to stderr.
+error() {
+  printf 'ERROR: %s\n' "$*" >&2
+}
+
+
+# Print a pending line for non-interactive output.
+print_pending() {
+  printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$SPINNER_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
+}
+
+
+# Animate a compact Braille-cell progress marker until stopped.
+spinner_loop() {
+  local message="$1"
+  local frame
+  local index=0
+
+  trap 'exit 0' INT TERM
+
+  if [[ ! -t 1 ]]; then
+    print_pending "$message"
+    while true; do
+      sleep 0.1 || exit 0
+    done
+  fi
+
+  while true; do
+    frame="${SPINNER_FRAMES[$((index % ${#SPINNER_FRAMES[@]}))]}"
+    printf '\r%s%s%s %s' "$COLOUR_PROGRESS" "$frame" "$COLOUR_INFO_RESET" "$message"
+    ((index += 1))
+    sleep 0.1 || exit 0
+  done
+}
+
+
+# Start the spinner in the background.
+start_spinner() {
+  local message="$1"
+
+  if [[ ! -t 1 ]]; then
+    print_pending "$message"
+    return 0
+  fi
+
+  spinner_loop "$message" &
+  SPINNER_PID="$!"
+}
+
+
+# Stop the active spinner and clear its terminal row.
+stop_spinner() {
+  local pid="${SPINNER_PID:-}"
+
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" 2>/dev/null || true
+  SPINNER_PID=""
+  if [[ -t 1 ]]; then
+    printf '\r\033[K'
+  fi
+}
+
+
+# Stop the spinner before this process exits.
+cleanup() {
+  local status=$?
+
+  stop_spinner
+  trap - EXIT INT TERM
+  exit "$status"
+}
+
+
+# Run a command while showing the spinner and capturing combined output.
+run_command() {
+  local message="$1"
+  local output_file="$2"
+  local status=0
+  shift 2
+
+  : >"$output_file"
+  start_spinner "$message"
+  "$@" >"$output_file" 2>&1 || status=$?
+  stop_spinner
+
+  return "$status"
+}
+
+
+# Parse arguments and dispatch the requested mode.
+main() {
+  local message=""
+  local output_file=""
+  local spin_only=0
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --message)
+        [[ "$#" -ge 2 ]] || {
+          error "missing value for --message"
+          usage >&2
+          exit 2
+        }
+        message="$2"
+        shift 2
+        ;;
+      --output)
+        [[ "$#" -ge 2 ]] || {
+          error "missing value for --output"
+          usage >&2
+          exit 2
+        }
+        output_file="$2"
+        shift 2
+        ;;
+      --spin-only)
+        spin_only=1
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        error "unknown argument: $1"
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  [[ -n "$message" ]] || {
+    error "missing --message"
+    usage >&2
+    exit 2
+  }
+
+  trap cleanup EXIT INT TERM
+
+  if [[ "$spin_only" = "1" ]]; then
+    [[ "$#" -eq 0 ]] || {
+      error "--spin-only does not accept a command"
+      usage >&2
+      exit 2
+    }
+    spinner_loop "$message"
+  fi
+
+  [[ -n "$output_file" ]] || {
+    error "missing --output"
+    usage >&2
+    exit 2
+  }
+  [[ "$#" -gt 0 ]] || {
+    error "missing command"
+    usage >&2
+    exit 2
+  }
+
+  run_command "$message" "$output_file" "$@"
+}
+
+
+main "$@"

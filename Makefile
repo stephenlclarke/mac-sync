@@ -5,6 +5,8 @@ export BASH_ENV
 export ENV
 
 SCRIPT = bin/mac-sync
+SPINNER = bin/mac-spinner
+SPINNER_TEST = tests/spinner.sh
 RESTORE_TEST = tests/restore.sh
 HOMEBREW_TEST = tests/homebrew.sh
 SECRETS_TEST = tests/secrets.sh
@@ -17,7 +19,10 @@ all: check
 
 check:
 	bash -n $(SCRIPT)
+	bash -n $(SPINNER)
 	/bin/bash -n $(SCRIPT)
+	/bin/bash -n $(SPINNER)
+	bash -n $(SPINNER_TEST)
 	bash -n $(RESTORE_TEST)
 	bash -n $(HOMEBREW_TEST)
 	bash -n $(SECRETS_TEST)
@@ -27,6 +32,8 @@ check:
 	$(SCRIPT) list >/dev/null
 	/bin/bash $(SCRIPT) --help >/dev/null
 	/bin/bash $(SCRIPT) list >/dev/null
+	bash $(SPINNER_TEST) $(CURDIR)/$(SPINNER)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(SPINNER_TEST) $(CURDIR)/$(SPINNER)
 	bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
