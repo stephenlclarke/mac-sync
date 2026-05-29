@@ -130,20 +130,12 @@ fi
 if [[ -t 1 && "$COLOUR_ENABLED" = "1" ]]; then
   readonly COLOUR_HEADER=$'\033[33m'
   readonly COLOUR_HEADER_RESET=$'\033[0m'
-  readonly COLOUR_PROGRESS=$'\033[38;5;63m'
-  readonly COLOUR_SUCCESS=$'\033[32m'
-  readonly COLOUR_INFO_RESET=$'\033[0m'
 else
   readonly COLOUR_HEADER=""
   readonly COLOUR_HEADER_RESET=""
-  readonly COLOUR_PROGRESS=""
-  readonly COLOUR_SUCCESS=""
-  readonly COLOUR_INFO_RESET=""
 fi
 
-readonly PROGRESS_PENDING_MARK=$'\342\240\213'
-readonly PROGRESS_DONE_MARK=$'\342\234\224\357\270\216'
-PROGRESS_SPINNER_PID=""
+PROGRESS_HELPER_PID=""
 PROGRESS_COMMAND_OUTPUT=""
 
 MAC_SYNC_RUN_ACTIVE=0
@@ -306,8 +298,8 @@ info() {
 }
 
 
-# Print the spinner helper command to use when one is available.
-spinner_app_path() {
+# Print the progress helper command to use when one is available.
+progress_helper_path() {
   local path
 
   for path in "$SELF_SPINNER" "$REPO_SPINNER" "$SPINNER_INSTALL_PATH"; do
@@ -321,13 +313,19 @@ spinner_app_path() {
 }
 
 
-# Print a pending-style progress line to stdout.
+# Print a pending progress line to stdout.
 progress_pending() {
-  printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
+  local spinner
+
+  if spinner="$(progress_helper_path)"; then
+    "$spinner" --message "$*" --pending
+  else
+    info "$*"
+  fi
 }
 
 
-# Start an in-place progress spinner for an in-flight operation.
+# Start in-place progress for an in-flight operation.
 progress_start() {
   local message="$1"
   local spinner
@@ -335,18 +333,18 @@ progress_start() {
   progress_stop
   if [[ ! -t 1 ]]; then
     progress_pending "$message"
-  elif spinner="$(spinner_app_path)"; then
+  elif spinner="$(progress_helper_path)"; then
     "$spinner" --message "$message" --spin-only &
-    PROGRESS_SPINNER_PID="$!"
+    PROGRESS_HELPER_PID="$!"
   else
     progress_pending "$message"
   fi
 }
 
 
-# Stop the active progress spinner and clear its terminal row.
+# Stop the active progress helper.
 progress_stop() {
-  local pid="${PROGRESS_SPINNER_PID:-}"
+  local pid="${PROGRESS_HELPER_PID:-}"
 
   if [[ -z "$pid" ]]; then
     return 0
@@ -354,21 +352,24 @@ progress_stop() {
 
   kill "$pid" >/dev/null 2>&1 || true
   wait "$pid" 2>/dev/null || true
-  PROGRESS_SPINNER_PID=""
-  if [[ -t 1 ]]; then
-    printf '\r\033[K'
-  fi
+  PROGRESS_HELPER_PID=""
 }
 
 
 # Print a completed progress line to stdout.
 progress_done() {
+  local spinner
+
   progress_stop
-  printf '%s%s%s %s\n' "$COLOUR_SUCCESS" "$PROGRESS_DONE_MARK" "$COLOUR_INFO_RESET" "$*"
+  if spinner="$(progress_helper_path)"; then
+    "$spinner" --message "$*" --done
+  else
+    info "$*"
+  fi
 }
 
 
-# Run a command while showing the progress spinner and capturing combined output.
+# Run a command while showing progress and capturing combined output.
 run_with_spinner() {
   local message="$1"
   local output_file
@@ -378,7 +379,7 @@ run_with_spinner() {
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/mac-sync-command.XXXXXX")"
   PROGRESS_COMMAND_OUTPUT=""
-  if spinner="$(spinner_app_path)" && ! declare -F "$1" >/dev/null 2>&1; then
+  if spinner="$(progress_helper_path)" && ! declare -F "$1" >/dev/null 2>&1; then
     "$spinner" --message "$message" --output "$output_file" -- "$@" || status=$?
   else
     progress_start "$message"

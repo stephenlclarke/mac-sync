@@ -5,12 +5,16 @@
 # USAGE:
 #   mac-spinner --message <text> --output <file> -- <command> [args...]
 #   mac-spinner --message <text> --spin-only
+#   mac-spinner --message <text> --pending
+#   mac-spinner --message <text> --done
 #   mac-spinner -h|--help
 #
 # OPTIONS:
 #   --message <text>  Text to show next to the spinner.
 #   --output <file>   File that receives combined stdout and stderr.
 #   --spin-only       Show the spinner until this process is stopped.
+#   --pending         Print a pending progress row and exit.
+#   --done            Print a completed progress row and exit.
 #   -h, --help        Show this help text.
 #
 # ENVIRONMENT:
@@ -33,13 +37,16 @@ esac
 
 if [[ -t 1 && "$COLOUR_ENABLED" = "1" ]]; then
   readonly COLOUR_PROGRESS=$'\033[38;5;63m'
+  readonly COLOUR_SUCCESS=$'\033[32m'
   readonly COLOUR_INFO_RESET=$'\033[0m'
 else
   readonly COLOUR_PROGRESS=""
+  readonly COLOUR_SUCCESS=""
   readonly COLOUR_INFO_RESET=""
 fi
 
 readonly SPINNER_PENDING_MARK=$'\342\240\213'
+readonly SPINNER_DONE_MARK=$'\342\234\224\357\270\216'
 SPINNER_FRAMES=(
   $'\342\240\213'
   $'\342\240\231'
@@ -53,6 +60,7 @@ SPINNER_FRAMES=(
   $'\342\240\223'
 )
 SPINNER_PID=""
+SPINNER_CLEAR_ON_EXIT=0
 
 
 # Print script usage.
@@ -82,6 +90,20 @@ print_pending() {
 }
 
 
+# Print a completed progress line.
+print_done() {
+  printf '%s%s%s %s\n' "$COLOUR_SUCCESS" "$SPINNER_DONE_MARK" "$COLOUR_INFO_RESET" "$*"
+}
+
+
+# Clear the active terminal row.
+clear_line() {
+  if [[ -t 1 ]]; then
+    printf '\r\033[K'
+  fi
+}
+
+
 # Animate a compact Braille-cell progress marker until stopped.
 spinner_loop() {
   local message="$1"
@@ -97,6 +119,7 @@ spinner_loop() {
     done
   fi
 
+  SPINNER_CLEAR_ON_EXIT=1
   while true; do
     frame="${SPINNER_FRAMES[$((index % ${#SPINNER_FRAMES[@]}))]}"
     printf '\r%s%s%s %s' "$COLOUR_PROGRESS" "$frame" "$COLOUR_INFO_RESET" "$message"
@@ -131,9 +154,8 @@ stop_spinner() {
   kill "$pid" >/dev/null 2>&1 || true
   wait "$pid" 2>/dev/null || true
   SPINNER_PID=""
-  if [[ -t 1 ]]; then
-    printf '\r\033[K'
-  fi
+  clear_line
+  SPINNER_CLEAR_ON_EXIT=0
 }
 
 
@@ -142,6 +164,9 @@ cleanup() {
   local status=$?
 
   stop_spinner
+  if [[ "$SPINNER_CLEAR_ON_EXIT" = "1" ]]; then
+    clear_line
+  fi
   trap - EXIT INT TERM
   exit "$status"
 }
@@ -166,8 +191,8 @@ run_command() {
 # Parse arguments and dispatch the requested mode.
 main() {
   local message=""
+  local mode="run"
   local output_file=""
-  local spin_only=0
 
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -190,7 +215,15 @@ main() {
         shift 2
         ;;
       --spin-only)
-        spin_only=1
+        mode="spin"
+        shift
+        ;;
+      --pending)
+        mode="pending"
+        shift
+        ;;
+      --done)
+        mode="done"
         shift
         ;;
       --)
@@ -217,14 +250,34 @@ main() {
 
   trap cleanup EXIT INT TERM
 
-  if [[ "$spin_only" = "1" ]]; then
-    [[ "$#" -eq 0 ]] || {
-      error "--spin-only does not accept a command"
-      usage >&2
-      exit 2
-    }
-    spinner_loop "$message"
-  fi
+  case "$mode" in
+    pending)
+      [[ "$#" -eq 0 ]] || {
+        error "--pending does not accept a command"
+        usage >&2
+        exit 2
+      }
+      print_pending "$message"
+      exit 0
+      ;;
+    done)
+      [[ "$#" -eq 0 ]] || {
+        error "--done does not accept a command"
+        usage >&2
+        exit 2
+      }
+      print_done "$message"
+      exit 0
+      ;;
+    spin)
+      [[ "$#" -eq 0 ]] || {
+        error "--spin-only does not accept a command"
+        usage >&2
+        exit 2
+      }
+      spinner_loop "$message"
+      ;;
+  esac
 
   [[ -n "$output_file" ]] || {
     error "missing --output"

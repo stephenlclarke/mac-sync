@@ -50,6 +50,14 @@ assert_file_contains "$CAPTURE_FILE" "failed"
 
 run_spinner --help
 assert_file_contains "$STDOUT_FILE" "mac-spinner --message <text> --output <file> -- <command> [args...]"
+assert_file_contains "$STDOUT_FILE" "mac-spinner --message <text> --pending"
+assert_file_contains "$STDOUT_FILE" "mac-spinner --message <text> --done"
+
+run_spinner --message "pending row" --pending
+assert_file_contains "$STDOUT_FILE" $'\342\240\213 pending row'
+
+run_spinner --message "done row" --done
+assert_file_contains "$STDOUT_FILE" $'\342\234\224\357\270\216 done row'
 
 if [[ -n "$SCRIPT_RUNNER" ]]; then
   SCRIPT_COLOUR=off "$SCRIPT_RUNNER" "$SCRIPT_PATH" --message "spin only" --spin-only >"$STDOUT_FILE" 2>"$STDERR_FILE" &
