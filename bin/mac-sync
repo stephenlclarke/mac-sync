@@ -664,21 +664,31 @@ tree_file_count() {
 # Sum regular-file bytes below a directory.
 tree_byte_count() {
   local dir="$1"
-  local file
-  local size
-  local total=0
+  local total
 
   if [[ ! -d "$dir" ]]; then
     printf '0\n'
     return 0
   fi
 
-  while IFS= read -r -d '' file; do
-    size="$(file_size_bytes "$file")"
-    ((total += size)) || true
-  done < <(find "$dir" -type f -print0)
+  if stat -f '%z' "$SELF_PATH" >/dev/null 2>&1; then
+    total="$(find "$dir" -type f -exec stat -f '%z' {} + \
+      | awk '{ total += $1 } END { print total + 0 }')"
+  elif stat -c '%s' "$SELF_PATH" >/dev/null 2>&1; then
+    total="$(find "$dir" -type f -exec stat -c '%s' {} + \
+      | awk '{ total += $1 } END { print total + 0 }')"
+  else
+    local file
+    local size
 
-  printf '%s\n' "$total"
+    total=0
+    while IFS= read -r -d '' file; do
+      size="$(file_size_bytes "$file")"
+      ((total += size)) || true
+    done < <(find "$dir" -type f -print0)
+  fi
+
+  printf '%s\n' "${total:-0}"
 }
 
 
