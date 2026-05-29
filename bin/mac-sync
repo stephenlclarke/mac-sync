@@ -2864,6 +2864,22 @@ print_status_messages() {
 }
 
 
+# Print local git worktree changes with a heading when any exist.
+print_repo_local_changes() {
+  local repo="$1"
+  local title="$2"
+  local changes
+
+  changes="$(git -C "$repo" status --short 2>/dev/null || true)"
+  if [[ -z "$changes" ]]; then
+    return 0
+  fi
+
+  info "${title} local changes:"
+  sed 's/^/  /' <<<"$changes"
+}
+
+
 # Return the LaunchAgent minute from the installed plist when available.
 launchagent_scheduled_minute() {
   local minute=""
@@ -3012,14 +3028,14 @@ cmd_status() {
 
   if [[ -d "$REPO_DIR/.git" ]]; then
     info "local repo branch: $(git -C "$REPO_DIR" branch --show-current 2>/dev/null || true)"
-    git -C "$REPO_DIR" status --short
+    print_repo_local_changes "$REPO_DIR" "local repo"
   else
     warning "local repo is not initialized yet"
   fi
 
   if [[ -d "$MACHINES_REPO_DIR/.git" ]]; then
     info "machines repo branch: $(git -C "$MACHINES_REPO_DIR" branch --show-current 2>/dev/null || true)"
-    git -C "$MACHINES_REPO_DIR" status --short -- machines
+    print_repo_local_changes "$MACHINES_REPO_DIR" "machines repo"
   else
     warning "machines repo is not initialized yet"
   fi

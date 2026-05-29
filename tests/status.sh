@@ -118,6 +118,8 @@ run_mac_sync sync
 [[ -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.env" ]] \
   || fail "missing local status file"
 
+printf 'local machines repo note\n' >"$TEST_MACHINES_REPO/README.md"
+
 run_mac_sync status
 assert_stdout_contains "local repo: $TEST_REPO"
 assert_stdout_contains "machines repo: $TEST_MACHINES_REPO"
@@ -147,3 +149,5 @@ assert_stdout_contains "WARN: no origin remote configured for local repo; skippi
 assert_stdout_contains "WARN: no origin remote configured for machines repo; skipping git pull"
 assert_stdout_contains "WARN: no origin remote configured for machines repo; skipping git push"
 assert_stdout_contains "last sync error messages: none"
+assert_stdout_contains "machines repo local changes:"
+assert_stdout_contains "?? README.md"
