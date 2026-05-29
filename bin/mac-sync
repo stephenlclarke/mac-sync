@@ -149,6 +149,7 @@ PROGRESS_SPINNER_FRAMES=(
   $'\342\240\223'
 )
 PROGRESS_SPINNER_PID=""
+PROGRESS_COMMAND_OUTPUT=""
 
 MAC_SYNC_RUN_ACTIVE=0
 MAC_SYNC_RUN_STARTED_AT=""
@@ -366,6 +367,31 @@ progress_stop() {
 progress_done() {
   progress_stop
   printf '%s%s%s %s\n' "$COLOUR_SUCCESS" "$PROGRESS_DONE_MARK" "$COLOUR_INFO_RESET" "$*"
+}
+
+
+# Run a command while showing the progress spinner and capturing combined output.
+run_with_spinner() {
+  local message="$1"
+  local output_file
+  local status=0
+  shift
+
+  output_file="$(mktemp "${TMPDIR:-/tmp}/mac-sync-command.XXXXXX")"
+  progress_start "$message"
+  "$@" >"$output_file" 2>&1 || status=$?
+  progress_stop
+  PROGRESS_COMMAND_OUTPUT="$(cat "$output_file")"
+  rm -f -- "$output_file"
+
+  return "$status"
+}
+
+
+# Print output captured by the last spinner command, when there is any.
+print_progress_command_output() {
+  [[ -n "$PROGRESS_COMMAND_OUTPUT" ]] || return 0
+  printf '%s\n' "$PROGRESS_COMMAND_OUTPUT" >&2
 }
 
 
@@ -1419,6 +1445,16 @@ write_homebrew_brewfile() {
 }
 
 
+# Write the complete local Homebrew package snapshot.
+write_homebrew_snapshot() {
+  mkdir -p "$HOMEBREW_DIR"
+  write_homebrew_list_file "$HOMEBREW_DIR/taps.txt" "Installed Homebrew taps." homebrew_taps
+  write_homebrew_list_file "$HOMEBREW_DIR/formulae.txt" "Installed Homebrew formulae." homebrew_formulae
+  write_homebrew_list_file "$HOMEBREW_DIR/casks.txt" "Installed Homebrew casks." homebrew_casks
+  write_homebrew_brewfile "$HOMEBREW_DIR"
+}
+
+
 # Sync the local Homebrew package state into the machine snapshot.
 sync_homebrew_packages() {
   homebrew_sync_enabled || return 0
@@ -1433,12 +1469,10 @@ sync_homebrew_packages() {
     return 0
   fi
 
-  progress_start "updating Homebrew package snapshot"
-  mkdir -p "$HOMEBREW_DIR"
-  write_homebrew_list_file "$HOMEBREW_DIR/taps.txt" "Installed Homebrew taps." homebrew_taps
-  write_homebrew_list_file "$HOMEBREW_DIR/formulae.txt" "Installed Homebrew formulae." homebrew_formulae
-  write_homebrew_list_file "$HOMEBREW_DIR/casks.txt" "Installed Homebrew casks." homebrew_casks
-  write_homebrew_brewfile "$HOMEBREW_DIR"
+  if ! run_with_spinner "updating Homebrew package snapshot" write_homebrew_snapshot; then
+    print_progress_command_output
+    return 1
+  fi
   progress_done "updated Homebrew package snapshot: $HOMEBREW_DIR"
 }
 
@@ -2546,13 +2580,12 @@ pull_git_repo_if_safe() {
     return 0
   fi
 
-  progress_start "pulling latest ${label} changes"
-  if ! output="$(git -C "$repo" pull --ff-only 2>&1)"; then
-    progress_stop
-    printf '%s\n' "$output" >&2
+  if ! run_with_spinner "pulling latest ${label} changes" git -C "$repo" pull --ff-only; then
+    print_progress_command_output
     return 1
   fi
 
+  output="$PROGRESS_COMMAND_OUTPUT"
   case "$output" in
     *"Already up to date."*)
       progress_done "${label} already up to date"
@@ -2620,15 +2653,23 @@ commit_and_push() {
     return 0
   fi
 
-  progress_start "checking machine snapshot changes"
-  git -C "$MACHINES_REPO_DIR" add "machines/${MACHINE_NAME}"
+  if ! run_with_spinner \
+    "checking machine snapshot changes" \
+    git -C "$MACHINES_REPO_DIR" add "machines/${MACHINE_NAME}"; then
+    print_progress_command_output
+    return 1
+  fi
 
   if git -C "$MACHINES_REPO_DIR" diff --cached --quiet -- "machines/${MACHINE_NAME}"; then
     progress_done "no machine snapshot changes to commit"
   else
     commit_message="chore(${MACHINE_NAME}): sync machine state"
-    progress_start "committing machine snapshot changes"
-    git -C "$MACHINES_REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"
+    if ! run_with_spinner \
+      "committing machine snapshot changes" \
+      git -C "$MACHINES_REPO_DIR" commit -m "$commit_message" -- "machines/${MACHINE_NAME}"; then
+      print_progress_command_output
+      return 1
+    fi
     progress_done "committed machine snapshot changes"
     committed=1
   fi
@@ -2650,8 +2691,12 @@ commit_and_push() {
   fi
 
   if repo_clean "$MACHINES_REPO_DIR" && branch_has_upstream "$MACHINES_REPO_DIR"; then
-    progress_start "rebasing machines repo before push"
-    git -C "$MACHINES_REPO_DIR" pull --rebase --autostash
+    if ! run_with_spinner \
+      "rebasing machines repo before push" \
+      git -C "$MACHINES_REPO_DIR" pull --rebase --autostash; then
+      print_progress_command_output
+      return 1
+    fi
     progress_done "rebased machines repo before push"
   elif repo_clean "$MACHINES_REPO_DIR"; then
     progress_done "no upstream branch yet; skipping pre-push pull"
@@ -2659,8 +2704,12 @@ commit_and_push() {
     warning "machines repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
   fi
 
-  progress_start "pushing ${branch} to origin"
-  git -C "$MACHINES_REPO_DIR" push -u origin "$branch"
+  if ! run_with_spinner \
+    "pushing ${branch} to origin" \
+    git -C "$MACHINES_REPO_DIR" push -u origin "$branch"; then
+    print_progress_command_output
+    return 1
+  fi
   progress_done "pushed ${branch} to origin"
 }
 
