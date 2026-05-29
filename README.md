@@ -74,6 +74,9 @@ Commands:
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
 - `help [topic]`: show general help or command-specific help
 
+During `sync`, changed files are printed with a Homebrew-style `✓` progress
+marker. Paths that are already unchanged stay quiet.
+
 ## Status
 
 Show current install state, the LaunchAgent state, the next scheduled run, the

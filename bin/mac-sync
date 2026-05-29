@@ -123,10 +123,19 @@ fi
 if [[ -t 1 && "$COLOUR_ENABLED" = "1" ]]; then
   readonly COLOUR_HEADER=$'\033[33m'
   readonly COLOUR_HEADER_RESET=$'\033[0m'
+  readonly COLOUR_PROGRESS=$'\033[38;5;63m'
+  readonly COLOUR_SUCCESS=$'\033[32m'
+  readonly COLOUR_INFO_RESET=$'\033[0m'
 else
   readonly COLOUR_HEADER=""
   readonly COLOUR_HEADER_RESET=""
+  readonly COLOUR_PROGRESS=""
+  readonly COLOUR_SUCCESS=""
+  readonly COLOUR_INFO_RESET=""
 fi
+
+readonly PROGRESS_PENDING_MARK="::"
+readonly PROGRESS_DONE_MARK=$'\342\234\223'
 
 MAC_SYNC_RUN_ACTIVE=0
 MAC_SYNC_RUN_STARTED_AT=""
@@ -285,6 +294,18 @@ warning() {
 # Print a human-facing informational message to stdout.
 info() {
   printf '%s\n' "$*"
+}
+
+
+# Print a pending-style progress line to stdout.
+progress_pending() {
+  printf '%s%s%s %s\n' "$COLOUR_PROGRESS" "$PROGRESS_PENDING_MARK" "$COLOUR_INFO_RESET" "$*"
+}
+
+
+# Print a completed progress line to stdout.
+progress_done() {
+  printf '%s%s%s %s\n' "$COLOUR_SUCCESS" "$PROGRESS_DONE_MARK" "$COLOUR_INFO_RESET" "$*"
 }
 
 
@@ -2256,12 +2277,12 @@ print_synced_directory_changes() {
     [[ -n "$rel" && "$rel" != "." && "$rel" != "./" ]] || continue
 
     if [[ "$code" == "*deleting" ]]; then
-      info "${remove_label}: ${dest_root%/}/$rel"
+      progress_done "${remove_label}: ${dest_root%/}/$rel"
       continue
     fi
 
     [[ "${code:1:1}" != "d" ]] || continue
-    info "${sync_label}: ${src_root%/}/$rel -> ${dest_root%/}/$rel"
+    progress_done "${sync_label}: ${src_root%/}/$rel -> ${dest_root%/}/$rel"
   done <<<"$changes"
 }
 
@@ -2281,10 +2302,10 @@ sync_one_path() {
   if [[ ! -e "$src" ]]; then
     if [[ -e "$dest" ]]; then
       if [[ "$DRY_RUN" = "1" ]]; then
-        info "would remove missing source snapshot: $dest"
+        progress_pending "would remove missing source snapshot: $dest"
       else
         rm -rf "$dest"
-        info "removed missing source snapshot: $dest"
+        progress_done "removed missing source snapshot: $dest"
       fi
     else
       return 0
@@ -2294,9 +2315,9 @@ sync_one_path() {
 
   if [[ "$DRY_RUN" = "1" ]]; then
     if [[ -d "$src" ]]; then
-      info "would sync directory: $src -> $dest"
+      progress_pending "would sync directory: $src -> $dest"
     else
-      info "would sync file: $src -> $dest"
+      progress_pending "would sync file: $src -> $dest"
     fi
     return 0
   fi
@@ -2318,7 +2339,7 @@ sync_one_path() {
     fi
     changes="$(rsync "$@" "$src" "$dest")"
     if [[ -n "$changes" ]]; then
-      info "sync file: $src -> $dest"
+      progress_done "sync file: $src -> $dest"
     fi
   fi
 }
