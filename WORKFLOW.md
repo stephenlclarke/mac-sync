@@ -17,7 +17,7 @@ flowchart TD
   A["Start on a Mac"] --> B["Install prerequisites<br/>brew install age gnu-tar"]
   B --> C["Clone mac-sync<br/>git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync"]
   B --> D["Clone dot-files<br/>git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files"]
-  C --> E["Review sync config<br/>less ~/github/mac-sync/config/sync-paths.txt"]
+  C --> E["Review sync paths<br/>make -C ~/github/dot-files print-mac-sync-paths"]
   D --> E
   E --> F["Install mac-sync LaunchAgent<br/>cd ~/github/mac-sync<br/>./bin/mac-sync install"]
   F --> G{"Existing machine snapshot?<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"}
@@ -60,10 +60,18 @@ MAC_SYNC_MACHINES_REPO=/path/to/dot-files
 
 ## Configure
 
-Review the tracked configuration in `~/github/mac-sync/config/` before the
-first sync:
+Review the tracked configuration before the first sync. The preferred regular
+path list comes from `~/github/dot-files`:
 
-- `sync-paths.txt`: regular dotfiles and directories to copy
+```sh
+make -C ~/github/dot-files print-mac-sync-paths
+```
+
+`mac-sync` uses that Makefile target automatically when it exists. It falls back
+to `~/github/mac-sync/config/sync-paths.txt` when the target is unavailable, or
+when `MAC_SYNC_MANIFEST_SOURCE=config` is set.
+
+- `config/sync-paths.txt`: fallback regular dotfiles and directories to copy
 - `excludes.txt`: `rsync` exclude patterns used during dotfile sync
 - `secret-paths.txt`: sensitive paths encrypted into the secrets archive
 - `age-recipients.txt`: public `age` recipients trusted to decrypt secrets
@@ -116,13 +124,17 @@ mac-sync sync
 
 During sync, `mac-sync`:
 
-1. Pulls the `mac-sync` repo when it is clean.
-2. Pulls the `dot-files` repo when it is clean.
-3. Copies configured paths from `$HOME` into the machine snapshot.
-4. Discovers safe referenced dotfiles and persists dynamic paths.
-5. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
-6. Updates an encrypted secrets snapshot when recipients and tools exist.
-7. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
+1. Checks the mac-sync GitHub remote directly for an installed command update.
+2. Uses the local mac-sync checkout only if it matches that remote commit.
+3. Clones the remote to a temporary directory when the local checkout is stale
+   or dirty, then restarts with the updated installed command.
+4. Pulls the local `mac-sync` repo when it is clean.
+5. Pulls the `dot-files` repo when it is clean.
+6. Copies configured paths from `$HOME` into the machine snapshot.
+7. Discovers safe referenced dotfiles and persists dynamic paths.
+8. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
+9. Updates an encrypted secrets snapshot when recipients and tools exist.
+10. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -136,9 +148,17 @@ sequenceDiagram
   participant GitHub
 
   User->>CLI: mac-sync sync
+  CLI->>GitHub: git ls-remote origin main
+  alt local checkout matches remote
+    CLI->>Code: use ~/github/mac-sync as update source
+  else local checkout stale or dirty
+    CLI->>GitHub: git clone --depth 1 --branch main ...
+  end
+  CLI->>CLI: install ~/bin/mac-sync and exec when changed
   CLI->>Code: git -C ~/github/mac-sync pull --ff-only
   CLI->>Snap: git -C ~/github/dot-files pull --ff-only
-  CLI->>Home: read configured paths
+  CLI->>Snap: make -C ~/github/dot-files print-mac-sync-paths
+  CLI->>Home: read configured and discovered paths
   CLI->>Snap: rsync into machines/machine-name/home
   CLI->>Snap: brew list and write homebrew snapshot
   CLI->>Snap: age -R config/age-recipients.txt when enabled

@@ -55,6 +55,15 @@
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
 #   MAC_SYNC_SECRETS       Set to 0 to disable encrypted secret snapshots
+#   MAC_SYNC_MANIFEST_SOURCE
+#                          auto, dot-files, or config. Default: auto
+#   MAC_SYNC_SELF_UPDATE   Set to 0 to disable remote self-update checks
+#   MAC_SYNC_SELF_UPDATE_MODE
+#                          restart or exit. Default: restart
+#   MAC_SYNC_SELF_UPDATE_REMOTE
+#                          Git remote used for self-updates
+#   MAC_SYNC_SELF_UPDATE_REF
+#                          Git branch used for self-updates. Default: main
 #   MAC_SYNC_KEYCHAIN_SERVICE
 #                          Keychain service for the age identity
 #   MAC_SYNC_KEYCHAIN_ACCOUNT
@@ -73,6 +82,8 @@
 #   MAC_SYNC_MACHINE=work-mbp mac-sync install
 
 set -euo pipefail
+
+ORIGINAL_ARGS=("$@")
 
 readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
 SCRIPT_NAME="$(basename "$SELF_PATH")"
@@ -94,6 +105,11 @@ readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
 readonly SECRETS_SYNC="${MAC_SYNC_SECRETS:-1}"
+readonly MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-auto}"
+readonly SELF_UPDATE="${MAC_SYNC_SELF_UPDATE:-1}"
+readonly SELF_UPDATE_MODE="${MAC_SYNC_SELF_UPDATE_MODE:-restart}"
+readonly SELF_UPDATE_REMOTE="${MAC_SYNC_SELF_UPDATE_REMOTE:-}"
+readonly SELF_UPDATE_REF="${MAC_SYNC_SELF_UPDATE_REF:-main}"
 readonly PATHS_FILE="${MAC_SYNC_PATHS_FILE:-${REPO_DIR}/config/sync-paths.txt}"
 readonly EXCLUDES_FILE="${MAC_SYNC_EXCLUDES_FILE:-${REPO_DIR}/config/excludes.txt}"
 readonly SECRET_PATHS_FILE="${MAC_SYNC_SECRET_PATHS_FILE:-${REPO_DIR}/config/secret-paths.txt}"
@@ -556,6 +572,7 @@ readonly STATUS_DIR="${MAC_SYNC_STATUS_DIR:-${HOME_DIR}/Library/Application Supp
 readonly SYNC_STATUS_FILE="${STATUS_DIR}/${MACHINE_NAME}.env"
 readonly SYNC_WARNINGS_FILE="${STATUS_DIR}/${MACHINE_NAME}.warnings.log"
 readonly SYNC_ERRORS_FILE="${STATUS_DIR}/${MACHINE_NAME}.errors.log"
+readonly SELF_UPDATE_STATUS_FILE="${STATUS_DIR}/${MACHINE_NAME}.self-update.env"
 
 MAC_SYNC_KEYGEN_TMP_DIR=""
 MAC_SYNC_ARCHIVE_TMP_DIR=""
@@ -566,6 +583,9 @@ MAC_SYNC_SYNC_TMP_CONFIGURED=""
 MAC_SYNC_SYNC_TMP_DYNAMIC=""
 MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA=""
 MAC_SYNC_SYNC_TMP_MANIFEST=""
+MAC_SYNC_MANIFEST_SOURCE_ACTIVE=""
+MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED=0
+MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=0
 
 
 # Remove the temporary age-keygen workspace.
@@ -918,6 +938,36 @@ secrets_sync_enabled() {
 }
 
 
+# Return true when remote self-updates are enabled.
+self_update_enabled() {
+  case "$SELF_UPDATE" in
+    0|off|OFF|false|FALSE|no|NO)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+
+# Normalize the self-update mode.
+self_update_mode() {
+  case "$SELF_UPDATE_MODE" in
+    restart|reexec)
+      printf '%s\n' "restart"
+      ;;
+    exit)
+      printf '%s\n' "exit"
+      ;;
+    *)
+      warning "unknown MAC_SYNC_SELF_UPDATE_MODE: $SELF_UPDATE_MODE; using restart"
+      printf '%s\n' "restart"
+      ;;
+  esac
+}
+
+
 # Return true when an array already contains a value.
 array_contains() {
   local needle="$1"
@@ -934,8 +984,8 @@ array_contains() {
 }
 
 
-# Print configured manifest paths without dynamic reference discovery.
-configured_manifest_paths() {
+# Print configured manifest paths from the mac-sync config file.
+configured_manifest_paths_from_file() {
   if [[ ! -f "$PATHS_FILE" ]]; then
     error "missing paths file: $PATHS_FILE"
     exit 1
@@ -949,6 +999,74 @@ configured_manifest_paths() {
     esac
     printf '%s\n' "$line"
   done <"$PATHS_FILE"
+}
+
+
+# Print configured manifest paths from the dot-files Makefile when supported.
+configured_manifest_paths_from_dot_files() {
+  local output
+
+  [[ -f "${MACHINES_REPO_DIR}/Makefile" ]] || return 1
+  command -v make >/dev/null 2>&1 || return 1
+
+  if ! output="$(BASH_ENV= ENV= make --no-print-directory -s -C "$MACHINES_REPO_DIR" print-mac-sync-paths 2>/dev/null)"; then
+    return 1
+  fi
+  [[ -n "$output" ]] || return 1
+
+  printf '%s\n' "$output" | awk 'NF && !seen[$0]++'
+}
+
+
+# Print configured manifest paths without dynamic reference discovery.
+configured_manifest_paths() {
+  MAC_SYNC_MANIFEST_SOURCE_ACTIVE=""
+
+  case "$MANIFEST_SOURCE" in
+    auto)
+      if configured_manifest_paths_from_dot_files; then
+        MAC_SYNC_MANIFEST_SOURCE_ACTIVE="dot-files"
+        return 0
+      fi
+      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="config"
+      configured_manifest_paths_from_file
+      ;;
+    dot-files)
+      if ! configured_manifest_paths_from_dot_files; then
+        error "dot-files manifest source is unavailable: ${MACHINES_REPO_DIR}/Makefile"
+        exit 1
+      fi
+      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="dot-files"
+      ;;
+    config)
+      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="config"
+      configured_manifest_paths_from_file
+      ;;
+    *)
+      error "MAC_SYNC_MANIFEST_SOURCE must be auto, dot-files, or config"
+      exit 2
+      ;;
+  esac
+}
+
+
+# Return the manifest source that will be used for display commands.
+configured_manifest_source_label() {
+  case "$MANIFEST_SOURCE" in
+    auto)
+      if configured_manifest_paths_from_dot_files >/dev/null 2>&1; then
+        printf '%s\n' "dot-files"
+      else
+        printf '%s\n' "config"
+      fi
+      ;;
+    dot-files|config)
+      printf '%s\n' "$MANIFEST_SOURCE"
+      ;;
+    *)
+      printf '%s\n' "invalid"
+      ;;
+  esac
 }
 
 
@@ -2310,6 +2428,7 @@ cmd_secrets_sync() {
   acquire_lock
   trap 'release_lock' EXIT INT TERM
 
+  self_update_from_remote_or_warn
   pull_repo_if_safe
   pull_machines_repo_if_safe
   sync_secrets_archive required
@@ -2612,10 +2731,9 @@ pull_git_repo_if_safe() {
 }
 
 
-# Pull the mac-sync repo when safe, keeping the installed command in step.
+# Pull the mac-sync repo when safe.
 pull_repo_if_safe() {
   pull_git_repo_if_safe "$REPO_DIR" "local repo"
-  update_installed_commands_or_exit
 }
 
 
@@ -2653,57 +2771,279 @@ install_spinner_command() {
 }
 
 
-# Update installed helper commands from the repo copy when needed.
-update_installed_spinner() {
-  local source
+# Return true when the current process is the installed mac-sync command.
+running_installed_script() {
+  local install_real
+  local self_real
 
-  source="$(spinner_source_path)" || return 0
-  if [[ -f "$SPINNER_INSTALL_PATH" ]] && cmp -s "$source" "$SPINNER_INSTALL_PATH"; then
+  [[ -f "$INSTALL_PATH" ]] || return 1
+  self_real="$(realpath_existing "$SELF_PATH")"
+  install_real="$(realpath_existing "$INSTALL_PATH")"
+
+  [[ "$self_real" = "$install_real" ]]
+}
+
+
+# Print the remote URL used for self-updates.
+self_update_remote_url() {
+  if [[ -n "$SELF_UPDATE_REMOTE" ]]; then
+    printf '%s\n' "$SELF_UPDATE_REMOTE"
+    return 0
+  fi
+
+  if [[ -d "$REPO_DIR/.git" ]] && git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
+    git -C "$REPO_DIR" remote get-url origin
+    return 0
+  fi
+
+  printf '%s\n' "https://github.com/stephenlclarke/mac-sync.git"
+}
+
+
+# Print the remote commit SHA for the configured self-update ref.
+self_update_remote_ref_sha() {
+  local remote="$1"
+  local ref="$2"
+  local sha
+
+  sha="$(git ls-remote --heads "$remote" "$ref" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+  if [[ -z "$sha" ]]; then
+    sha="$(git ls-remote "$remote" "$ref" 2>/dev/null | awk 'NR == 1 { print $1 }')"
+  fi
+
+  [[ -n "$sha" ]] || return 1
+  printf '%s\n' "$sha"
+}
+
+
+# Print a ref name suitable for git clone --branch.
+self_update_clone_ref() {
+  local ref="$1"
+
+  case "$ref" in
+    refs/heads/*)
+      printf '%s\n' "${ref#refs/heads/}"
+      ;;
+    refs/tags/*)
+      printf '%s\n' "${ref#refs/tags/}"
+      ;;
+    *)
+      printf '%s\n' "$ref"
+      ;;
+  esac
+}
+
+
+# Return true when the local mac-sync checkout is exactly the remote ref.
+self_update_local_source_current() {
+  local remote_sha="$1"
+  local local_sha
+
+  [[ -d "$REPO_DIR/.git" ]] || return 1
+  [[ -f "$REPO_SCRIPT" ]] || return 1
+  repo_clean "$REPO_DIR" || return 1
+
+  local_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$local_sha" && "$local_sha" = "$remote_sha" ]]
+}
+
+
+# Print a compact checksum for a file, or "missing".
+file_checksum() {
+  local file="$1"
+
+  if [[ ! -f "$file" ]]; then
+    printf '%s\n' "missing"
+    return 0
+  fi
+
+  cksum "$file" | awk '{ printf "%s:%s\n", $1, $2 }'
+}
+
+
+# Print one value from the self-update status file.
+self_update_state_value() {
+  local key="$1"
+
+  [[ -f "$SELF_UPDATE_STATUS_FILE" ]] || return 0
+  awk -F= -v key="$key" '
+    $1 == key {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$SELF_UPDATE_STATUS_FILE"
+}
+
+
+# Return true when the installed files already match the last verified remote SHA.
+self_update_state_current() {
+  local remote="$1"
+  local ref="$2"
+  local remote_sha="$3"
+  local recorded_remote
+  local recorded_ref
+  local recorded_sha
+  local recorded_script_checksum
+  local recorded_spinner_checksum
+
+  [[ -f "$SELF_UPDATE_STATUS_FILE" ]] || return 1
+  recorded_remote="$(self_update_state_value remote)"
+  recorded_ref="$(self_update_state_value ref)"
+  recorded_sha="$(self_update_state_value remote_sha)"
+  recorded_script_checksum="$(self_update_state_value script_checksum)"
+  recorded_spinner_checksum="$(self_update_state_value spinner_checksum)"
+
+  [[ "$recorded_remote" = "$remote" ]] || return 1
+  [[ "$recorded_ref" = "$ref" ]] || return 1
+  [[ "$recorded_sha" = "$remote_sha" ]] || return 1
+  [[ "$recorded_script_checksum" = "$(file_checksum "$INSTALL_PATH")" ]] || return 1
+  [[ "$recorded_spinner_checksum" = "$(file_checksum "$SPINNER_INSTALL_PATH")" ]] || return 1
+}
+
+
+# Persist the installed file checksums for the verified remote SHA.
+write_self_update_state() {
+  local remote="$1"
+  local ref="$2"
+  local remote_sha="$3"
+  local tmp_status
+
+  mkdir -p "$STATUS_DIR"
+  tmp_status="$(mktemp "${STATUS_DIR}/${MACHINE_NAME}.self-update.env.XXXXXX")"
+  {
+    printf 'remote=%s\n' "$remote"
+    printf 'ref=%s\n' "$ref"
+    printf 'remote_sha=%s\n' "$remote_sha"
+    printf 'script_checksum=%s\n' "$(file_checksum "$INSTALL_PATH")"
+    printf 'spinner_checksum=%s\n' "$(file_checksum "$SPINNER_INSTALL_PATH")"
+  } >"$tmp_status"
+  mv "$tmp_status" "$SELF_UPDATE_STATUS_FILE"
+}
+
+
+# Clone the remote self-update source into a temporary directory.
+clone_self_update_source() {
+  local remote="$1"
+  local ref="$2"
+  local target="$3"
+  local clone_ref
+
+  clone_ref="$(self_update_clone_ref "$ref")"
+  git clone --quiet --depth 1 --branch "$clone_ref" "$remote" "$target"
+}
+
+
+# Apply script and spinner updates from a known-current source checkout.
+apply_self_update_source() {
+  local source_dir="$1"
+  local source_label="$2"
+  local source_script="${source_dir}/bin/mac-sync"
+  local source_spinner="${source_dir}/bin/mac-spinner"
+
+  MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED=0
+  MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=0
+
+  if [[ -f "$source_spinner" ]]; then
+    if [[ ! -f "$SPINNER_INSTALL_PATH" ]] || ! cmp -s "$source_spinner" "$SPINNER_INSTALL_PATH"; then
+      mkdir -p "$INSTALL_DIR"
+      install -m 755 "$source_spinner" "$SPINNER_INSTALL_PATH"
+      MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=1
+      log "updated installed spinner helper from $source_label"
+    fi
+  fi
+
+  if [[ ! -f "$source_script" ]]; then
+    warning "self-update source is missing bin/mac-sync: $source_label"
+    return 1
+  fi
+
+  if [[ -f "$INSTALL_PATH" ]] && cmp -s "$source_script" "$INSTALL_PATH"; then
     return 0
   fi
 
   mkdir -p "$INSTALL_DIR"
-  install -m 755 "$source" "$SPINNER_INSTALL_PATH"
-  log "updated installed spinner helper from $source"
+  install -m 755 "$source_script" "$INSTALL_PATH"
+  MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED=1
+  log "updated installed mac-sync from $source_label"
 }
 
 
-# Update installed helper commands, exiting when the running mac-sync changed.
-update_installed_commands_or_exit() {
-  update_installed_spinner
-  update_installed_self_or_exit
-}
+# Restart or stop after the installed script was replaced.
+finish_self_update() {
+  local source_label="$1"
+  local mode
 
+  [[ "$MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED" = "1" ]] || return 0
 
-# Update the installed script from the repo copy when a pull changed it.
-update_installed_self_or_exit() {
-  local self_real
-  local install_real
-
-  if [[ ! -f "$REPO_SCRIPT" ]]; then
-    return 0
+  mode="$(self_update_mode)"
+  if [[ "$mode" = "exit" ]]; then
+    warning "mac-sync updated itself from $source_label"
+    warning "Please re-run the sync using the new script: $INSTALL_PATH sync"
+    log "self-updated installed script and exited before continuing"
+    exit 75
   fi
 
-  if [[ ! -f "$INSTALL_PATH" ]]; then
-    return 0
-  fi
+  warning "mac-sync updated itself from $source_label; restarting with the new script"
+  log "self-updated installed script and restarted"
+  progress_stop
+  cleanup_sync_tmps
+  release_lock
+  trap - EXIT INT TERM
+  exec "$INSTALL_PATH" "${ORIGINAL_ARGS[@]}"
 
-  if cmp -s "$REPO_SCRIPT" "$INSTALL_PATH"; then
-    return 0
-  fi
-
-  self_real="$(realpath_existing "$SELF_PATH")"
-  install_real="$(realpath_existing "$INSTALL_PATH")"
-
-  if [[ "$self_real" != "$install_real" ]]; then
-    return 0
-  fi
-
-  install -m 755 "$REPO_SCRIPT" "$INSTALL_PATH"
-  warning "mac-sync updated itself from $REPO_SCRIPT"
-  warning "Please re-run the sync using the new script: $INSTALL_PATH sync"
-  log "self-updated installed script from repo and exited before continuing"
+  error "failed to restart updated command: $INSTALL_PATH"
   exit 75
+}
+
+
+# Check GitHub directly and update the installed command before syncing.
+self_update_from_remote_or_warn() {
+  local remote
+  local remote_sha
+  local source_dir
+  local source_label
+  local tmp_dir=""
+
+  self_update_enabled || return 0
+  [[ "$DRY_RUN" != "1" ]] || return 0
+  running_installed_script || return 0
+
+  remote="$(self_update_remote_url)"
+  if ! remote_sha="$(self_update_remote_ref_sha "$remote" "$SELF_UPDATE_REF")"; then
+    warning "could not check mac-sync self-update remote: ${remote} ${SELF_UPDATE_REF}"
+    return 0
+  fi
+
+  if self_update_local_source_current "$remote_sha"; then
+    source_dir="$REPO_DIR"
+    source_label="${REPO_DIR} (${SELF_UPDATE_REF}@${remote_sha:0:7})"
+  elif self_update_state_current "$remote" "$SELF_UPDATE_REF" "$remote_sha"; then
+    return 0
+  else
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-self-update.XXXXXX")"
+    if ! clone_self_update_source "$remote" "$SELF_UPDATE_REF" "${tmp_dir}/source"; then
+      rm -rf -- "$tmp_dir"
+      warning "could not clone mac-sync self-update source: ${remote} ${SELF_UPDATE_REF}"
+      return 0
+    fi
+    source_dir="${tmp_dir}/source"
+    source_label="${remote} (${SELF_UPDATE_REF}@${remote_sha:0:7})"
+  fi
+
+  if ! apply_self_update_source "$source_dir" "$source_label"; then
+    if [[ -n "$tmp_dir" ]]; then
+      rm -rf -- "$tmp_dir"
+    fi
+    return 0
+  fi
+  write_self_update_state "$remote" "$SELF_UPDATE_REF" "$remote_sha"
+
+  if [[ -n "$tmp_dir" ]]; then
+    rm -rf -- "$tmp_dir"
+  fi
+
+  finish_self_update "$source_label"
 }
 
 
@@ -2781,6 +3121,7 @@ commit_and_push() {
 
 # Ensure the repo and runtime commands are available.
 check_runtime() {
+  need cksum
   need comm
   need find
   need git
@@ -2814,6 +3155,9 @@ cmd_sync() {
 
   check_runtime
   acquire_lock
+  trap 'progress_stop; cleanup_sync_tmps; release_lock' EXIT INT TERM
+
+  self_update_from_remote_or_warn
   start_sync_status
   trap 'status=$?; progress_stop; finish_sync_status "$status"; cleanup_sync_tmps; release_lock; exit "$status"' EXIT INT TERM
 
@@ -2829,7 +3173,6 @@ cmd_sync() {
   MAC_SYNC_SYNC_TMP_DYNAMIC="$tmp_dynamic"
   MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA="$tmp_dynamic_extra"
   MAC_SYNC_SYNC_TMP_MANIFEST="$tmp_manifest"
-  trap 'progress_stop; cleanup_sync_tmps; release_lock' EXIT INT TERM
 
   progress_start "building sync manifest"
   configured_manifest_paths >"$tmp_configured"
@@ -2944,6 +3287,7 @@ cmd_list() {
   info "machines repo: $MACHINES_REPO_DIR"
   info "machine: $MACHINE_NAME"
   info "paths file: $PATHS_FILE"
+  info "manifest source: $(configured_manifest_source_label)"
   info "dynamic paths file: $DYNAMIC_PATHS_FILE"
   info "Homebrew snapshot dir: $HOMEBREW_DIR"
   info "secret paths file: $SECRET_PATHS_FILE"
@@ -3232,8 +3576,12 @@ cmd_status() {
   info "installed command: $INSTALL_PATH"
   info "spinner command: $SPINNER_INSTALL_PATH"
   info "paths file: $PATHS_FILE"
+  info "manifest source: $(configured_manifest_source_label)"
+  info "self-update remote: $(self_update_remote_url)"
+  info "self-update ref: $SELF_UPDATE_REF"
   info "LaunchAgent: $LAUNCH_AGENT_PLIST"
   info "status file: $SYNC_STATUS_FILE"
+  info "self-update state file: $SELF_UPDATE_STATUS_FILE"
   info "stdout log: $LOG_OUT"
   info "stderr log: $LOG_ERR"
 

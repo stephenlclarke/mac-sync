@@ -253,7 +253,7 @@ startup file changes. The generated per-machine dynamic list is persisted to:
 
 On later runs, paths that were previously dynamic but are no longer discovered
 are pruned from that machine snapshot, unless they overlap a curated path in
-`config/sync-paths.txt`.
+the configured manifest.
 
 Homebrew package state is captured during sync when `brew` is available. The
 generated per-machine lists are persisted to:
@@ -291,6 +291,18 @@ Environment overrides:
 - `MAC_SYNC_HOMEBREW=0`: disable Homebrew package snapshotting and restore
   command suggestions
 - `MAC_SYNC_SECRETS=0`: disable encrypted secret snapshotting and restore hints
+- `MAC_SYNC_MANIFEST_SOURCE`: choose `auto`, `dot-files`, or `config`.
+  The default `auto` uses `make print-mac-sync-paths` from the `dot-files`
+  repo when available, then falls back to `config/sync-paths.txt`.
+- `MAC_SYNC_SELF_UPDATE=0`: disable the remote self-update check during
+  `sync` and `secrets sync`
+- `MAC_SYNC_SELF_UPDATE_MODE=exit`: install an updated command and exit instead
+  of restarting automatically. The default is `restart`.
+- `MAC_SYNC_SELF_UPDATE_REMOTE`: override the Git remote used for self-updates.
+  By default this is the local mac-sync origin, falling back to
+  `https://github.com/stephenlclarke/mac-sync.git`.
+- `MAC_SYNC_SELF_UPDATE_REF`: branch or ref used for self-updates, defaulting
+  to `main`
 - `MAC_SYNC_KEYCHAIN_SERVICE`: Keychain service for the `age` identity,
   defaulting to `mac-sync age identity`
 - `MAC_SYNC_KEYCHAIN_ACCOUNT`: Keychain account for the `age` identity,
@@ -299,11 +311,20 @@ Environment overrides:
 
 ## Self Update
 
-The repo copies at `bin/mac-sync` and `bin/mac-spinner` are canonical. Each sync
-pulls the mac-sync repo first when the worktree is clean. If that updates
-`bin/mac-sync` while the installed `~/bin/mac-sync` command is running, the
-command updates itself, exits, and asks you to re-run the sync with the new
-script. The spinner helper is refreshed automatically when it changes.
+The GitHub remote is the canonical source for `bin/mac-sync` and
+`bin/mac-spinner`. At the start of `sync` and `secrets sync`, the installed
+`~/bin/mac-sync` command checks the configured remote ref directly with
+`git ls-remote`.
+
+When the local mac-sync checkout is clean and exactly matches that remote commit,
+the installed command updates from the local checkout. If the checkout is stale
+or dirty, `mac-sync` clones the remote ref to a temporary directory and updates
+from that clone instead.
+
+By default, an updated installed command restarts itself and continues the sync
+with the new script. Set `MAC_SYNC_SELF_UPDATE_MODE=exit` to keep the older
+behavior of installing the update and asking you to re-run, or
+`MAC_SYNC_SELF_UPDATE=0` to disable the check.
 
 ## Security Notes
 

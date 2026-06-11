@@ -12,6 +12,8 @@ HOMEBREW_TEST = tests/homebrew.sh
 SECRETS_TEST = tests/secrets.sh
 STATUS_TEST = tests/status.sh
 HELP_TEST = tests/help.sh
+SELF_UPDATE_TEST = tests/self-update.sh
+MANIFEST_TEST = tests/manifest.sh
 
 .PHONY: all check help
 
@@ -28,6 +30,8 @@ check:
 	bash -n $(SECRETS_TEST)
 	bash -n $(STATUS_TEST)
 	bash -n $(HELP_TEST)
+	bash -n $(SELF_UPDATE_TEST)
+	bash -n $(MANIFEST_TEST)
 	$(SCRIPT) --help >/dev/null
 	$(SCRIPT) list >/dev/null
 	/bin/bash $(SCRIPT) --help >/dev/null
@@ -44,6 +48,10 @@ check:
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(SECRETS_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(STATUS_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(STATUS_TEST) $(CURDIR)/$(SCRIPT)
+	bash $(SELF_UPDATE_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(SELF_UPDATE_TEST) $(CURDIR)/$(SCRIPT)
+	bash $(MANIFEST_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(MANIFEST_TEST) $(CURDIR)/$(SCRIPT)
 
 help:
 	@$(SCRIPT) --help
