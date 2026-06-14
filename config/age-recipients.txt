@@ -1,3 +1,4 @@
 # Public age recipients that can decrypt encrypted secret snapshots.
 # Add one age1... recipient per trusted Mac or recovery key.
 age1pwp6sgeu0mukkwyfh7dtahgaxuv5d9cc29240sqc698y293qve2sd8xzpu
+age18rgqmv8vpks8dxewypzhpjh3vqc5ph8xmuhpljq9atnf386v6geskmfz2p
