@@ -265,6 +265,11 @@ generated per-machine lists are persisted to:
 That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
 lists, plus a generated `Brewfile` for browsing or reuse.
 
+Before pushing a machine snapshot, `mac-sync` rebases the machines repo against
+its upstream branch. This is done even when the `dot-files` checkout has
+unrelated local files, so hourly backups from multiple Macs can integrate each
+other's `machines/<machine-name>` commits before pushing.
+
 Rsync excludes are listed in:
 
 ```text

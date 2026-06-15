@@ -3047,6 +3047,53 @@ self_update_from_remote_or_warn() {
 }
 
 
+# Rebase the machines repo against its upstream before pushing.
+rebase_machines_repo_before_push() {
+  if branch_has_upstream "$MACHINES_REPO_DIR"; then
+    if ! run_with_spinner \
+      "rebasing machines repo before push" \
+      git -C "$MACHINES_REPO_DIR" pull --rebase --autostash; then
+      print_progress_command_output
+      return 1
+    fi
+    progress_done "rebased machines repo before push"
+  else
+    progress_done "no upstream branch yet; skipping pre-push pull"
+  fi
+}
+
+
+# Push the machines repo, retrying if another Mac moved the remote first.
+push_machines_repo_with_retries() {
+  local branch="$1"
+  local attempt=1
+  local max_attempts=3
+
+  while (( attempt <= max_attempts )); do
+    if ! rebase_machines_repo_before_push; then
+      return 1
+    fi
+
+    if run_with_spinner \
+      "pushing ${branch} to origin" \
+      git -C "$MACHINES_REPO_DIR" push -u origin "$branch"; then
+      progress_done "pushed ${branch} to origin"
+      return 0
+    fi
+
+    print_progress_command_output
+    if (( attempt == max_attempts )); then
+      return 1
+    fi
+
+    warning "machines repo push failed; rebasing and retrying (${attempt}/${max_attempts})"
+    ((attempt += 1)) || true
+  done
+
+  return 1
+}
+
+
 # Commit the machine snapshot when it changed and push it to origin.
 commit_and_push() {
   local branch
@@ -3095,27 +3142,7 @@ commit_and_push() {
     return 0
   fi
 
-  if repo_clean "$MACHINES_REPO_DIR" && branch_has_upstream "$MACHINES_REPO_DIR"; then
-    if ! run_with_spinner \
-      "rebasing machines repo before push" \
-      git -C "$MACHINES_REPO_DIR" pull --rebase --autostash; then
-      print_progress_command_output
-      return 1
-    fi
-    progress_done "rebased machines repo before push"
-  elif repo_clean "$MACHINES_REPO_DIR"; then
-    progress_done "no upstream branch yet; skipping pre-push pull"
-  else
-    warning "machines repo still has local changes outside this machine snapshot; pushing current branch without rebasing"
-  fi
-
-  if ! run_with_spinner \
-    "pushing ${branch} to origin" \
-    git -C "$MACHINES_REPO_DIR" push -u origin "$branch"; then
-    print_progress_command_output
-    return 1
-  fi
-  progress_done "pushed ${branch} to origin"
+  push_machines_repo_with_retries "$branch"
 }
 
 
