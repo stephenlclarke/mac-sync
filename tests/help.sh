@@ -77,5 +77,32 @@ run_mac_sync secrets help
 assert_stdout_contains "USAGE:"
 assert_stdout_contains "mac-sync secrets <command>"
 
+run_mac_sync help packages
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync packages <command>"
+assert_stdout_contains "install --from <machine> [--formulae-only] [--admin-user <user>]"
+
+run_mac_sync packages help
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync packages <command>"
+
+run_mac_sync help editor
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync editor <command>"
+assert_stdout_contains "mac-sync editor install --from old-mbp"
+
+run_mac_sync editor help
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync editor <command>"
+
+run_mac_sync help manifest
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync manifest <command>"
+assert_stdout_contains "mac-sync manifest configured"
+
+run_mac_sync manifest help
+assert_stdout_contains "USAGE:"
+assert_stdout_contains "mac-sync manifest <command>"
+
 run_mac_sync_expect_failure help nope
 assert_stderr_contains "ERROR: unknown help topic: nope"

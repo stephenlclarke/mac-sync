@@ -1,8 +1,9 @@
 # mac-sync
 
 `mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
-packages, and local GitHub clones in git, split by machine name. This repo owns
-the command and config; machine snapshots live in the separate
+packages, VS Code extensions, encrypted secrets, and local GitHub clones in
+git, split by machine name. This repo owns the command and backup/restore
+configuration; machine snapshots live in the separate
 `stephenlclarke/dot-files` repo.
 
 Snapshots are written to:
@@ -57,8 +58,13 @@ mac-sync restore --select
 mac-sync restore --list-machines
 mac-sync restore --from old-mbp
 mac-sync secrets init
+mac-sync packages diff --from old-mbp
+mac-sync packages install --from old-mbp
+mac-sync editor diff --from old-mbp
+mac-sync editor install --from old-mbp
 mac-sync secrets list --from old-mbp
 mac-sync secrets restore --from old-mbp
+mac-sync manifest list
 mac-sync help restore
 mac-sync help secrets
 mac-sync list
@@ -75,6 +81,9 @@ Commands:
 - `restore`: copy a machine snapshot from `dot-files` back into `$HOME` and
   re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
+- `packages`: manage Homebrew snapshots, diffs, and installs
+- `editor`: manage VS Code extension snapshots, diffs, and installs
+- `manifest`: show configured and dynamically discovered backup paths
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
 - `help [topic]`: show general help or command-specific help
@@ -140,8 +149,8 @@ Restore pulls both repos first when their worktrees are clean, then copies the
 curated paths from `config/sync-paths.txt` plus the selected machine's persisted
 dynamic paths from `~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt`.
 It also compares the selected machine's Homebrew snapshot with the local
-Homebrew state and re-clones missing GitHub repositories from the selected
-machine's saved clone list into `~/github`.
+Homebrew and VS Code extension state and re-clones missing GitHub repositories
+from the selected machine's saved clone list into `~/github`.
 
 By default, restore copies missing files and files that are newer in the repo
 snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
@@ -161,6 +170,9 @@ When Homebrew packages differ, restore prints the manual commands needed to
 install missing taps, formulae, and casks or upgrade outdated packages from the
 synced list. It does not run those commands for you and it does not uninstall
 extra local packages.
+
+When VS Code extensions differ, restore prints the manual `code` commands needed
+to reconcile the local extension set. It does not run those commands for you.
 
 If an encrypted secrets snapshot exists for the selected machine, restore prints
 the `mac-sync secrets list` and `mac-sync secrets restore` commands to inspect
@@ -254,15 +266,56 @@ recipient to the repo. Future encrypted snapshots are encrypted to every
 recipient in `config/age-recipients.txt`, so any matching Keychain identity can
 decrypt them.
 
+## Packages
+
+Homebrew package state is captured during normal `mac-sync sync` when `brew` is
+available. Manage it directly with:
+
+```sh
+mac-sync packages sync
+mac-sync packages diff --from old-mbp
+mac-sync packages install --from old-mbp
+mac-sync packages install --from old-mbp --formulae-only
+mac-sync packages install --from old-mbp --admin-user adm-sclarke
+```
+
+`packages diff` prints the same manual commands that `restore` prints.
+`packages install` runs `brew bundle install` from the selected machine
+snapshot. Use `--formulae-only` to skip casks, or `--admin-user` when cask
+installs need a different admin-capable account.
+
+## Editor State
+
+VS Code extension state is captured during normal `mac-sync sync` when the
+`code` CLI is available. Manage it directly with:
+
+```sh
+mac-sync editor sync
+mac-sync editor diff --from old-mbp
+mac-sync editor install --from old-mbp
+```
+
+`editor diff` prints the manual `code --install-extension` and
+`code --uninstall-extension` commands. `editor install` reconciles the local VS
+Code extensions to the selected machine snapshot.
+
 ## Configuration
 
-The synced paths are listed in:
+The configured backup paths are listed in:
 
 ```text
 config/sync-paths.txt
 ```
 
-Paths are relative to `$HOME` unless they start with `/`.
+Paths are relative to `$HOME` unless they start with `/`. Inspect the active
+manifest with:
+
+```sh
+mac-sync manifest list
+mac-sync manifest configured
+mac-sync manifest dynamic
+mac-sync manifest source
+```
 
 At runtime, `mac-sync` also scans safe top-level dotfiles in `$HOME` and follows
 safe `$HOME`, `${HOME}`, and `~` references it finds. This keeps sourced files
@@ -287,6 +340,13 @@ generated per-machine lists are persisted to:
 
 That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
 lists, plus a generated `Brewfile` for browsing or reuse.
+
+VS Code extension state is captured during sync when `code` is available. The
+generated per-machine manifest is persisted to:
+
+```text
+~/github/dot-files/machines/<machine-name>/editor/vscode-extensions.txt
+```
 
 Git repositories under `~/github`, including nested paths such as
 `xyzzy.tools/fixdecoder_rs`, are captured during sync when they have at least
@@ -329,13 +389,16 @@ Environment overrides:
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
 - `MAC_SYNC_HOMEBREW=0`: disable Homebrew package snapshotting and restore
   command suggestions
+- `MAC_SYNC_VSCODE_EXTENSIONS=0`: disable VS Code extension snapshotting and
+  restore command suggestions
 - `MAC_SYNC_GITHUB_ROOT`: local GitHub clone root, defaulting to `~/github`
 - `MAC_SYNC_GITHUB_REPOS=0`: disable GitHub repository snapshotting and restore
   cloning
 - `MAC_SYNC_SECRETS=0`: disable encrypted secret snapshotting and restore hints
-- `MAC_SYNC_MANIFEST_SOURCE`: choose `auto`, `dot-files`, or `config`.
-  The default `auto` uses `make print-mac-sync-paths` from the `dot-files`
-  repo when available, then falls back to `config/sync-paths.txt`.
+- `MAC_SYNC_MANIFEST_SOURCE`: choose `config`, `auto`, or `dot-files`.
+  The default `config` uses `config/sync-paths.txt`. The `dot-files`
+  option is retained only for older dot-files checkouts that still expose
+  `make print-mac-sync-paths`.
 - `MAC_SYNC_SELF_UPDATE=0`: disable the remote self-update check during
   `sync` and `secrets sync`
 - `MAC_SYNC_SELF_UPDATE_MODE=exit`: install an updated command and exit instead

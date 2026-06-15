@@ -5,9 +5,10 @@ This workflow describes how to download, configure, install, sync, and restore
 
 `mac-sync` uses two repositories:
 
-- `~/github/mac-sync`: command, configuration, tests, and documentation
+- `~/github/mac-sync`: command, backup/restore configuration, tests, and documentation
 - `~/github/dot-files`: per-machine snapshots under `machines/<machine-name>/`
-  including dotfiles, Homebrew state, and GitHub clone inventory
+  including dotfiles, Homebrew state, VS Code extension state, encrypted secrets,
+  and GitHub clone inventory
 
 ## End-to-End Flow
 
@@ -18,14 +19,14 @@ flowchart TD
   A["Start on a Mac"] --> B["Install prerequisites<br/>brew install age gnu-tar"]
   B --> C["Clone mac-sync<br/>git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync"]
   B --> D["Clone dot-files<br/>git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files"]
-  C --> E["Review sync paths<br/>make -C ~/github/dot-files print-mac-sync-paths"]
+  C --> E["Review sync paths<br/>mac-sync manifest configured"]
   D --> E
   E --> F["Install mac-sync LaunchAgent<br/>cd ~/github/mac-sync<br/>./bin/mac-sync install"]
   F --> G{"Existing machine snapshot?<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"}
   G -- "No" --> H["Run initial sync<br/>mac-sync sync"]
   G -- "Yes" --> I["Preview restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
   I --> J["Restore selected machine snapshot<br/>mac-sync restore --select"]
-  J --> K["Apply printed Homebrew commands if needed<br/>brew install ..."]
+  J --> K["Apply packages/editor state if needed<br/>mac-sync packages install ...<br/>mac-sync editor install ..."]
   J --> L["Restore encrypted secrets if needed<br/>mac-sync secrets restore --from old-mbp"]
   H --> M["Check hourly automation<br/>mac-sync status"]
   K --> M
@@ -61,18 +62,14 @@ MAC_SYNC_MACHINES_REPO=/path/to/dot-files
 
 ## Configure
 
-Review the tracked configuration before the first sync. The preferred regular
-path list comes from `~/github/dot-files`:
+Review the tracked configuration before the first sync. The regular path list
+lives in the `mac-sync` repo:
 
 ```sh
-make -C ~/github/dot-files print-mac-sync-paths
+mac-sync manifest configured
 ```
 
-`mac-sync` uses that Makefile target automatically when it exists. It falls back
-to `~/github/mac-sync/config/sync-paths.txt` when the target is unavailable, or
-when `MAC_SYNC_MANIFEST_SOURCE=config` is set.
-
-- `config/sync-paths.txt`: fallback regular dotfiles and directories to copy
+- `config/sync-paths.txt`: regular dotfiles and directories to copy
 - `excludes.txt`: `rsync` exclude patterns used during dotfile sync
 - `secret-paths.txt`: sensitive paths encrypted into the secrets archive
 - `age-recipients.txt`: public `age` recipients trusted to decrypt secrets
@@ -130,13 +127,14 @@ During sync, `mac-sync`:
 3. Clones the remote to a temporary directory when the local checkout is stale
    or dirty, then restarts with the updated installed command.
 4. Pulls the local `mac-sync` repo when it is clean.
-5. Pulls the `dot-files` repo when it is clean.
+5. Pulls the `dot-files` snapshot repo when it is clean.
 6. Copies configured paths from `$HOME` into the machine snapshot.
 7. Discovers safe referenced dotfiles and persists dynamic paths.
 8. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
-9. Captures GitHub repos below `~/github` that have GitHub remotes.
-10. Updates an encrypted secrets snapshot when recipients and tools exist.
-11. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
+9. Captures VS Code extensions when the `code` CLI is available.
+10. Captures GitHub repos below `~/github` that have GitHub remotes.
+11. Updates an encrypted secrets snapshot when recipients and tools exist.
+12. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -159,10 +157,11 @@ sequenceDiagram
   CLI->>CLI: install ~/bin/mac-sync and exec when changed
   CLI->>Code: git -C ~/github/mac-sync pull --ff-only
   CLI->>Snap: git -C ~/github/dot-files pull --ff-only
-  CLI->>Snap: make -C ~/github/dot-files print-mac-sync-paths
-  CLI->>Home: read configured and discovered paths
+  CLI->>Code: read config/sync-paths.txt
+  CLI->>Home: discover dynamic referenced paths
   CLI->>Snap: rsync into machines/machine-name/home
   CLI->>Snap: brew list and write homebrew snapshot
+  CLI->>Snap: code --list-extensions and write editor snapshot
   CLI->>Home: inspect git repos under ~/github
   CLI->>Snap: write github-repositories/repositories.txt
   CLI->>Snap: age -R config/age-recipients.txt when enabled
@@ -246,11 +245,11 @@ Use `--force` only when the snapshot should win over newer local files:
 mac-sync restore --from old-mbp --force
 ```
 
-Restore copies regular dotfiles and prints Homebrew commands when the selected
-machine snapshot differs from the current Mac. It does not run the Homebrew
-commands for you. It also clones missing GitHub repos from the selected
-machine's `github-repositories/repositories.txt` into `~/github`, skipping
-targets that already exist.
+Restore copies regular dotfiles and prints Homebrew and VS Code commands when
+the selected machine snapshot differs from the current Mac. It does not run
+those package/editor commands for you. It also clones missing GitHub repos from
+the selected machine's `github-repositories/repositories.txt` into `~/github`,
+skipping targets that already exist.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -261,10 +260,10 @@ flowchart TD
   C -- "No" --> D["Adjust config or source machine<br/>vim ~/github/mac-sync/config/sync-paths.txt"]
   D --> B
   C -- "Yes" --> E["Run restore<br/>mac-sync restore --select"]
-  E --> F{"Homebrew differences?"}
-  F -- "Yes" --> G["Review printed brew commands<br/>mac-sync restore --from old-mbp"]
-  F -- "No" --> H["Skip Homebrew changes"]
-  G --> I["Run desired brew commands manually<br/>brew install ..."]
+  E --> F{"Package/editor differences?"}
+  F -- "Yes" --> G["Review printed commands<br/>mac-sync restore --from old-mbp"]
+  F -- "No" --> H["Skip package/editor changes"]
+  G --> I["Run desired commands<br/>mac-sync packages install ...<br/>mac-sync editor install ..."]
   E --> R{"Missing GitHub repos?"}
   R -- "Yes" --> S["Clone into ~/github"]
   R -- "No" --> T["Skip existing repos"]
@@ -328,13 +327,16 @@ For a replacement Mac, the usual order is:
 4. Run `mac-sync restore --list-machines` and pick the old Mac snapshot.
 5. Run `MAC_SYNC_DRY_RUN=1 mac-sync restore --from <old-machine>`.
 6. Run `mac-sync restore --from <old-machine>`.
-7. Run any printed Homebrew commands you actually want.
-8. Run `mac-sync secrets init` to add this Mac as a trusted recipient.
-9. Run `mac-sync secrets restore --from <old-machine>` if needed.
-10. Re-run `mac-sync restore --from <old-machine>` if private repo cloning
+7. Run `mac-sync packages install --from <old-machine>` if you want the old
+   Homebrew state.
+8. Run `mac-sync editor install --from <old-machine>` if you want the old VS
+   Code extension state.
+9. Run `mac-sync secrets init` to add this Mac as a trusted recipient.
+10. Run `mac-sync secrets restore --from <old-machine>` if needed.
+11. Re-run `mac-sync restore --from <old-machine>` if private repo cloning
     needed secrets that were restored in the previous step.
-11. Run `mac-sync sync` to create this Mac's own snapshot.
-12. Confirm with `mac-sync status`.
+12. Run `mac-sync sync` to create this Mac's own snapshot.
+13. Confirm with `mac-sync status`.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -343,10 +345,12 @@ flowchart LR
   Old["Old Mac snapshot<br/>mac-sync sync"] --> Dot["dot-files repo<br/>git clone ... ~/github/dot-files"]
   Dot --> New["New Mac restore<br/>mac-sync restore --from old-mbp"]
   New --> Repos["Missing GitHub repos<br/>git clone into ~/github"]
-  New --> Brew["Manual Homebrew commands<br/>brew install ..."]
+  New --> Brew["Optional package restore<br/>mac-sync packages install ..."]
+  New --> Editor["Optional editor restore<br/>mac-sync editor install ..."]
   New --> Secrets["Optional secrets restore<br/>mac-sync secrets restore --from old-mbp"]
   Repos --> Sync["New Mac sync<br/>mac-sync sync"]
   Brew --> Sync["New Mac sync<br/>mac-sync sync"]
+  Editor --> Sync["New Mac sync<br/>mac-sync sync"]
   Secrets --> Sync
   Sync --> Dot
 ```
@@ -363,6 +367,11 @@ mac-sync list
 mac-sync status
 mac-sync sync
 mac-sync restore --from <machine>
+mac-sync packages diff --from <machine>
+mac-sync packages install --from <machine>
+mac-sync editor diff --from <machine>
+mac-sync editor install --from <machine>
+mac-sync manifest list
 mac-sync secrets list --from <machine>
 mac-sync secrets restore --from <machine>
 mac-sync uninstall

@@ -45,7 +45,7 @@ run_mac_sync() {
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-auto}" \
+    MAC_SYNC_MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-config}" \
     MAC_SYNC_SELF_UPDATE=0 \
     PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH" \
     SCRIPT_COLOUR=off \
@@ -59,7 +59,7 @@ run_mac_sync() {
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-auto}" \
+    MAC_SYNC_MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-config}" \
     MAC_SYNC_SELF_UPDATE=0 \
     PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH" \
     SCRIPT_COLOUR=off \
@@ -97,12 +97,6 @@ print-mac-sync-paths:
 EOF
 
 run_mac_sync list
-assert_stdout_contains "manifest source: dot-files"
-assert_stdout_contains "$TEST_HOME/.profile -> $TEST_MACHINES_REPO/machines/target/home/.profile"
-assert_stdout_contains "$TEST_HOME/.config/tool -> $TEST_MACHINES_REPO/machines/target/home/.config/tool"
-assert_stdout_lacks "$TEST_HOME/.bashrc ->"
-
-MAC_SYNC_MANIFEST_SOURCE=config run_mac_sync list
 assert_stdout_contains "manifest source: config"
 assert_stdout_contains "$TEST_HOME/.bashrc -> $TEST_MACHINES_REPO/machines/target/home/.bashrc"
 assert_stdout_lacks "$TEST_HOME/.profile ->"
@@ -110,3 +104,14 @@ assert_stdout_lacks "$TEST_HOME/.profile ->"
 MAC_SYNC_MANIFEST_SOURCE=dot-files run_mac_sync list
 assert_stdout_contains "manifest source: dot-files"
 assert_stdout_contains "$TEST_HOME/.profile -> $TEST_MACHINES_REPO/machines/target/home/.profile"
+assert_stdout_contains "$TEST_HOME/.config/tool -> $TEST_MACHINES_REPO/machines/target/home/.config/tool"
+assert_stdout_lacks "$TEST_HOME/.bashrc ->"
+
+run_mac_sync manifest source
+assert_stdout_contains "config"
+
+run_mac_sync manifest configured
+assert_stdout_contains ".bashrc"
+
+MAC_SYNC_MANIFEST_SOURCE=dot-files run_mac_sync manifest configured
+assert_stdout_contains ".profile"

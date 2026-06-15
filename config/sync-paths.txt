@@ -1,6 +1,7 @@
 # Paths are relative to $HOME unless they start with /.
 # Keep this list explicit so secrets and machine-generated state do not drift in.
 .agents
+.aliases
 .ansible.cfg
 .aws/config
 .bash_profile
@@ -9,10 +10,12 @@
 .codex/AGENTS.md
 .codex/config.toml
 .colima/ssh_config
+.functions
 .gitconfig
 .gnupg/common.conf
 .p10k.zsh
 .profile
+.shellenv
 .ssh/config
 .tmux.conf
 .vscode/argv.json
@@ -20,6 +23,8 @@
 .warp/.mcp.json
 .warp/tab_configs/startup_config.toml
 .zprofile
+.zsh/zsh-autosuggestions
+.zsh/zsh-syntax-highlighting
 .zshenv
 .zshrc
 Library/Application Support/Code/User/keybindings.json

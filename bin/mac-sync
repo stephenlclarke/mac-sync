@@ -34,6 +34,9 @@
 #   restore [--from <machine>|--select] [--force]
 #               Restore another machine snapshot back into $HOME
 #   secrets     Manage encrypted secret snapshots with age and Keychain
+#   packages    Manage Homebrew package snapshots and restore commands
+#   editor      Manage VS Code extension snapshots and restore commands
+#   manifest    Show configured and discovered backup paths
 #   list        Show configured source paths and repo destinations
 #   paths       Alias for list
 #   status      Show install, repo, LaunchAgent, git, and last-sync state
@@ -54,11 +57,13 @@
 #   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
+#   MAC_SYNC_VSCODE_EXTENSIONS
+#                          Set to 0 to disable VS Code extension snapshots
 #   MAC_SYNC_GITHUB_ROOT   Directory containing local GitHub clones. Default: $HOME/github
 #   MAC_SYNC_GITHUB_REPOS  Set to 0 to disable GitHub repository snapshots
 #   MAC_SYNC_SECRETS       Set to 0 to disable encrypted secret snapshots
 #   MAC_SYNC_MANIFEST_SOURCE
-#                          auto, dot-files, or config. Default: auto
+#                          config, auto, or dot-files. Default: config
 #   MAC_SYNC_SELF_UPDATE   Set to 0 to disable remote self-update checks
 #   MAC_SYNC_SELF_UPDATE_MODE
 #                          restart or exit. Default: restart
@@ -78,6 +83,8 @@
 #   mac-sync sync
 #   mac-sync restore --from old-mbp
 #   mac-sync secrets init
+#   mac-sync packages diff --from old-mbp
+#   mac-sync editor install --from old-mbp
 #   mac-sync secrets list --from old-mbp
 #   mac-sync help restore
 #   mac-sync help secrets
@@ -110,14 +117,16 @@ readonly LAUNCH_AGENT_PATH="${MAC_SYNC_LAUNCH_AGENT_PATH:-${HOME_DIR}/bin:/opt/h
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
+readonly VSCODE_EXTENSIONS_SYNC="${MAC_SYNC_VSCODE_EXTENSIONS:-1}"
 readonly GITHUB_ROOT_DIR="${MAC_SYNC_GITHUB_ROOT:-${HOME_DIR}/github}"
 readonly GITHUB_REPOS_SYNC="${MAC_SYNC_GITHUB_REPOS:-1}"
 readonly SECRETS_SYNC="${MAC_SYNC_SECRETS:-1}"
-readonly MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-auto}"
+readonly MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-config}"
 readonly SELF_UPDATE="${MAC_SYNC_SELF_UPDATE:-1}"
 readonly SELF_UPDATE_MODE="${MAC_SYNC_SELF_UPDATE_MODE:-restart}"
 readonly SELF_UPDATE_REMOTE="${MAC_SYNC_SELF_UPDATE_REMOTE:-}"
 readonly SELF_UPDATE_REF="${MAC_SYNC_SELF_UPDATE_REF:-main}"
+readonly HOMEBREW_BUNDLE_INSTALL_FLAGS="${MAC_SYNC_BREW_BUNDLE_INSTALL_FLAGS:-${BREW_BUNDLE_INSTALL_FLAGS:-}}"
 readonly PATHS_FILE="${MAC_SYNC_PATHS_FILE:-${REPO_DIR}/config/sync-paths.txt}"
 readonly EXCLUDES_FILE="${MAC_SYNC_EXCLUDES_FILE:-${REPO_DIR}/config/excludes.txt}"
 readonly SECRET_PATHS_FILE="${MAC_SYNC_SECRET_PATHS_FILE:-${REPO_DIR}/config/secret-paths.txt}"
@@ -220,7 +229,7 @@ BEHAVIOR:
   Missing real GitHub repositories from the selected snapshot are cloned back
   into the configured GitHub root without overwriting existing paths.
   Newer local files are kept unless --force is used.
-  Homebrew differences are printed as manual brew commands.
+  Homebrew and VS Code extension differences are printed as manual commands.
   Encrypted secrets are not restored automatically; restore prints the secrets
   commands when an encrypted snapshot exists.
 
@@ -270,6 +279,81 @@ EOF
 }
 
 
+# Print command-specific Homebrew package usage.
+usage_packages() {
+  cat <<EOF
+USAGE:
+  $SCRIPT_NAME packages <command>
+
+COMMANDS:
+  sync       Update this Mac's Homebrew snapshot and push machine state
+  diff       Print Homebrew commands needed to match a machine snapshot
+  install    Run brew bundle from a machine snapshot
+  list       Show the Homebrew snapshot files for a machine
+  help       Show this help text
+
+OPTIONS:
+  diff --from <machine>
+  install --from <machine> [--formulae-only] [--admin-user <user>]
+  list --from <machine>
+
+EXAMPLES:
+  $SCRIPT_NAME packages sync
+  $SCRIPT_NAME packages diff --from old-mbp
+  $SCRIPT_NAME packages install --from old-mbp
+  $SCRIPT_NAME packages install --from old-mbp --formulae-only
+  $SCRIPT_NAME packages install --from old-mbp --admin-user adm-sclarke
+EOF
+}
+
+
+# Print command-specific VS Code extension usage.
+usage_editor() {
+  cat <<EOF
+USAGE:
+  $SCRIPT_NAME editor <command>
+
+COMMANDS:
+  sync       Update this Mac's VS Code extension snapshot and push machine state
+  diff       Print VS Code extension changes needed to match a machine snapshot
+  install    Reconcile VS Code extensions to a machine snapshot
+  list       Show the VS Code extension snapshot for a machine
+  help       Show this help text
+
+OPTIONS:
+  diff --from <machine>
+  install --from <machine>
+  list --from <machine>
+
+EXAMPLES:
+  $SCRIPT_NAME editor sync
+  $SCRIPT_NAME editor diff --from old-mbp
+  $SCRIPT_NAME editor install --from old-mbp
+EOF
+}
+
+
+# Print command-specific manifest usage.
+usage_manifest() {
+  cat <<EOF
+USAGE:
+  $SCRIPT_NAME manifest <command>
+
+COMMANDS:
+  list        Print the full backup manifest, including dynamic paths
+  configured  Print only the configured backup manifest
+  dynamic     Print only dynamically discovered backup paths
+  source      Print the active configured manifest source
+  help        Show this help text
+
+EXAMPLES:
+  $SCRIPT_NAME manifest list
+  $SCRIPT_NAME manifest configured
+  $SCRIPT_NAME manifest source
+EOF
+}
+
+
 # Dispatch top-level and command-specific help.
 cmd_help() {
   local topic="${1:-}"
@@ -289,6 +373,15 @@ cmd_help() {
       ;;
     secrets)
       usage_secrets
+      ;;
+    packages)
+      usage_packages
+      ;;
+    editor)
+      usage_editor
+      ;;
+    manifest)
+      usage_manifest
       ;;
     help|-h|--help)
       usage
@@ -580,6 +673,8 @@ readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
 readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
 readonly DYNAMIC_PATHS_FILE="${MACHINE_DIR}/dynamic-sync-paths.txt"
 readonly HOMEBREW_DIR="${MACHINE_DIR}/homebrew"
+readonly EDITOR_DIR="${MACHINE_DIR}/editor"
+readonly VSCODE_EXTENSIONS_FILE="${EDITOR_DIR}/vscode-extensions.txt"
 readonly GITHUB_REPOS_DIR="${MACHINE_DIR}/github-repositories"
 readonly GITHUB_REPOS_FILE="${GITHUB_REPOS_DIR}/repositories.txt"
 readonly SECRETS_DIR="${MACHINE_DIR}/secrets"
@@ -931,6 +1026,19 @@ dynamic_refs_enabled() {
 # Return true when Homebrew package snapshotting is enabled.
 homebrew_sync_enabled() {
   case "$HOMEBREW_SYNC" in
+    0|off|OFF|false|FALSE)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+
+# Return true when VS Code extension snapshotting is enabled.
+vscode_extensions_sync_enabled() {
+  case "$VSCODE_EXTENSIONS_SYNC" in
     0|off|OFF|false|FALSE)
       return 1
       ;;
@@ -1908,6 +2016,298 @@ print_homebrew_restore_commands() {
 }
 
 
+# Write a Brewfile for installing from a machine Homebrew snapshot.
+write_homebrew_install_brewfile() {
+  local homebrew_dir="$1"
+  local target_file="$2"
+  local formulae_only="$3"
+  local line
+
+  {
+    printf '%s\n' '# Generated by mac-sync for restore.'
+    while IFS= read -r line; do
+      printf 'tap "%s"\n' "$(brewfile_quote "$line")"
+    done < <(homebrew_list_file_lines "${homebrew_dir}/taps.txt")
+    while IFS= read -r line; do
+      printf 'brew "%s"\n' "$(brewfile_quote "$line")"
+    done < <(homebrew_list_file_lines "${homebrew_dir}/formulae.txt")
+    if [[ "$formulae_only" != "1" ]]; then
+      while IFS= read -r line; do
+        printf 'cask "%s"\n' "$(brewfile_quote "$line")"
+      done < <(homebrew_list_file_lines "${homebrew_dir}/casks.txt")
+    fi
+  } >"$target_file"
+}
+
+
+# Run brew bundle, optionally through a separate admin account.
+run_brew_bundle_file() {
+  local brewfile="$1"
+  local admin_user="$2"
+  local brew_path
+  local command_line
+  local tmp_brewfile
+
+  if [[ -n "$admin_user" ]]; then
+    brew_path="$(command -v brew)"
+    tmp_brewfile="$(mktemp "${TMPDIR:-/tmp}/mac-sync-Brewfile-admin.XXXXXX")"
+    cp "$brewfile" "$tmp_brewfile"
+    chmod 644 "$tmp_brewfile"
+    command_line="$(shell_quote "$brew_path") bundle install --file=$(shell_quote "$tmp_brewfile") ${HOMEBREW_BUNDLE_INSTALL_FLAGS}"
+    info "running brew bundle as admin user $admin_user"
+    if ! /usr/bin/su -l "$admin_user" -c "$command_line"; then
+      rm -f "$tmp_brewfile"
+      return 1
+    fi
+    rm -f "$tmp_brewfile"
+    return 0
+  fi
+
+  brew bundle install --file="$brewfile" $HOMEBREW_BUNDLE_INSTALL_FLAGS
+}
+
+
+# Return true when a Brewfile includes non-font casks that may need admin rights.
+brewfile_has_admin_casks() {
+  local brewfile="$1"
+
+  awk '/^cask "[^"]+"/ && $2 !~ /^"font-/ { found = 1 } END { exit found ? 0 : 1 }' "$brewfile"
+}
+
+
+# Return true when the current user is in the macOS admin group.
+current_user_is_admin() {
+  id -Gn | tr ' ' '\n' | grep -qx admin
+}
+
+
+# Install Homebrew packages from a machine snapshot.
+install_homebrew_snapshot() {
+  local machine="$1"
+  local formulae_only="$2"
+  local admin_user="$3"
+  local homebrew_dir
+  local tmp_brewfile
+
+  homebrew_dir="$(homebrew_dir_for "$machine")"
+  if [[ ! -d "$homebrew_dir" ]]; then
+    error "missing Homebrew snapshot: $homebrew_dir"
+    exit 1
+  fi
+
+  if ! command -v brew >/dev/null 2>&1; then
+    error "missing dependency: brew"
+    exit 1
+  fi
+
+  tmp_brewfile="$(mktemp "${TMPDIR:-/tmp}/mac-sync-Brewfile.XXXXXX")"
+  trap 'rm -f "$tmp_brewfile"' RETURN
+  write_homebrew_install_brewfile "$homebrew_dir" "$tmp_brewfile" "$formulae_only"
+
+  if [[ "$formulae_only" != "1" && -z "$admin_user" ]] \
+    && ! current_user_is_admin \
+    && brewfile_has_admin_casks "$tmp_brewfile"; then
+    error "Homebrew snapshot contains application or system casks, but $(id -un) is not in the macOS admin group."
+    error "Re-run with --admin-user <admin-account>, run from an admin account, or use --formulae-only."
+    exit 1
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    info "would run brew bundle install from: $homebrew_dir"
+    return 0
+  fi
+
+  run_brew_bundle_file "$tmp_brewfile" "$admin_user"
+  rm -f "$tmp_brewfile"
+  trap - RETURN
+}
+
+
+# Print the Homebrew snapshot files for a machine.
+list_homebrew_snapshot() {
+  local machine="$1"
+  local homebrew_dir
+  local file
+
+  homebrew_dir="$(homebrew_dir_for "$machine")"
+  if [[ ! -d "$homebrew_dir" ]]; then
+    error "missing Homebrew snapshot: $homebrew_dir"
+    exit 1
+  fi
+
+  for file in taps.txt formulae.txt casks.txt Brewfile; do
+    if [[ -f "$homebrew_dir/$file" ]]; then
+      info "${homebrew_dir}/${file}"
+      sed 's/^/  /' "$homebrew_dir/$file"
+    fi
+  done
+}
+
+
+# Return the VS Code extension snapshot path for a machine.
+vscode_extensions_file_for() {
+  local machine="$1"
+
+  printf '%s/%s/editor/vscode-extensions.txt\n' "$MACHINES_ROOT_DIR" "$machine"
+}
+
+
+# Print the current local VS Code extensions with versions.
+current_vscode_extensions() {
+  command -v code >/dev/null 2>&1 || return 0
+  code --list-extensions --show-versions | awk 'NF' | LC_ALL=C sort -u
+}
+
+
+# Write the current VS Code extension snapshot for this machine.
+write_vscode_extensions_snapshot() {
+  mkdir -p "$EDITOR_DIR"
+  {
+    printf '%s\n' '# Generated by mac-sync. Do not edit.'
+    printf '%s\n' '# Installed VS Code extensions with versions.'
+    current_vscode_extensions
+  } >"$VSCODE_EXTENSIONS_FILE"
+}
+
+
+# Sync the local VS Code extension state into the machine snapshot.
+sync_vscode_extensions() {
+  vscode_extensions_sync_enabled || return 0
+
+  if ! command -v code >/dev/null 2>&1; then
+    warning "VS Code CLI not found; skipping VS Code extension snapshot"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    progress_pending "would update VS Code extension snapshot: $VSCODE_EXTENSIONS_FILE"
+    return 0
+  fi
+
+  if ! run_with_spinner "updating VS Code extension snapshot" write_vscode_extensions_snapshot; then
+    print_progress_command_output
+    return 1
+  fi
+  progress_done "updated VS Code extension snapshot: $VSCODE_EXTENSIONS_FILE"
+}
+
+
+# Print non-comment extension lines from a VS Code snapshot.
+vscode_extension_file_lines() {
+  local file="$1"
+  local line
+
+  [[ -f "$file" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done <"$file"
+}
+
+
+# Write desired/current VS Code extension comparisons to a temp directory.
+write_vscode_extension_diff_files() {
+  local snapshot_file="$1"
+  local tmp_dir="$2"
+
+  vscode_extension_file_lines "$snapshot_file" | LC_ALL=C sort -u >"$tmp_dir/desired"
+  current_vscode_extensions >"$tmp_dir/current"
+  comm -23 "$tmp_dir/desired" "$tmp_dir/current" >"$tmp_dir/install"
+  comm -23 "$tmp_dir/current" "$tmp_dir/desired" >"$tmp_dir/remove"
+}
+
+
+# Print VS Code extension commands needed to match a machine snapshot.
+print_vscode_extension_restore_commands() {
+  local machine="$1"
+  local snapshot_file
+  local tmp_dir
+  local ext
+  local ext_id
+  local printed=0
+
+  vscode_extensions_sync_enabled || return 0
+
+  snapshot_file="$(vscode_extensions_file_for "$machine")"
+  [[ -f "$snapshot_file" ]] || return 0
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-vscode.XXXXXX")"
+  write_vscode_extension_diff_files "$snapshot_file" "$tmp_dir"
+
+  if [[ ! -s "$tmp_dir/install" && ! -s "$tmp_dir/remove" ]]; then
+    rm -rf "$tmp_dir"
+    return 0
+  fi
+
+  printf '\n'
+  info "VS Code extensions differ from the ${machine} snapshot."
+  info "Run these commands manually:"
+  while IFS= read -r ext || [[ -n "$ext" ]]; do
+    [[ -n "$ext" ]] || continue
+    ext_id="${ext%@*}"
+    info "  code --uninstall-extension $(shell_quote "$ext_id")"
+    printed=1
+  done <"$tmp_dir/remove"
+  while IFS= read -r ext || [[ -n "$ext" ]]; do
+    [[ -n "$ext" ]] || continue
+    info "  code --install-extension $(shell_quote "$ext")"
+    printed=1
+  done <"$tmp_dir/install"
+
+  rm -rf "$tmp_dir"
+  [[ "$printed" = "1" ]]
+}
+
+
+# Reconcile local VS Code extensions to a machine snapshot.
+install_vscode_extensions_snapshot() {
+  local machine="$1"
+  local snapshot_file
+  local tmp_dir
+  local ext
+  local ext_id
+
+  snapshot_file="$(vscode_extensions_file_for "$machine")"
+  if [[ ! -f "$snapshot_file" ]]; then
+    error "missing VS Code extension snapshot: $snapshot_file"
+    exit 1
+  fi
+
+  if ! command -v code >/dev/null 2>&1; then
+    error "missing dependency: code"
+    exit 1
+  fi
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-vscode-install.XXXXXX")"
+  trap 'rm -rf "$tmp_dir"' RETURN
+  write_vscode_extension_diff_files "$snapshot_file" "$tmp_dir"
+
+  while IFS= read -r ext || [[ -n "$ext" ]]; do
+    [[ -n "$ext" ]] || continue
+    ext_id="${ext%@*}"
+    info "remove VS Code extension $ext_id"
+    if [[ "$DRY_RUN" != "1" ]]; then
+      code --uninstall-extension "$ext_id" >/dev/null
+    fi
+  done <"$tmp_dir/remove"
+
+  while IFS= read -r ext || [[ -n "$ext" ]]; do
+    [[ -n "$ext" ]] || continue
+    info "install VS Code extension $ext"
+    if [[ "$DRY_RUN" != "1" ]]; then
+      code --install-extension "$ext" >/dev/null
+    fi
+  done <"$tmp_dir/install"
+
+  info "applied VS Code extensions from $snapshot_file"
+  rm -rf "$tmp_dir"
+  trap - RETURN
+}
 # Return the GitHub repository manifest file for a machine.
 github_repositories_file_for() {
   local machine="$1"
@@ -2958,6 +3358,379 @@ cmd_secrets() {
 }
 
 
+# Resolve and validate a machine snapshot name.
+resolve_requested_machine() {
+  local requested="$1"
+  local resolved
+
+  safe_machine_name "$requested" || {
+    error "invalid machine name: $requested"
+    exit 2
+  }
+
+  if ! resolved="$(resolve_machine_snapshot_name "$requested")"; then
+    machine_snapshot_suggestion_lines >&2
+    error "missing machine snapshot: ${MACHINES_ROOT_DIR}/${requested}"
+    exit 1
+  fi
+
+  printf '%s\n' "$resolved"
+}
+
+
+# Sync Homebrew packages and push the machine snapshot.
+cmd_packages_sync() {
+  check_runtime
+  acquire_lock
+  trap 'release_lock' EXIT INT TERM
+
+  self_update_from_remote_or_warn
+  pull_repo_if_safe
+  pull_machines_repo_if_safe
+  sync_homebrew_packages
+  if [[ "$DRY_RUN" != "1" ]]; then
+    write_machine_metadata
+  fi
+  commit_and_push
+
+  release_lock
+  trap - EXIT INT TERM
+}
+
+
+# Print Homebrew differences for a machine snapshot.
+cmd_packages_diff() {
+  local from_machine="$MACHINE_NAME"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown packages diff option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  print_homebrew_restore_commands "$from_machine"
+}
+
+
+# Install Homebrew packages from a machine snapshot.
+cmd_packages_install() {
+  local admin_user=""
+  local formulae_only=0
+  local from_machine="$MACHINE_NAME"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      --formulae-only)
+        formulae_only=1
+        shift
+        ;;
+      --admin-user)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing user after --admin-user"
+          exit 2
+        fi
+        admin_user="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown packages install option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  install_homebrew_snapshot "$from_machine" "$formulae_only" "$admin_user"
+}
+
+
+# List Homebrew snapshot files for a machine.
+cmd_packages_list() {
+  local from_machine="$MACHINE_NAME"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown packages list option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  list_homebrew_snapshot "$from_machine"
+}
+
+
+# Dispatch Homebrew package subcommands.
+cmd_packages() {
+  local command="${1:-help}"
+
+  case "$command" in
+    sync)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "packages sync does not accept options"
+        exit 2
+      fi
+      cmd_packages_sync
+      ;;
+    diff)
+      shift || true
+      cmd_packages_diff "$@"
+      ;;
+    install)
+      shift || true
+      cmd_packages_install "$@"
+      ;;
+    list)
+      shift || true
+      cmd_packages_list "$@"
+      ;;
+    help|-h|--help)
+      usage_packages
+      ;;
+    *)
+      error "unknown packages command: $command"
+      exit 2
+      ;;
+  esac
+}
+
+
+# Sync VS Code extensions and push the machine snapshot.
+cmd_editor_sync() {
+  check_runtime
+  acquire_lock
+  trap 'release_lock' EXIT INT TERM
+
+  self_update_from_remote_or_warn
+  pull_repo_if_safe
+  pull_machines_repo_if_safe
+  sync_vscode_extensions
+  if [[ "$DRY_RUN" != "1" ]]; then
+    write_machine_metadata
+  fi
+  commit_and_push
+
+  release_lock
+  trap - EXIT INT TERM
+}
+
+
+# Print VS Code extension differences for a machine snapshot.
+cmd_editor_diff() {
+  local from_machine="$MACHINE_NAME"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown editor diff option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  print_vscode_extension_restore_commands "$from_machine"
+}
+
+
+# Reconcile VS Code extensions from a machine snapshot.
+cmd_editor_install() {
+  local from_machine="$MACHINE_NAME"
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown editor install option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  install_vscode_extensions_snapshot "$from_machine"
+}
+
+
+# List the VS Code extension snapshot for a machine.
+cmd_editor_list() {
+  local from_machine="$MACHINE_NAME"
+  local snapshot_file
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --from)
+        if [[ "$#" -lt 2 ]]; then
+          error "missing machine name after --from"
+          exit 2
+        fi
+        from_machine="$2"
+        shift 2
+        ;;
+      *)
+        error "unknown editor list option: $1"
+        exit 2
+        ;;
+    esac
+  done
+
+  check_runtime
+  pull_machines_repo_if_safe
+  from_machine="$(resolve_requested_machine "$from_machine")"
+  snapshot_file="$(vscode_extensions_file_for "$from_machine")"
+  if [[ ! -f "$snapshot_file" ]]; then
+    error "missing VS Code extension snapshot: $snapshot_file"
+    exit 1
+  fi
+  info "$snapshot_file"
+  sed 's/^/  /' "$snapshot_file"
+}
+
+
+# Dispatch VS Code editor subcommands.
+cmd_editor() {
+  local command="${1:-help}"
+
+  case "$command" in
+    sync)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "editor sync does not accept options"
+        exit 2
+      fi
+      cmd_editor_sync
+      ;;
+    diff)
+      shift || true
+      cmd_editor_diff "$@"
+      ;;
+    install)
+      shift || true
+      cmd_editor_install "$@"
+      ;;
+    list)
+      shift || true
+      cmd_editor_list "$@"
+      ;;
+    help|-h|--help)
+      usage_editor
+      ;;
+    *)
+      error "unknown editor command: $command"
+      exit 2
+      ;;
+  esac
+}
+
+
+# Dispatch manifest inspection subcommands.
+cmd_manifest() {
+  local command="${1:-list}"
+
+  case "$command" in
+    list)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "manifest list does not accept options"
+        exit 2
+      fi
+      check_runtime
+      manifest_paths
+      ;;
+    configured)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "manifest configured does not accept options"
+        exit 2
+      fi
+      check_runtime
+      configured_manifest_paths
+      ;;
+    dynamic)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "manifest dynamic does not accept options"
+        exit 2
+      fi
+      check_runtime
+      dynamic_manifest_paths
+      ;;
+    source)
+      shift || true
+      if [[ "$#" -gt 0 ]]; then
+        error "manifest source does not accept options"
+        exit 2
+      fi
+      check_runtime
+      configured_manifest_source_label
+      ;;
+    help|-h|--help)
+      usage_manifest
+      ;;
+    *)
+      error "unknown manifest command: $command"
+      exit 2
+      ;;
+  esac
+}
+
+
 # Print changed files reported by rsync for a directory sync.
 print_synced_directory_changes() {
   local src_root="$1"
@@ -3689,6 +4462,7 @@ cmd_sync() {
 
   prune_stale_dynamic_paths "$tmp_dynamic_extra" "$tmp_configured"
   sync_homebrew_packages
+  sync_vscode_extensions
   sync_github_repositories
   sync_secrets_archive auto
 
@@ -3804,6 +4578,7 @@ cmd_restore() {
   done < <(restore_manifest_paths "$from_machine")
 
   print_homebrew_restore_commands "$from_machine"
+  print_vscode_extension_restore_commands "$from_machine"
   restore_github_repositories "$from_machine"
   print_secrets_restore_hint "$from_machine"
 }
@@ -3823,6 +4598,7 @@ cmd_list() {
   info "manifest source: $(configured_manifest_source_label)"
   info "dynamic paths file: $DYNAMIC_PATHS_FILE"
   info "Homebrew snapshot dir: $HOMEBREW_DIR"
+  info "VS Code extension snapshot file: $VSCODE_EXTENSIONS_FILE"
   info "GitHub repo root: $GITHUB_ROOT_DIR"
   info "GitHub repo snapshot file: $GITHUB_REPOS_FILE"
   info "secret paths file: $SECRET_PATHS_FILE"
@@ -3837,6 +4613,11 @@ cmd_list() {
     info "Homebrew sync: enabled"
   else
     info "Homebrew sync: disabled"
+  fi
+  if vscode_extensions_sync_enabled; then
+    info "VS Code extension sync: enabled"
+  else
+    info "VS Code extension sync: disabled"
   fi
   if github_repos_sync_enabled; then
     info "GitHub repo sync: enabled"
@@ -4121,6 +4902,8 @@ cmd_status() {
   info "spinner command: $SPINNER_INSTALL_PATH"
   info "paths file: $PATHS_FILE"
   info "manifest source: $(configured_manifest_source_label)"
+  info "Homebrew snapshot dir: $HOMEBREW_DIR"
+  info "VS Code extension snapshot file: $VSCODE_EXTENSIONS_FILE"
   info "self-update remote: $(self_update_remote_url)"
   info "self-update ref: $SELF_UPDATE_REF"
   info "LaunchAgent: $LAUNCH_AGENT_PLIST"
@@ -4213,6 +4996,18 @@ main() {
     secrets)
       shift || true
       cmd_secrets "$@"
+      ;;
+    packages)
+      shift || true
+      cmd_packages "$@"
+      ;;
+    editor)
+      shift || true
+      cmd_editor "$@"
+      ;;
+    manifest)
+      shift || true
+      cmd_manifest "$@"
       ;;
     list|paths)
       cmd_list

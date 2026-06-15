@@ -12,6 +12,7 @@ HOMEBREW_TEST = tests/homebrew.sh
 SECRETS_TEST = tests/secrets.sh
 STATUS_TEST = tests/status.sh
 HELP_TEST = tests/help.sh
+EDITOR_TEST = tests/editor.sh
 SELF_UPDATE_TEST = tests/self-update.sh
 MANIFEST_TEST = tests/manifest.sh
 GITHUB_REPOSITORIES_TEST = tests/github-repositories.sh
@@ -32,6 +33,7 @@ check:
 	bash -n $(SECRETS_TEST)
 	bash -n $(STATUS_TEST)
 	bash -n $(HELP_TEST)
+	bash -n $(EDITOR_TEST)
 	bash -n $(SELF_UPDATE_TEST)
 	bash -n $(MANIFEST_TEST)
 	bash -n $(GITHUB_REPOSITORIES_TEST)
@@ -44,6 +46,8 @@ check:
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(SPINNER_TEST) $(CURDIR)/$(SPINNER)
 	bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(HELP_TEST) $(CURDIR)/$(SCRIPT)
+	bash $(EDITOR_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(EDITOR_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(RESTORE_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(HOMEBREW_TEST) $(CURDIR)/$(SCRIPT)
