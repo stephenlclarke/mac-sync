@@ -2070,9 +2070,25 @@ github_repo_has_parent_worktree() {
 }
 
 
+# Print candidate git worktree roots below the GitHub root, pruning inside repos.
+github_repository_candidate_dirs() {
+  local root="$1"
+  local child
+
+  [[ -d "$root" ]] || return 0
+
+  while IFS= read -r child; do
+    if [[ -e "${child}/.git" ]]; then
+      printf '%s\n' "$child"
+      continue
+    fi
+    github_repository_candidate_dirs "$child"
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d ! -name .git -print | LC_ALL=C sort)
+}
+
+
 # Print relative-path and clone-URL rows for real GitHub repos under the root.
 local_github_repository_lines() {
-  local git_marker
   local repo_dir
   local repo_rel
   local repo_real
@@ -2085,8 +2101,7 @@ local_github_repository_lines() {
   [[ -d "$GITHUB_ROOT_DIR" ]] || return 0
   root_real="$(realpath_existing "$GITHUB_ROOT_DIR")"
 
-  while IFS= read -r git_marker; do
-    repo_dir="$(dirname "$git_marker")"
+  while IFS= read -r repo_dir; do
     repo_real="$(realpath_existing "$repo_dir")"
     case "$repo_real" in
       "$root_real"/*)
@@ -2110,7 +2125,7 @@ local_github_repository_lines() {
 
     clone_url="$(github_remote_for_repo "$repo_dir")" || continue
     printf '%s\t%s\n' "$repo_rel" "$clone_url"
-  done < <(find "$GITHUB_ROOT_DIR" -mindepth 2 -name .git -print -prune | LC_ALL=C sort)
+  done < <(github_repository_candidate_dirs "$GITHUB_ROOT_DIR")
 }
 
 
