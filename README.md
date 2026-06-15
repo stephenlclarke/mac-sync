@@ -1,8 +1,9 @@
 # mac-sync
 
-`mac-sync` keeps a curated snapshot of important Mac dotfiles and Homebrew
-packages in git, split by machine name. This repo owns the command and config;
-machine snapshots live in the separate `stephenlclarke/dot-files` repo.
+`mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
+packages, and local GitHub clones in git, split by machine name. This repo owns
+the command and config; machine snapshots live in the separate
+`stephenlclarke/dot-files` repo.
 
 Snapshots are written to:
 
@@ -52,6 +53,8 @@ MAC_SYNC_MACHINE=work-mbp MAC_SYNC_HOURLY_MINUTE=17 ./bin/mac-sync install
 ```sh
 mac-sync sync
 mac-sync restore
+mac-sync restore --select
+mac-sync restore --list-machines
 mac-sync restore --from old-mbp
 mac-sync secrets init
 mac-sync secrets list --from old-mbp
@@ -69,7 +72,8 @@ Commands:
 - `uninstall`: unload the LaunchAgent and remove the installed command
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: LaunchAgent mode; same behavior as `sync`
-- `restore`: copy a machine snapshot from `dot-files` back into `$HOME`
+- `restore`: copy a machine snapshot from `dot-files` back into `$HOME` and
+  re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `list`: show every configured source path and repo destination
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
@@ -106,6 +110,20 @@ Restore the current machine snapshot:
 mac-sync restore
 ```
 
+When the current hostname has no snapshot, restore lists available snapshots
+from `~/github/dot-files/machines/` and prompts for the source machine. Use
+`--select` to force that prompt even when the current hostname exists:
+
+```sh
+mac-sync restore --select
+```
+
+List available restore sources:
+
+```sh
+mac-sync restore --list-machines
+```
+
 Show restore help:
 
 ```sh
@@ -122,7 +140,8 @@ Restore pulls both repos first when their worktrees are clean, then copies the
 curated paths from `config/sync-paths.txt` plus the selected machine's persisted
 dynamic paths from `~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt`.
 It also compares the selected machine's Homebrew snapshot with the local
-Homebrew state.
+Homebrew state and re-clones missing GitHub repositories from the selected
+machine's saved clone list into `~/github`.
 
 By default, restore copies missing files and files that are newer in the repo
 snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
@@ -146,6 +165,10 @@ extra local packages.
 If an encrypted secrets snapshot exists for the selected machine, restore prints
 the `mac-sync secrets list` and `mac-sync secrets restore` commands to inspect
 or restore it. Normal restore never decrypts secrets automatically.
+
+GitHub clone restore is conservative: it only uses real GitHub remotes captured
+from git worktrees under the configured GitHub root, strips credentials from
+stored remote URLs, and skips any target path that already exists.
 
 ## Encrypted Secrets
 
@@ -265,6 +288,17 @@ generated per-machine lists are persisted to:
 That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
 lists, plus a generated `Brewfile` for browsing or reuse.
 
+Git repositories under `~/github`, including nested paths such as
+`xyzzy.tools/fixdecoder_rs`, are captured during sync when they have at least
+one GitHub remote. The generated per-machine clone list is persisted to:
+
+```text
+~/github/dot-files/machines/<machine-name>/github-repositories/repositories.txt
+```
+
+Each row stores the path relative to `~/github` and a credential-free GitHub
+clone URL. Non-GitHub remotes, submodules, and non-repo directories are ignored.
+
 Before pushing a machine snapshot, `mac-sync` rebases the machines repo against
 its upstream branch. This is done even when the `dot-files` checkout has
 unrelated local files, so hourly backups from multiple Macs can integrate each
@@ -295,6 +329,9 @@ Environment overrides:
 - `MAC_SYNC_DYNAMIC_REFS=0`: disable dynamic dotfile reference discovery
 - `MAC_SYNC_HOMEBREW=0`: disable Homebrew package snapshotting and restore
   command suggestions
+- `MAC_SYNC_GITHUB_ROOT`: local GitHub clone root, defaulting to `~/github`
+- `MAC_SYNC_GITHUB_REPOS=0`: disable GitHub repository snapshotting and restore
+  cloning
 - `MAC_SYNC_SECRETS=0`: disable encrypted secret snapshotting and restore hints
 - `MAC_SYNC_MANIFEST_SOURCE`: choose `auto`, `dot-files`, or `config`.
   The default `auto` uses `make print-mac-sync-paths` from the `dot-files`

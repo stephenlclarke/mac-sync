@@ -57,13 +57,15 @@ mkdir -p "$TEST_HOME" "$TEST_REPO"
 
 run_mac_sync help restore
 assert_stdout_contains "USAGE:"
-assert_stdout_contains "mac-sync restore [--from <machine>] [--force]"
-assert_stdout_contains "--from <machine>  Restore from another machine snapshot."
+assert_stdout_contains "mac-sync restore [--from <machine>|--select|--list-machines] [--force]"
+assert_stdout_contains "--from <machine>   Restore from another machine snapshot."
+assert_stdout_contains "--select           Prompt for a machine snapshot"
+assert_stdout_contains "--list-machines    List available machine snapshots and exit."
 assert_stdout_contains "MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp"
 
 run_mac_sync restore --help
 assert_stdout_contains "USAGE:"
-assert_stdout_contains "mac-sync restore [--from <machine>] [--force]"
+assert_stdout_contains "mac-sync restore [--from <machine>|--select|--list-machines] [--force]"
 
 run_mac_sync help secrets
 assert_stdout_contains "USAGE:"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+unset BASH_ENV ENV
 
 readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"

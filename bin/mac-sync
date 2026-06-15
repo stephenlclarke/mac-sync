@@ -31,7 +31,7 @@
 #   sync        Sync configured paths, commit machine changes, and push
 #   run         LaunchAgent mode; alias for sync
 #   restore     Restore this machine snapshot back into $HOME
-#   restore --from <machine> [--force]
+#   restore [--from <machine>|--select] [--force]
 #               Restore another machine snapshot back into $HOME
 #   secrets     Manage encrypted secret snapshots with age and Keychain
 #   list        Show configured source paths and repo destinations
@@ -54,6 +54,8 @@
 #   MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
 #   MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
 #   MAC_SYNC_HOMEBREW      Set to 0 to disable Homebrew package snapshots
+#   MAC_SYNC_GITHUB_ROOT   Directory containing local GitHub clones. Default: $HOME/github
+#   MAC_SYNC_GITHUB_REPOS  Set to 0 to disable GitHub repository snapshots
 #   MAC_SYNC_SECRETS       Set to 0 to disable encrypted secret snapshots
 #   MAC_SYNC_MANIFEST_SOURCE
 #                          auto, dot-files, or config. Default: auto
@@ -104,6 +106,8 @@ readonly LAUNCH_AGENT_PATH="${MAC_SYNC_LAUNCH_AGENT_PATH:-${HOME_DIR}/bin:/opt/h
 readonly DRY_RUN="${MAC_SYNC_DRY_RUN:-0}"
 readonly DYNAMIC_REFS="${MAC_SYNC_DYNAMIC_REFS:-1}"
 readonly HOMEBREW_SYNC="${MAC_SYNC_HOMEBREW:-1}"
+readonly GITHUB_ROOT_DIR="${MAC_SYNC_GITHUB_ROOT:-${HOME_DIR}/github}"
+readonly GITHUB_REPOS_SYNC="${MAC_SYNC_GITHUB_REPOS:-1}"
 readonly SECRETS_SYNC="${MAC_SYNC_SECRETS:-1}"
 readonly MANIFEST_SOURCE="${MAC_SYNC_MANIFEST_SOURCE:-auto}"
 readonly SELF_UPDATE="${MAC_SYNC_SELF_UPDATE:-1}"
@@ -195,16 +199,22 @@ usage() {
 usage_restore() {
   cat <<EOF
 USAGE:
-  $SCRIPT_NAME restore [--from <machine>] [--force]
+  $SCRIPT_NAME restore [--from <machine>|--select|--list-machines] [--force]
 
 OPTIONS:
-  --from <machine>  Restore from another machine snapshot. Default: current machine.
-  --force           Overwrite newer local files and resolve file/directory conflicts.
-  -h, --help        Show this help text.
+  --from <machine>   Restore from another machine snapshot.
+  --select           Prompt for a machine snapshot even when the current machine exists.
+  --list-machines    List available machine snapshots and exit.
+  --force            Overwrite newer local files and resolve file/directory conflicts.
+  -h, --help         Show this help text.
 
 BEHAVIOR:
   Restore pulls both repos first when their worktrees are clean.
+  When --from is omitted, restore defaults to the current machine snapshot when
+  it exists. Otherwise it offers machine snapshots from the dot-files repo.
   It restores configured paths plus that machine's persisted dynamic paths.
+  Missing real GitHub repositories from the selected snapshot are cloned back
+  into the configured GitHub root without overwriting existing paths.
   Newer local files are kept unless --force is used.
   Homebrew differences are printed as manual brew commands.
   Encrypted secrets are not restored automatically; restore prints the secrets
@@ -212,6 +222,8 @@ BEHAVIOR:
 
 EXAMPLES:
   $SCRIPT_NAME restore
+  $SCRIPT_NAME restore --select
+  $SCRIPT_NAME restore --list-machines
   $SCRIPT_NAME restore --from old-mbp
   $SCRIPT_NAME restore --from old-mbp --force
   MAC_SYNC_DRY_RUN=1 $SCRIPT_NAME restore --from old-mbp
@@ -564,6 +576,8 @@ readonly MACHINE_HOME_DIR="${MACHINE_DIR}/home"
 readonly MACHINE_ABSOLUTE_DIR="${MACHINE_DIR}/absolute"
 readonly DYNAMIC_PATHS_FILE="${MACHINE_DIR}/dynamic-sync-paths.txt"
 readonly HOMEBREW_DIR="${MACHINE_DIR}/homebrew"
+readonly GITHUB_REPOS_DIR="${MACHINE_DIR}/github-repositories"
+readonly GITHUB_REPOS_FILE="${GITHUB_REPOS_DIR}/repositories.txt"
 readonly SECRETS_DIR="${MACHINE_DIR}/secrets"
 readonly SECRETS_ARCHIVE="${SECRETS_DIR}/secrets.tar.gz.age"
 readonly SECRETS_INCLUDED_PATHS_FILE="${SECRETS_DIR}/included-paths.txt"
@@ -928,6 +942,19 @@ homebrew_sync_enabled() {
 # Return true when encrypted secret snapshotting is enabled.
 secrets_sync_enabled() {
   case "$SECRETS_SYNC" in
+    0|off|OFF|false|FALSE)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+
+# Return true when GitHub repository snapshotting is enabled.
+github_repos_sync_enabled() {
+  case "$GITHUB_REPOS_SYNC" in
     0|off|OFF|false|FALSE)
       return 1
       ;;
@@ -1466,6 +1493,142 @@ safe_machine_name() {
 }
 
 
+# Print machine snapshot directory names from the machines repo.
+machine_snapshot_names() {
+  local path
+
+  [[ -d "$MACHINES_ROOT_DIR" ]] || return 0
+
+  while IFS= read -r path; do
+    basename "$path"
+  done < <(find "$MACHINES_ROOT_DIR" -mindepth 1 -maxdepth 1 -type d -print | LC_ALL=C sort)
+}
+
+
+# Resolve a requested machine snapshot, accepting case-only hostname differences.
+resolve_machine_snapshot_name() {
+  local requested="$1"
+  local requested_lower
+  local candidate
+  local candidate_lower
+  local match=""
+
+  if [[ -d "${MACHINES_ROOT_DIR}/${requested}" ]]; then
+    printf '%s\n' "$requested"
+    return 0
+  fi
+
+  requested_lower="$(printf '%s\n' "$requested" | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r candidate; do
+    candidate_lower="$(printf '%s\n' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$candidate_lower" = "$requested_lower" ]]; then
+      if [[ -n "$match" ]]; then
+        return 1
+      fi
+      match="$candidate"
+    fi
+  done < <(machine_snapshot_names)
+
+  [[ -n "$match" ]] || return 1
+  printf '%s\n' "$match"
+}
+
+
+# Print available restore source machines with the current default marked.
+machine_snapshot_suggestion_lines() {
+  local candidate
+  local found=0
+
+  printf 'Available machine snapshots in %s:\n' "$MACHINES_ROOT_DIR"
+  while IFS= read -r candidate; do
+    found=1
+    if [[ "$candidate" = "$MACHINE_NAME" ]]; then
+      printf '  %s (current default)\n' "$candidate"
+    else
+      printf '  %s\n' "$candidate"
+    fi
+  done < <(machine_snapshot_names)
+
+  if [[ "$found" = "0" ]]; then
+    printf '  (none)\n'
+  fi
+}
+
+
+# Prompt for a source machine snapshot and print only the selected name.
+select_machine_snapshot() {
+  local default_machine="$1"
+  local candidate
+  local choices=()
+  local index
+  local prompt
+  local reply
+  local resolved
+
+  while IFS= read -r candidate; do
+    choices+=("$candidate")
+  done < <(machine_snapshot_names)
+
+  if (( ${#choices[@]} == 0 )); then
+    error "no machine snapshots found in: $MACHINES_ROOT_DIR"
+    return 1
+  fi
+
+  if [[ ! -d "${MACHINES_ROOT_DIR}/${default_machine}" ]]; then
+    default_machine=""
+  fi
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    machine_snapshot_suggestion_lines >&2
+    error "current machine snapshot is missing; re-run with --from <machine>"
+    return 1
+  fi
+
+  machine_snapshot_suggestion_lines >&2
+  if [[ -n "$default_machine" ]]; then
+    prompt="Select machine to restore from [${default_machine}]: "
+  else
+    prompt="Select machine to restore from: "
+  fi
+
+  printf '%s' "$prompt" >&2
+  IFS= read -r reply
+
+  if [[ -z "$reply" ]]; then
+    if [[ -n "$default_machine" ]]; then
+      printf '%s\n' "$default_machine"
+      return 0
+    fi
+    error "no machine snapshot selected"
+    return 1
+  fi
+
+  case "$reply" in
+    *[!0-9]*)
+      if ! safe_machine_name "$reply"; then
+        error "invalid machine name: $reply"
+        return 1
+      fi
+      if ! resolved="$(resolve_machine_snapshot_name "$reply")"; then
+        error "missing machine snapshot: ${MACHINES_ROOT_DIR}/${reply}"
+        return 1
+      fi
+      printf '%s\n' "$resolved"
+      return 0
+      ;;
+    *)
+      ((index = 10#$reply - 1)) || true
+      if (( index < 0 || index >= ${#choices[@]} )); then
+        error "machine selection out of range: $reply"
+        return 1
+      fi
+      printf '%s\n' "${choices[$index]}"
+      return 0
+      ;;
+  esac
+}
+
+
 # Print the restore manifest for a source machine snapshot.
 restore_manifest_paths() {
   local machine="$1"
@@ -1746,6 +1909,302 @@ print_homebrew_restore_commands() {
 
   rm -rf "$tmp_dir"
   return 0
+}
+
+
+# Return the GitHub repository manifest file for a machine.
+github_repositories_file_for() {
+  local machine="$1"
+
+  printf '%s/%s/github-repositories/repositories.txt\n' "$MACHINES_ROOT_DIR" "$machine"
+}
+
+
+# Return true when a local GitHub clone relative path is safe to recreate.
+safe_github_repo_relative_path() {
+  local rel="$1"
+  local part
+  local parts=()
+
+  case "$rel" in
+    ""|.|..|/*|../*|*/..|*/../*|*//*)
+      return 1
+      ;;
+  esac
+
+  [[ "$rel" != *$'\t'* && "$rel" != *$'\n'* ]] || return 1
+
+  IFS=/ read -r -a parts <<<"$rel"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ""|.|..|-*)
+        return 1
+        ;;
+    esac
+  done
+
+  return 0
+}
+
+
+# Normalize a GitHub remote URL to a credential-free HTTPS clone URL.
+normalize_github_remote_url() {
+  local url="$1"
+  local path=""
+  local owner
+  local repo
+
+  url="${url//$'\r'/}"
+  url="${url//$'\n'/}"
+  url="${url%%\#*}"
+  url="${url%%\?*}"
+  url="${url%/}"
+
+  case "$url" in
+    git@github.com:*)
+      path="${url#git@github.com:}"
+      ;;
+    git@ssh.github.com:*)
+      path="${url#git@ssh.github.com:}"
+      ;;
+    ssh://git@github.com/*)
+      path="${url#ssh://git@github.com/}"
+      ;;
+    ssh://git@ssh.github.com:443/*)
+      path="${url#ssh://git@ssh.github.com:443/}"
+      ;;
+    https://github.com/*)
+      path="${url#https://github.com/}"
+      ;;
+    http://github.com/*)
+      path="${url#http://github.com/}"
+      ;;
+    git://github.com/*)
+      path="${url#git://github.com/}"
+      ;;
+    https://*@github.com/*)
+      path="${url#https://}"
+      path="${path#*@github.com/}"
+      ;;
+    http://*@github.com/*)
+      path="${url#http://}"
+      path="${path#*@github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  path="${path%/}"
+  path="${path%.git}"
+  case "$path" in
+    ""|*/*/*|*//*) return 1 ;;
+    */*) ;;
+    *) return 1 ;;
+  esac
+
+  owner="${path%%/*}"
+  repo="${path#*/}"
+  case "$owner" in
+    ""|*[!A-Za-z0-9_.-]*) return 1 ;;
+  esac
+  case "$repo" in
+    ""|*[!A-Za-z0-9_.-]*) return 1 ;;
+  esac
+
+  printf 'https://github.com/%s/%s.git\n' "$owner" "$repo"
+}
+
+
+# Print the first GitHub clone URL configured on a local git repository.
+github_remote_for_repo() {
+  local repo_dir="$1"
+  local remote
+  local url
+  local clone_url
+
+  if url="$(git -C "$repo_dir" remote get-url origin 2>/dev/null)" \
+    && clone_url="$(normalize_github_remote_url "$url")"; then
+    printf '%s\n' "$clone_url"
+    return 0
+  fi
+
+  while IFS= read -r remote; do
+    [[ "$remote" != "origin" ]] || continue
+    if url="$(git -C "$repo_dir" remote get-url "$remote" 2>/dev/null)" \
+      && clone_url="$(normalize_github_remote_url "$url")"; then
+      printf '%s\n' "$clone_url"
+      return 0
+    fi
+  done < <(git -C "$repo_dir" remote 2>/dev/null | LC_ALL=C sort)
+
+  return 1
+}
+
+
+# Return true when a candidate repo lives inside another worktree.
+github_repo_has_parent_worktree() {
+  local repo_real="$1"
+  local root_real="$2"
+  local parent
+  local ancestor_top
+  local ancestor_real
+
+  parent="$(dirname "$repo_real")"
+  while [[ "$parent" != "$root_real" && "$parent" != "/" && -n "$parent" ]]; do
+    ancestor_top="$(git -C "$parent" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$ancestor_top" ]]; then
+      ancestor_real="$(realpath_existing "$ancestor_top")"
+      if [[ "$ancestor_real" != "$repo_real" ]]; then
+        case "$repo_real" in
+          "$ancestor_real"/*)
+            return 0
+            ;;
+        esac
+      fi
+    fi
+    parent="$(dirname "$parent")"
+  done
+
+  return 1
+}
+
+
+# Print relative-path and clone-URL rows for real GitHub repos under the root.
+local_github_repository_lines() {
+  local git_marker
+  local repo_dir
+  local repo_rel
+  local repo_real
+  local root_real
+  local super_project
+  local top_level
+  local top_real
+  local clone_url
+
+  [[ -d "$GITHUB_ROOT_DIR" ]] || return 0
+  root_real="$(realpath_existing "$GITHUB_ROOT_DIR")"
+
+  while IFS= read -r git_marker; do
+    repo_dir="$(dirname "$git_marker")"
+    repo_real="$(realpath_existing "$repo_dir")"
+    case "$repo_real" in
+      "$root_real"/*)
+        repo_rel="${repo_real#"$root_real"/}"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    safe_github_repo_relative_path "$repo_rel" || continue
+
+    git -C "$repo_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+    top_level="$(git -C "$repo_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+    [[ -n "$top_level" ]] || continue
+
+    top_real="$(realpath_existing "$top_level")"
+    [[ "$repo_real" = "$top_real" ]] || continue
+    github_repo_has_parent_worktree "$repo_real" "$root_real" && continue
+    super_project="$(git -C "$repo_dir" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+    [[ -z "$super_project" ]] || continue
+
+    clone_url="$(github_remote_for_repo "$repo_dir")" || continue
+    printf '%s\t%s\n' "$repo_rel" "$clone_url"
+  done < <(find "$GITHUB_ROOT_DIR" -mindepth 2 -name .git -print -prune | LC_ALL=C sort)
+}
+
+
+# Write the complete local GitHub repository snapshot.
+write_github_repositories_snapshot() {
+  mkdir -p "$GITHUB_REPOS_DIR"
+  {
+    printf '%s\n' '# Generated by mac-sync. Do not edit.'
+    printf '%s\n' '# Format: relative-path<TAB>github-clone-url'
+    local_github_repository_lines | LC_ALL=C sort -u
+  } >"$GITHUB_REPOS_FILE"
+}
+
+
+# Sync local GitHub clone inventory into the machine snapshot.
+sync_github_repositories() {
+  github_repos_sync_enabled || return 0
+
+  if [[ "$DRY_RUN" = "1" ]]; then
+    progress_pending "would update GitHub repository snapshot: $GITHUB_REPOS_FILE"
+    return 0
+  fi
+
+  if ! run_with_spinner "updating GitHub repository snapshot" write_github_repositories_snapshot; then
+    print_progress_command_output
+    return 1
+  fi
+  progress_done "updated GitHub repository snapshot: $GITHUB_REPOS_FILE"
+}
+
+
+# Clone missing GitHub repositories from a selected machine snapshot.
+restore_github_repositories() {
+  local machine="$1"
+  local repositories_file
+  local local_dir
+  local clone_url
+  local extra
+  local normalized_url
+  local target
+
+  github_repos_sync_enabled || return 0
+
+  repositories_file="$(github_repositories_file_for "$machine")"
+  [[ -f "$repositories_file" ]] || return 0
+
+  info "restoring GitHub repositories from: $repositories_file"
+  if [[ "$DRY_RUN" != "1" ]]; then
+    mkdir -p "$GITHUB_ROOT_DIR"
+  fi
+
+  while IFS=$'\t' read -r local_dir clone_url extra || [[ -n "$local_dir" ]]; do
+    case "$local_dir" in
+      ""|\#*)
+        continue
+        ;;
+    esac
+
+    if [[ -n "${extra:-}" ]]; then
+      warning "skip malformed GitHub repository manifest line for: $local_dir"
+      continue
+    fi
+
+    if ! safe_github_repo_relative_path "$local_dir"; then
+      warning "skip unsafe GitHub repository relative path: $local_dir"
+      continue
+    fi
+
+    if ! normalized_url="$(normalize_github_remote_url "$clone_url")"; then
+      warning "skip non-GitHub repository URL for ${local_dir}: $clone_url"
+      continue
+    fi
+
+    target="${GITHUB_ROOT_DIR}/${local_dir}"
+    if [[ -e "$target" ]]; then
+      if git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        info "existing GitHub repo: $target"
+      else
+        warning "skip clone over existing non-repo path: $target"
+      fi
+      continue
+    fi
+
+    if [[ "$DRY_RUN" = "1" ]]; then
+      info "would clone GitHub repo: $normalized_url -> $target"
+      continue
+    fi
+
+    info "clone GitHub repo: $normalized_url -> $target"
+    mkdir -p "$(dirname "$target")"
+    if ! git clone "$normalized_url" "$target"; then
+      warning "failed to clone GitHub repo: $normalized_url"
+    fi
+  done <"$repositories_file"
 }
 
 
@@ -3220,6 +3679,7 @@ cmd_sync() {
 
   prune_stale_dynamic_paths "$tmp_dynamic_extra" "$tmp_configured"
   sync_homebrew_packages
+  sync_github_repositories
   sync_secrets_archive auto
 
   if [[ "$DRY_RUN" != "1" ]]; then
@@ -3243,8 +3703,12 @@ cmd_sync() {
 cmd_restore() {
   local force=0
   local from_machine="$MACHINE_NAME"
+  local from_machine_provided=0
+  local list_machines=0
   local machine_dir
   local rel
+  local requested_machine
+  local select_machine=0
 
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -3254,7 +3718,16 @@ cmd_restore() {
           exit 2
         fi
         from_machine="$2"
+        from_machine_provided=1
         shift 2
+        ;;
+      --select)
+        select_machine=1
+        shift
+        ;;
+      --list-machines)
+        list_machines=1
+        shift
         ;;
       --force)
         force=1
@@ -3272,14 +3745,36 @@ cmd_restore() {
     esac
   done
 
-  if ! safe_machine_name "$from_machine"; then
-    error "invalid machine name: $from_machine"
+  if [[ "$from_machine_provided" = "1" && "$select_machine" = "1" ]]; then
+    error "--from and --select cannot be used together"
     exit 2
   fi
 
   check_runtime
   pull_repo_if_safe
   pull_machines_repo_if_safe
+
+  if [[ "$list_machines" = "1" ]]; then
+    machine_snapshot_suggestion_lines
+    return 0
+  fi
+
+  if [[ "$from_machine_provided" = "1" ]]; then
+    if ! safe_machine_name "$from_machine"; then
+      error "invalid machine name: $from_machine"
+      exit 2
+    fi
+    requested_machine="$from_machine"
+    if ! from_machine="$(resolve_machine_snapshot_name "$requested_machine")"; then
+      machine_snapshot_suggestion_lines >&2
+      error "missing machine snapshot: ${MACHINES_ROOT_DIR}/${requested_machine}"
+      exit 1
+    fi
+  elif [[ "$select_machine" = "1" || ! -d "${MACHINES_ROOT_DIR}/${MACHINE_NAME}" ]]; then
+    if ! from_machine="$(select_machine_snapshot "$MACHINE_NAME")"; then
+      exit 2
+    fi
+  fi
 
   machine_dir="${MACHINES_ROOT_DIR}/${from_machine}"
   if [[ ! -d "$machine_dir" ]]; then
@@ -3299,6 +3794,7 @@ cmd_restore() {
   done < <(restore_manifest_paths "$from_machine")
 
   print_homebrew_restore_commands "$from_machine"
+  restore_github_repositories "$from_machine"
   print_secrets_restore_hint "$from_machine"
 }
 
@@ -3317,6 +3813,8 @@ cmd_list() {
   info "manifest source: $(configured_manifest_source_label)"
   info "dynamic paths file: $DYNAMIC_PATHS_FILE"
   info "Homebrew snapshot dir: $HOMEBREW_DIR"
+  info "GitHub repo root: $GITHUB_ROOT_DIR"
+  info "GitHub repo snapshot file: $GITHUB_REPOS_FILE"
   info "secret paths file: $SECRET_PATHS_FILE"
   info "age recipients file: $AGE_RECIPIENTS_FILE"
   info "encrypted secrets archive: $SECRETS_ARCHIVE"
@@ -3329,6 +3827,11 @@ cmd_list() {
     info "Homebrew sync: enabled"
   else
     info "Homebrew sync: disabled"
+  fi
+  if github_repos_sync_enabled; then
+    info "GitHub repo sync: enabled"
+  else
+    info "GitHub repo sync: disabled"
   fi
   if secrets_sync_enabled; then
     info "encrypted secrets sync: enabled"
@@ -3398,6 +3901,7 @@ write_launchagent() {
   local escaped_install_path
   local escaped_log_err
   local escaped_log_out
+  local escaped_github_root_dir
   local escaped_machine_name
   local escaped_machines_repo_dir
   local escaped_path
@@ -3408,6 +3912,7 @@ write_launchagent() {
   escaped_install_path="$(xmlescape "$INSTALL_PATH")"
   escaped_log_err="$(xmlescape "$LOG_ERR")"
   escaped_log_out="$(xmlescape "$LOG_OUT")"
+  escaped_github_root_dir="$(xmlescape "$GITHUB_ROOT_DIR")"
   escaped_machine_name="$(xmlescape "$MACHINE_NAME")"
   escaped_machines_repo_dir="$(xmlescape "$MACHINES_REPO_DIR")"
   escaped_path="$(xmlescape "$LAUNCH_AGENT_PATH")"
@@ -3442,6 +3947,8 @@ EOF
       <string>${escaped_machines_repo_dir}</string>
       <key>MAC_SYNC_MACHINE</key>
       <string>${escaped_machine_name}</string>
+      <key>MAC_SYNC_GITHUB_ROOT</key>
+      <string>${escaped_github_root_dir}</string>
       <key>PATH</key>
       <string>${escaped_path}</string>
 ${script_colour_xml}

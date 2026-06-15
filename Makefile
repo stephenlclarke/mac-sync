@@ -14,6 +14,7 @@ STATUS_TEST = tests/status.sh
 HELP_TEST = tests/help.sh
 SELF_UPDATE_TEST = tests/self-update.sh
 MANIFEST_TEST = tests/manifest.sh
+GITHUB_REPOSITORIES_TEST = tests/github-repositories.sh
 CONCURRENT_MACHINES_TEST = tests/concurrent-machines.sh
 
 .PHONY: all check help
@@ -33,6 +34,7 @@ check:
 	bash -n $(HELP_TEST)
 	bash -n $(SELF_UPDATE_TEST)
 	bash -n $(MANIFEST_TEST)
+	bash -n $(GITHUB_REPOSITORIES_TEST)
 	bash -n $(CONCURRENT_MACHINES_TEST)
 	$(SCRIPT) --help >/dev/null
 	$(SCRIPT) list >/dev/null
@@ -54,6 +56,8 @@ check:
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(SELF_UPDATE_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(MANIFEST_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(MANIFEST_TEST) $(CURDIR)/$(SCRIPT)
+	bash $(GITHUB_REPOSITORIES_TEST) $(CURDIR)/$(SCRIPT)
+	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(GITHUB_REPOSITORIES_TEST) $(CURDIR)/$(SCRIPT)
 	bash $(CONCURRENT_MACHINES_TEST) $(CURDIR)/$(SCRIPT)
 	MAC_SYNC_TEST_RUNNER=/bin/bash bash $(CONCURRENT_MACHINES_TEST) $(CURDIR)/$(SCRIPT)
 
