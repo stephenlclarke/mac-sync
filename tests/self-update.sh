@@ -123,12 +123,14 @@ cmp -s "$REMOTE_WORK/bin/mac-spinner" "${TMP_ROOT}/bin/mac-spinner" \
 rm -f "$MARKER_FILE"
 cp "$SCRIPT_PATH" "$TEST_INSTALL"
 chmod +x "$TEST_INSTALL"
-if MAC_SYNC_SELF_UPDATE_MODE=exit run_installed sync; then
+MAC_SYNC_SELF_UPDATE_MODE="exit"
+if run_installed sync; then
   fail "exit mode should stop after installing the update"
 else
   status=$?
   [[ "$status" -eq 75 ]] || fail "exit mode returned $status, expected 75"
 fi
+unset MAC_SYNC_SELF_UPDATE_MODE
 [[ ! -f "$MARKER_FILE" ]] || fail "exit mode should not re-execute updated script"
 cmp -s "$REMOTE_WORK/bin/mac-sync" "$TEST_INSTALL" \
   || fail "exit mode did not install remote script"

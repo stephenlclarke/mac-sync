@@ -12,7 +12,8 @@ readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
 readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly FAKE_BIN="${TMP_ROOT}/fake-bin"
-readonly SYSTEM_GIT="$(command -v git)"
+SYSTEM_GIT="$(command -v git)"
+readonly SYSTEM_GIT
 
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 

@@ -90,7 +90,11 @@ ORIGINAL_ARGS=("$@")
 readonly SELF_PATH="${BASH_SOURCE[0]:-$0}"
 SCRIPT_NAME="$(basename "$SELF_PATH")"
 readonly SCRIPT_NAME
-SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd -P || dirname "$SELF_PATH")"
+if SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd -P)"; then
+  :
+else
+  SELF_DIR="$(dirname "$SELF_PATH")"
+fi
 readonly SELF_DIR
 readonly HOME_DIR="${HOME:?HOME is not set}"
 readonly DEFAULT_REPO_DIR="${HOME_DIR}/github/mac-sync"
@@ -597,9 +601,7 @@ MAC_SYNC_SYNC_TMP_CONFIGURED=""
 MAC_SYNC_SYNC_TMP_DYNAMIC=""
 MAC_SYNC_SYNC_TMP_DYNAMIC_EXTRA=""
 MAC_SYNC_SYNC_TMP_MANIFEST=""
-MAC_SYNC_MANIFEST_SOURCE_ACTIVE=""
 MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED=0
-MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=0
 
 
 # Remove the temporary age-keygen workspace.
@@ -1036,7 +1038,7 @@ configured_manifest_paths_from_dot_files() {
   [[ -f "${MACHINES_REPO_DIR}/Makefile" ]] || return 1
   command -v make >/dev/null 2>&1 || return 1
 
-  if ! output="$(BASH_ENV= ENV= make --no-print-directory -s -C "$MACHINES_REPO_DIR" print-mac-sync-paths 2>/dev/null)"; then
+  if ! output="$(BASH_ENV='' ENV='' make --no-print-directory -s -C "$MACHINES_REPO_DIR" print-mac-sync-paths 2>/dev/null)"; then
     return 1
   fi
   [[ -n "$output" ]] || return 1
@@ -1047,15 +1049,11 @@ configured_manifest_paths_from_dot_files() {
 
 # Print configured manifest paths without dynamic reference discovery.
 configured_manifest_paths() {
-  MAC_SYNC_MANIFEST_SOURCE_ACTIVE=""
-
   case "$MANIFEST_SOURCE" in
     auto)
       if configured_manifest_paths_from_dot_files; then
-        MAC_SYNC_MANIFEST_SOURCE_ACTIVE="dot-files"
         return 0
       fi
-      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="config"
       configured_manifest_paths_from_file
       ;;
     dot-files)
@@ -1063,10 +1061,8 @@ configured_manifest_paths() {
         error "dot-files manifest source is unavailable: ${MACHINES_REPO_DIR}/Makefile"
         exit 1
       fi
-      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="dot-files"
       ;;
     config)
-      MAC_SYNC_MANIFEST_SOURCE_ACTIVE="config"
       configured_manifest_paths_from_file
       ;;
     *)
@@ -1998,7 +1994,8 @@ normalize_github_remote_url() {
   path="${path%/}"
   path="${path%.git}"
   case "$path" in
-    ""|*/*/*|*//*) return 1 ;;
+    ""|*//*) return 1 ;;
+    */*/*) return 1 ;;
     */*) ;;
     *) return 1 ;;
   esac
@@ -3416,13 +3413,11 @@ apply_self_update_source() {
   local source_spinner="${source_dir}/bin/mac-spinner"
 
   MAC_SYNC_SELF_UPDATE_SCRIPT_CHANGED=0
-  MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=0
 
   if [[ -f "$source_spinner" ]]; then
     if [[ ! -f "$SPINNER_INSTALL_PATH" ]] || ! cmp -s "$source_spinner" "$SPINNER_INSTALL_PATH"; then
       mkdir -p "$INSTALL_DIR"
       install -m 755 "$source_spinner" "$SPINNER_INSTALL_PATH"
-      MAC_SYNC_SELF_UPDATE_SPINNER_CHANGED=1
       log "updated installed spinner helper from $source_label"
     fi
   fi
@@ -4026,7 +4021,7 @@ print_repo_local_changes() {
   fi
 
   info "${title} local changes:"
-  sed 's/^/  /' <<<"$changes"
+  printf '  %s\n' "${changes//$'\n'/$'\n'  }"
 }
 
 
