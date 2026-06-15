@@ -179,8 +179,9 @@ Check status after the first run:
 mac-sync status
 ```
 
-The status output shows the local repo, machines repo, next scheduled run, last
-sync result, storage totals, warnings, errors, remote repo, and commit.
+The status output shows the `mac-sync` version SHA, local repo, machines repo,
+next scheduled run, last sync result, storage totals, warnings, errors, remote
+repo, and commit.
 
 ## Hourly Sync
 

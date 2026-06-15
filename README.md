@@ -94,8 +94,9 @@ Paths that are already unchanged stay quiet.
 
 ## Status
 
-Show current install state, the LaunchAgent state, the next scheduled run, the
-last completed sync, the amount of data changed by that sync, total machine
+Show the current `mac-sync` version SHA, install state, the LaunchAgent state,
+the next scheduled run, the last completed sync, the amount of data changed by
+that sync, total machine
 snapshot storage, and warning or error messages captured during the last sync:
 
 ```sh

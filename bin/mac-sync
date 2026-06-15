@@ -999,6 +999,14 @@ repo_path_clean() {
 }
 
 
+# Print the short HEAD SHA for a repo, suitable for status version output.
+repo_commit_version() {
+  local repo="${1:-$REPO_DIR}"
+
+  git -C "$repo" rev-parse --short HEAD 2>/dev/null || printf 'unknown'
+}
+
+
 # Return true when the current branch has an upstream branch.
 branch_has_upstream() {
   local repo="${1:-$REPO_DIR}"
@@ -4958,8 +4966,12 @@ cmd_status() {
   local result
   local updated_byte_count
   local updated_file_count
+  local version
   local warning_count
 
+  version="$(repo_commit_version "$REPO_DIR")"
+
+  info "mac-sync version: $version"
   info "local repo: $REPO_DIR"
   info "machines repo: $MACHINES_REPO_DIR"
   info "machine: $MACHINE_NAME"

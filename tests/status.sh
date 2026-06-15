@@ -113,6 +113,9 @@ cat >"$TEST_REPO/config/sync-paths.txt" <<'EOF'
 EOF
 
 : >"$TEST_REPO/config/excludes.txt"
+git -C "$TEST_REPO" add bin/mac-sync config/sync-paths.txt config/excludes.txt
+git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
+
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
 mkdir -p "$TEST_HOME/.config/tool"
 printf 'tool setting\n' >"$TEST_HOME/.config/tool/settings"
@@ -136,6 +139,8 @@ assert_stdout_lacks "sync directory:"
 printf 'local machines repo note\n' >"$TEST_MACHINES_REPO/README.md"
 
 run_mac_sync status
+expected_version="$(git -C "$TEST_REPO" rev-parse --short HEAD)"
+assert_stdout_contains "mac-sync version: $expected_version"
 assert_stdout_contains "local repo: $TEST_REPO"
 assert_stdout_contains "machines repo: $TEST_MACHINES_REPO"
 assert_stdout_lacks "machine dir:"
