@@ -359,10 +359,10 @@ one GitHub remote. The generated per-machine clone list is persisted to:
 Each row stores the path relative to `~/github` and a credential-free GitHub
 clone URL. Non-GitHub remotes, submodules, and non-repo directories are ignored.
 
-Before pushing a machine snapshot, `mac-sync` rebases the machines repo against
-its upstream branch. This is done even when the `dot-files` checkout has
-unrelated local files, so hourly backups from multiple Macs can integrate each
-other's `machines/<machine-name>` commits before pushing.
+Before pushing a machine snapshot, `mac-sync` checks whether the machines repo
+is behind its upstream branch and rebases only when needed. Unrelated local
+edits elsewhere in the `dot-files` checkout are preserved, so hourly backups can
+continue while files outside `machines/<machine-name>` are being edited.
 
 Rsync excludes are listed in:
 

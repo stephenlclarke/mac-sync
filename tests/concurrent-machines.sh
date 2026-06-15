@@ -98,6 +98,7 @@ git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
 git -C "$REMOTE_WORK" init -b main >/dev/null
 git -C "$REMOTE_WORK" config user.name "mac-sync test"
 git -C "$REMOTE_WORK" config user.email "mac-sync@example.invalid"
+printf 'tracked base\n' >"$REMOTE_WORK/README.md"
 printf 'other-base\n' >"$REMOTE_WORK/machines/other/home/.bashrc"
 git -C "$REMOTE_WORK" add .
 git -C "$REMOTE_WORK" commit -m "seed other machine" >/dev/null
@@ -127,6 +128,8 @@ fi
 EOF
 chmod +x "$TEST_MACHINES_REPO/.git/hooks/pre-push"
 
+printf 'local staged edit\n' >"$TEST_MACHINES_REPO/README.md"
+git -C "$TEST_MACHINES_REPO" add README.md
 mkdir -p "$TEST_MACHINES_REPO/bin"
 printf '#!/usr/bin/env bash\n' >"$TEST_MACHINES_REPO/bin/setup-git-ssh-signing.sh"
 chmod +x "$TEST_MACHINES_REPO/bin/setup-git-ssh-signing.sh"
@@ -134,8 +137,10 @@ printf 'target-update\n' >"$TEST_HOME/.bashrc"
 
 run_mac_sync sync
 
+assert_stdout_contains "pulled latest machines repo changes"
 assert_stdout_contains "rebased machines repo before push"
 assert_stderr_contains "rebasing and retrying"
+assert_stderr_lacks "machines repo has local changes; skipping pre-operation git pull"
 assert_stdout_contains "pushed main to origin"
 
 git -C "$TEST_MACHINES_REPO" fetch origin >/dev/null
@@ -152,3 +157,9 @@ grep -F "other-race" "$TEST_MACHINES_REPO/machines/other/home/.race" >/dev/null 
   || fail "unrelated untracked file was not preserved"
 git -C "$TEST_MACHINES_REPO" status --porcelain | grep -F "?? bin/" >/dev/null \
   || fail "unrelated untracked file is no longer untracked"
+git -C "$TEST_MACHINES_REPO" status --porcelain -- README.md | grep -F "README.md" >/dev/null \
+  || fail "unrelated tracked edit was not preserved"
+grep -F "local staged edit" "$TEST_MACHINES_REPO/README.md" >/dev/null \
+  || fail "unrelated tracked edit contents changed"
+[[ "$(git -C "$TEST_MACHINES_REPO" show HEAD:README.md)" = "tracked base" ]] \
+  || fail "unrelated tracked edit was committed"

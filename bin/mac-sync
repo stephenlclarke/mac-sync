@@ -990,6 +990,15 @@ repo_clean() {
 }
 
 
+# Return true when one pathspec has no local worktree or index changes.
+repo_path_clean() {
+  local repo="$1"
+  local pathspec="$2"
+
+  [[ -z "$(git -C "$repo" status --porcelain -- "$pathspec")" ]]
+}
+
+
 # Return true when the current branch has an upstream branch.
 branch_has_upstream() {
   local repo="${1:-$REPO_DIR}"
@@ -3983,7 +3992,45 @@ pull_repo_if_safe() {
 
 # Pull the machine snapshot repo when safe.
 pull_machines_repo_if_safe() {
-  pull_git_repo_if_safe "$MACHINES_REPO_DIR" "machines repo"
+  local machine_path="machines/${MACHINE_NAME}"
+  local output
+
+  if ! repo_has_origin "$MACHINES_REPO_DIR"; then
+    warning "no origin remote configured for machines repo; skipping git pull"
+    return 0
+  fi
+
+  if ! repo_path_clean "$MACHINES_REPO_DIR" "$machine_path"; then
+    warning "current machine snapshot has local changes; skipping pre-operation git pull"
+    return 0
+  fi
+
+  if repo_clean "$MACHINES_REPO_DIR"; then
+    if ! run_with_spinner \
+      "pulling latest machines repo changes" \
+      git -C "$MACHINES_REPO_DIR" pull --ff-only; then
+      print_progress_command_output
+      return 1
+    fi
+  else
+    if ! run_with_spinner \
+      "pulling latest machines repo changes with unrelated local edits preserved" \
+      git -C "$MACHINES_REPO_DIR" pull --ff-only --autostash; then
+      print_progress_command_output
+      warning "could not pull machines repo before sync; continuing and retrying before push"
+      return 0
+    fi
+  fi
+
+  output="$PROGRESS_COMMAND_OUTPUT"
+  case "$output" in
+    *"Already up to date."*)
+      progress_done "machines repo already up to date"
+      ;;
+    *)
+      progress_done "pulled latest machines repo changes"
+      ;;
+  esac
 }
 
 
@@ -4291,7 +4338,25 @@ self_update_from_remote_or_warn() {
 
 # Rebase the machines repo against its upstream before pushing.
 rebase_machines_repo_before_push() {
+  local ahead
+  local behind
+
   if branch_has_upstream "$MACHINES_REPO_DIR"; then
+    if ! run_with_spinner \
+      "fetching machines repo upstream" \
+      git -C "$MACHINES_REPO_DIR" fetch --quiet; then
+      print_progress_command_output
+      return 1
+    fi
+
+    read -r ahead behind < <(
+      git -C "$MACHINES_REPO_DIR" rev-list --left-right --count HEAD...'@{u}'
+    )
+    if [[ "${behind:-0}" = "0" ]]; then
+      progress_done "machines repo already includes upstream"
+      return 0
+    fi
+
     if ! run_with_spinner \
       "rebasing machines repo before push" \
       git -C "$MACHINES_REPO_DIR" pull --rebase --autostash; then

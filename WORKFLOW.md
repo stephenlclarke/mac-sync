@@ -127,7 +127,8 @@ During sync, `mac-sync`:
 3. Clones the remote to a temporary directory when the local checkout is stale
    or dirty, then restarts with the updated installed command.
 4. Pulls the local `mac-sync` repo when it is clean.
-5. Pulls the `dot-files` snapshot repo when it is clean.
+5. Pulls the `dot-files` snapshot repo when the current machine archive is
+   clean, preserving unrelated local edits in that checkout.
 6. Copies configured paths from `$HOME` into the machine snapshot.
 7. Discovers safe referenced dotfiles and persists dynamic paths.
 8. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
