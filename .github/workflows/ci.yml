@@ -85,12 +85,27 @@ jobs:
           ruby -c Formula/mac-sync.rb
           make package-release MAC_SYNC_ARCHIVE=mac-sync-release-arm64.tar.gz
 
-      - name: Cache SonarQube packages
+      - name: Check SonarQube token
+        id: sonar-token
         if: >
           (github.ref == 'refs/heads/main' || github.event_name == 'pull_request') &&
           (github.event_name != 'pull_request' ||
             (github.event.pull_request.head.repo.full_name == github.repository &&
              github.actor != 'dependabot[bot]'))
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${SONAR_TOKEN:-}" ]]; then
+            printf 'available=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'available=false\n' >> "$GITHUB_OUTPUT"
+            printf '::notice title=SonarQube skipped::SONAR_TOKEN is not configured; skipping SonarQube scan.\n'
+          fi
+
+      - name: Cache SonarQube packages
+        if: steps.sonar-token.outputs.available == 'true'
         uses: actions/cache@v6
         with:
           path: ~/.sonar/cache
@@ -98,11 +113,7 @@ jobs:
           restore-keys: ${{ runner.os }}-sonar
 
       - name: Install Sonar Scanner CLI
-        if: >
-          (github.ref == 'refs/heads/main' || github.event_name == 'pull_request') &&
-          (github.event_name != 'pull_request' ||
-            (github.event.pull_request.head.repo.full_name == github.repository &&
-             github.actor != 'dependabot[bot]'))
+        if: steps.sonar-token.outputs.available == 'true'
         env:
           SONAR_SCANNER_GPG_FINGERPRINT: 679F1EE92B19609DE816FDE81DB198F93525EC1A
           SONAR_SCANNER_VERSION: 8.1.0.6389
@@ -145,11 +156,7 @@ jobs:
           printf '%s\n' "${scanner_root}/sonar-scanner-${SONAR_SCANNER_VERSION}-${scanner_flavor}/bin" >> "$GITHUB_PATH"
 
       - name: SonarQube scan
-        if: >
-          (github.ref == 'refs/heads/main' || github.event_name == 'pull_request') &&
-          (github.event_name != 'pull_request' ||
-            (github.event.pull_request.head.repo.full_name == github.repository &&
-             github.actor != 'dependabot[bot]'))
+        if: steps.sonar-token.outputs.available == 'true'
         timeout-minutes: 10
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
