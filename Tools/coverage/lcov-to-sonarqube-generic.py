@@ -12,14 +12,20 @@ def usage() -> None:
     print("usage: lcov-to-sonarqube-generic.py <input.lcov> <output.xml> [project-root]", file=sys.stderr)
 
 
+def path_under_root(path: str | Path, root: Path) -> Path:
+    candidate = path if isinstance(path, Path) else Path(path)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise SystemExit(f"path escapes project root: {path}") from error
+    return resolved
+
+
 def relative_path(path: str, root: Path) -> str:
-    source = Path(path)
-    if source.is_absolute():
-        try:
-            return source.resolve().relative_to(root).as_posix()
-        except ValueError:
-            return source.as_posix()
-    return source.as_posix()
+    return path_under_root(path, root).relative_to(root).as_posix()
 
 
 def parse_lcov(path: Path, root: Path) -> dict[str, dict[int, bool]]:
@@ -64,9 +70,10 @@ def main() -> int:
         usage()
         return 2
 
-    input_path = Path(sys.argv[1])
-    output_path = Path(sys.argv[2])
-    root = Path(sys.argv[3] if len(sys.argv) == 4 else ".").resolve()
+    workspace = Path.cwd().resolve()
+    root = path_under_root(sys.argv[3] if len(sys.argv) == 4 else ".", workspace)
+    input_path = path_under_root(sys.argv[1], root)
+    output_path = path_under_root(sys.argv[2], root)
     write_generic_coverage(parse_lcov(input_path, root), output_path)
     return 0
 

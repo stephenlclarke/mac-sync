@@ -133,20 +133,26 @@ coverage-check: coverage
 sonar: coverage sonar-scan
 
 sonar-scan:
-	@test -f coverage.xml || { \
-		printf 'coverage.xml is missing; run make coverage or make ci before make sonar-scan\n' >&2; \
+	@test -s coverage.xml || { \
+		printf 'coverage.xml is missing or empty; run make coverage or make ci before make sonar-scan\n' >&2; \
 		exit 2; \
 	}
+	@coverage_lines="$$(grep -c '<lineToCover ' coverage.xml || true)"; \
+	if [[ "$$coverage_lines" -eq 0 ]]; then \
+		printf 'coverage.xml has no lineToCover entries; run make coverage before make sonar-scan\n' >&2; \
+		exit 2; \
+	fi; \
+	printf 'Sonar coverage report: coverage.xml (%s line entries)\n' "$$coverage_lines"
 	@sonar_token="$${SONAR_TOKEN:-$${SONAR_TOKEN_PERSONAL:-}}"; \
 	if [[ -z "$$sonar_token" ]]; then \
 		printf 'SONAR_TOKEN or SONAR_TOKEN_PERSONAL is required for make sonar\n' >&2; \
 		exit 2; \
 	fi
-	sonar_token="$${SONAR_TOKEN:-$${SONAR_TOKEN_PERSONAL:-}}"; \
+	@sonar_token="$${SONAR_TOKEN:-$${SONAR_TOKEN_PERSONAL:-}}"; \
 	branch="$${SONAR_BRANCH:-$$(git branch --show-current 2>/dev/null || true)}"; \
 	attempt=1; \
 	max_attempts="$(SONAR_SCAN_ATTEMPTS)"; \
-	scanner_args=(-Dsonar.qualitygate.wait="$(SONAR_QUALITYGATE_WAIT)"); \
+	scanner_args=(-Dsonar.qualitygate.wait="$(SONAR_QUALITYGATE_WAIT)" -Dsonar.coverageReportPaths=coverage.xml); \
 	if [[ -n "$$branch" && "$$branch" != "HEAD" ]]; then \
 		scanner_args=(-Dsonar.branch.name="$$branch" "$${scanner_args[@]}"); \
 	fi; \
@@ -157,6 +163,9 @@ sonar-scan:
 		set -e; \
 		if [[ "$$status" -eq 0 ]]; then \
 			exit 0; \
+		fi; \
+		if [[ "$$status" -eq 3 ]]; then \
+			exit "$$status"; \
 		fi; \
 		if (( attempt >= max_attempts )); then \
 			exit "$$status"; \

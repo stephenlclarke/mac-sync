@@ -8,6 +8,16 @@ import re
 from pathlib import Path
 
 
+def path_under_workspace(path: Path, workspace: Path) -> Path:
+    candidate = path if path.is_absolute() else workspace / path
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(workspace)
+    except ValueError as error:
+        raise SystemExit(f"path escapes workspace: {path}") from error
+    return resolved
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--formula", required=True, type=Path)
@@ -30,14 +40,20 @@ def replace_once(pattern: str, replacement: str, text: str) -> str:
 
 def main() -> None:
     args = parse_args()
-    if args.formula.exists():
-        text = args.formula.read_text(encoding="utf-8")
-    elif args.template is not None:
-        text = args.template.read_text(encoding="utf-8")
+    workspace = Path.cwd().resolve()
+    formula = path_under_workspace(args.formula, workspace)
+    template = path_under_workspace(args.template, workspace) if args.template is not None else None
+
+    if formula.exists():
+        text = formula.read_text(encoding="utf-8")
+    elif template is not None:
+        text = template.read_text(encoding="utf-8")
     else:
-        raise SystemExit(f"formula does not exist and no template was supplied: {args.formula}")
+        raise SystemExit(f"formula does not exist and no template was supplied: {formula}")
 
     if args.formula_class is not None:
+        if re.fullmatch(r"[A-Z][A-Za-z0-9]*", args.formula_class) is None:
+            raise SystemExit(f"invalid formula class: {args.formula_class}")
         text = replace_once(r"^class \w+ < Formula$", f"class {args.formula_class} < Formula", text)
 
     text = replace_once(r'^  url ".+"$', f'  url "{args.url}"', text)
@@ -48,8 +64,8 @@ def main() -> None:
         f"This formula installs the {args.label} prebuilt package asset:\n        {args.asset}",
         text,
     )
-    args.formula.parent.mkdir(parents=True, exist_ok=True)
-    args.formula.write_text(text, encoding="utf-8")
+    formula.parent.mkdir(parents=True, exist_ok=True)
+    formula.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

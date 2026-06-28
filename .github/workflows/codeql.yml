@@ -28,7 +28,7 @@ jobs:
   analyze:
     name: Analyze Swift
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
@@ -43,7 +43,7 @@ jobs:
           config-file: .github/codeql/codeql-config.yml
 
       - name: Build Swift package for CodeQL
-        timeout-minutes: 15
+        timeout-minutes: 35
         run: make build
 
       - name: Analyze

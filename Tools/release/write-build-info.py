@@ -8,9 +8,19 @@ import json
 from pathlib import Path
 
 
+def path_under_workspace(path: Path, workspace: Path) -> Path:
+    candidate = path if path.is_absolute() else workspace / path
+    resolved = candidate.resolve(strict=False)
+    try:
+        resolved.relative_to(workspace)
+    except ValueError as error:
+        raise SystemExit(f"path escapes workspace: {path}") from error
+    return resolved
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", required=True)
+    parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--source", required=True)
     parser.add_argument("--branch", required=True)
@@ -22,7 +32,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    output = Path(args.output)
+    output = path_under_workspace(args.output, Path.cwd().resolve())
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": args.version,
