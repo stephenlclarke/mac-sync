@@ -17,6 +17,8 @@ readonly OTHER_CLONE="${TMP_ROOT}/other-clone"
 readonly PUSH_RACE_MARKER="${TMP_ROOT}/push-race-fired"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
 readonly STDERR_FILE="${TMP_ROOT}/stderr"
+readonly GIT_TEST_NAME="mac-sync test"
+readonly GIT_TEST_EMAIL="mac-sync@example.invalid"
 
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 
@@ -90,26 +92,26 @@ EOF
 : >"$TEST_REPO/config/excludes.txt"
 
 git -C "$TEST_REPO" init -b main >/dev/null
-git -C "$TEST_REPO" config user.name "mac-sync test"
-git -C "$TEST_REPO" config user.email "mac-sync@example.invalid"
+git -C "$TEST_REPO" config user.name "$GIT_TEST_NAME"
+git -C "$TEST_REPO" config user.email "$GIT_TEST_EMAIL"
 git -C "$TEST_REPO" add .
 git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
 
 git -C "$REMOTE_WORK" init -b main >/dev/null
-git -C "$REMOTE_WORK" config user.name "mac-sync test"
-git -C "$REMOTE_WORK" config user.email "mac-sync@example.invalid"
+git -C "$REMOTE_WORK" config user.name "$GIT_TEST_NAME"
+git -C "$REMOTE_WORK" config user.email "$GIT_TEST_EMAIL"
 printf 'tracked base\n' >"$REMOTE_WORK/README.md"
 printf 'other-base\n' >"$REMOTE_WORK/machines/other/home/.bashrc"
 git -C "$REMOTE_WORK" add .
 git -C "$REMOTE_WORK" commit -m "seed other machine" >/dev/null
 git clone --bare "$REMOTE_WORK" "$REMOTE_BARE" >/dev/null 2>&1
 git clone "$REMOTE_BARE" "$TEST_MACHINES_REPO" >/dev/null 2>&1
-git -C "$TEST_MACHINES_REPO" config user.name "mac-sync test"
-git -C "$TEST_MACHINES_REPO" config user.email "mac-sync@example.invalid"
+git -C "$TEST_MACHINES_REPO" config user.name "$GIT_TEST_NAME"
+git -C "$TEST_MACHINES_REPO" config user.email "$GIT_TEST_EMAIL"
 
 git clone "$REMOTE_BARE" "$OTHER_CLONE" >/dev/null 2>&1
-git -C "$OTHER_CLONE" config user.name "mac-sync test"
-git -C "$OTHER_CLONE" config user.email "mac-sync@example.invalid"
+git -C "$OTHER_CLONE" config user.name "$GIT_TEST_NAME"
+git -C "$OTHER_CLONE" config user.email "$GIT_TEST_EMAIL"
 printf 'other-update\n' >"$OTHER_CLONE/machines/other/home/.bashrc"
 git -C "$OTHER_CLONE" commit -am "sync other machine" >/dev/null
 git -C "$OTHER_CLONE" push origin main >/dev/null 2>&1

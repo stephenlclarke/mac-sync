@@ -119,8 +119,8 @@ cli-smoke-built:
 		printf '%s is missing; run make build before make cli-smoke-built\n' "$(MAC_SPINNER_BINARY)" >&2; \
 		exit 2; \
 	}
-	"$(MAC_SYNC_BINARY)" --help >/dev/null
-	"$(MAC_SYNC_BINARY)" list >/dev/null
+	MAC_SYNC_REPO="$(CURDIR)" "$(MAC_SYNC_BINARY)" --help >/dev/null
+	MAC_SYNC_REPO="$(CURDIR)" "$(MAC_SYNC_BINARY)" list >/dev/null
 	"$(MAC_SPINNER_BINARY)" --message smoke --pending >/dev/null
 
 coverage: swift-coverage

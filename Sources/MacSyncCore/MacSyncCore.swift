@@ -1614,12 +1614,11 @@ public final class MacSyncApp {
         var fromMachine = config.machineName
         while !args.isEmpty {
             let arg = args.removeFirst()
-            switch arg {
-            case "--from":
+            if arg == "--from" {
                 guard let value = args.first else { try fail("missing machine name after --from", code: 2) }
                 fromMachine = value
                 args.removeFirst()
-            default:
+            } else {
                 try fail("unknown secrets list option: \(arg)", code: 2)
             }
         }
@@ -1786,12 +1785,11 @@ public final class MacSyncApp {
         var machine = config.machineName
         while !args.isEmpty {
             let arg = args.removeFirst()
-            switch arg {
-            case "--from":
+            if arg == "--from" {
                 guard let value = args.first else { try fail("missing machine name after --from", code: 2) }
                 machine = value
                 args.removeFirst()
-            default:
+            } else {
                 try fail("unknown \(commandName) option: \(arg)", code: 2)
             }
         }
@@ -2669,7 +2667,14 @@ public final class MacSyncApp {
         for rel in try manifestPaths() {
             let src = sourcePath(for: rel)
             let dest = destPath(for: rel)
-            let state = pathExists(src) ? (isDirectory(src) ? "dir" : "file") : "missing"
+            let state: String
+            if !pathExists(src) {
+                state = "missing"
+            } else if isDirectory(src) {
+                state = "dir"
+            } else {
+                state = "file"
+            }
             info("\(state.padding(toLength: 8, withPad: " ", startingAt: 0)) \(src) -> \(dest)")
         }
     }
