@@ -168,7 +168,7 @@ EOF
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
 
 run_mac_sync sync sync
-assert_stdout_contains $'\342\240\213 updating Homebrew package snapshot'
+assert_stdout_contains $'\342\240\223 updating Homebrew package snapshot'
 assert_stdout_contains $'\342\234\224\357\270\216 updated Homebrew package snapshot: '"$TEST_MACHINES_REPO/machines/target/homebrew"
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/homebrew/taps.txt" "homebrew/cask"
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/homebrew/taps.txt" "stephenlclarke/tools"

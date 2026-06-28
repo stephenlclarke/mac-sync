@@ -1,5 +1,17 @@
 # mac-sync
 
+[![CI](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml)
+[![Homebrew](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=coverage)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=bugs)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Duplicated Lines](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+
 `mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
 packages, VS Code extensions, encrypted secrets, and local GitHub clones in
 git, split by machine name. This repo owns the command and backup/restore
@@ -12,20 +24,31 @@ Snapshots are written to:
 ~/github/dot-files/machines/<machine-name>/
 ```
 
-The reusable sync command lives in:
+The command is implemented as a SwiftPM package. The reusable launcher lives in:
 
 ```text
 bin/mac-sync
 ```
+
+That launcher prefers `.build/release/mac-sync` or `.build/debug/mac-sync`, then
+falls back to `swift run` when no built binary exists.
 
 See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
 restore runbook.
 
 ## Install
 
+From Homebrew:
+
+```sh
+brew tap stephenlclarke/tap
+brew install mac-sync
+```
+
 From this repo:
 
 ```sh
+make build
 ./bin/mac-sync install
 ```
 
@@ -88,9 +111,20 @@ Commands:
 - `status`: show install, LaunchAgent, repo, git, and last-sync state
 - `help [topic]`: show general help or command-specific help
 
-During `sync`, in-progress work is shown with a compact rotating Braille-dot
+During `sync`, in-progress work is shown with a compact three-dot figure-eight Braille
 marker from `mac-spinner`, and completed work is printed with a tick marker.
 Paths that are already unchanged stay quiet.
+
+## Development
+
+```sh
+make ci
+make package-release
+```
+
+CI runs Swift unit tests with coverage, the existing shell regression suite,
+CLI smoke checks, CodeQL, SonarCloud analysis, sanitizer jobs, Homebrew formula
+syntax checks, and branch prebuilt publishing for the Homebrew tap.
 
 ## Status
 

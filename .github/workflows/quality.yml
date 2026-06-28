@@ -1,0 +1,100 @@
+name: Quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  swift-address-sanitizer:
+    name: Swift ASan
+    if: github.event_name != 'schedule'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout mac-sync
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Run Swift tests with Address Sanitizer
+        run: |
+          SWIFT_TEST_RESULT_LOG=.build/swift-asan.log \
+            SWIFT_TEST_ATTEMPTS=2 \
+            Tools/ci/run-swift-test.sh swift test --disable-automatic-resolution --sanitize=address --no-parallel
+
+  swift-thread-sanitizer:
+    name: Swift TSan Nightly
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout mac-sync
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Run Swift tests with Thread Sanitizer
+        run: |
+          SWIFT_TEST_RESULT_LOG=.build/swift-tsan.log \
+            SWIFT_TEST_ATTEMPTS=2 \
+            Tools/ci/run-swift-test.sh swift test --disable-automatic-resolution --sanitize=thread --no-parallel
+
+  swift-style-advisory:
+    name: SwiftLint/SwiftFormat Advisory
+    if: github.event_name != 'schedule'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout mac-sync
+        uses: actions/checkout@v7
+
+      - name: Install Swift style tools
+        env:
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          set -euo pipefail
+          if ! command -v swiftlint >/dev/null 2>&1; then
+            HOMEBREW_REQUIRE_TAP_TRUST=1 brew install swiftlint
+          fi
+          if ! command -v swiftformat >/dev/null 2>&1; then
+            HOMEBREW_REQUIRE_TAP_TRUST=1 brew install swiftformat
+          fi
+          swiftlint version
+          swiftformat --version
+
+      - name: Run SwiftLint
+        run: |
+          set +e
+          swiftlint lint --strict --quiet Package.swift Sources Tests
+          status="$?"
+          if [[ "$status" -ne 0 ]]; then
+            printf '::warning title=SwiftLint advisory::swiftlint exited with status %s\n' "$status"
+          fi
+          exit 0
+
+      - name: Run SwiftFormat lint
+        run: |
+          set +e
+          swiftformat Package.swift Sources Tests --lint --swift-version 6.2
+          status="$?"
+          if [[ "$status" -ne 0 ]]; then
+            printf '::warning title=SwiftFormat advisory::swiftformat exited with status %s\n' "$status"
+          fi
+          exit 0

@@ -1,6 +1,18 @@
 .DS_Store
 *.tmp
 *.log
+.build/
+.swiftpm/
+dist/
+coverage.lcov
+coverage.xml
+default.profraw
+*.profraw
+*.profdata
+*.tar.gz
+*.tar.gz.sha256
+__pycache__/
+*.pyc
 
 # Machine snapshots live in ~/github/dot-files/machines, not this repo.
 machines/

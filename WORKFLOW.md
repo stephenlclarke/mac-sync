@@ -1,7 +1,12 @@
 # mac-sync Workflow
 
-This workflow describes how to download, configure, install, sync, and restore
-`mac-sync` on a Mac.
+This workflow describes how to download, configure, install, sync, restore, and
+upgrade `mac-sync` on a Mac.
+
+`mac-sync` is implemented as a SwiftPM package. The old Bash implementation has
+been removed; `bin/mac-sync` and `bin/mac-spinner` are compatibility launchers
+that run the built Swift executables or fall back to `swift run` during local
+development.
 
 `mac-sync` uses two repositories:
 
@@ -19,9 +24,10 @@ flowchart TD
   A["Start on a Mac"] --> B["Install prerequisites<br/>brew install age gnu-tar"]
   B --> C["Clone mac-sync<br/>git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync"]
   B --> D["Clone dot-files<br/>git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files"]
-  C --> E["Review sync paths<br/>mac-sync manifest configured"]
+  C --> S["Build Swift binaries<br/>cd ~/github/mac-sync<br/>make build-release"]
+  S --> E["Review sync paths<br/>./bin/mac-sync manifest configured"]
   D --> E
-  E --> F["Install mac-sync LaunchAgent<br/>cd ~/github/mac-sync<br/>./bin/mac-sync install"]
+  E --> F["Install Swift command and LaunchAgent<br/>./bin/mac-sync install"]
   F --> G{"Existing machine snapshot?<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"}
   G -- "No" --> H["Run initial sync<br/>mac-sync sync"]
   G -- "Yes" --> I["Preview restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
@@ -44,7 +50,24 @@ secrets workflow also needs `age` and GNU tar:
 brew install age gnu-tar
 ```
 
-Clone both repositories:
+Install the released Swift binary with Homebrew when you want the managed
+package:
+
+```sh
+brew tap stephenlclarke/tap
+brew install mac-sync
+```
+
+For source installs, make sure the Swift toolchain is available:
+
+```sh
+swift --version
+```
+
+If `swift` is missing, install Xcode or the Xcode Command Line Tools before
+continuing.
+
+Clone both repositories for source installs and for snapshot storage:
 
 ```sh
 mkdir -p ~/github
@@ -66,13 +89,13 @@ Review the tracked configuration before the first sync. The regular path list
 lives in the `mac-sync` repo:
 
 ```sh
-mac-sync manifest configured
+./bin/mac-sync manifest configured
 ```
 
 - `config/sync-paths.txt`: regular dotfiles and directories to copy
-- `excludes.txt`: `rsync` exclude patterns used during dotfile sync
-- `secret-paths.txt`: sensitive paths encrypted into the secrets archive
-- `age-recipients.txt`: public `age` recipients trusted to decrypt secrets
+- `config/excludes.txt`: `rsync` exclude patterns used during dotfile sync
+- `config/secret-paths.txt`: sensitive paths encrypted into the secrets archive
+- `config/age-recipients.txt`: public `age` recipients trusted to decrypt secrets
 
 The default machine name is derived from the macOS host name. Override it when
 you want a stable or friendlier directory name:
@@ -89,19 +112,30 @@ The machine snapshot will be written under:
 
 ## Install
 
-Install from the `mac-sync` repo:
+Build and install from the `mac-sync` repo:
 
 ```sh
 cd ~/github/mac-sync
+make build-release
 ./bin/mac-sync install
+```
+
+When Homebrew installed the binary, install the LaunchAgent from that binary:
+
+```sh
+mac-sync install
 ```
 
 Install does this:
 
-- copies the command to `~/bin/mac-sync`
+- copies the Swift command to `~/bin/mac-sync`
+- copies the Swift spinner helper to `~/bin/mac-spinner`
 - writes `~/Library/LaunchAgents/tools.xyzzy.mac-sync.plist`
 - loads the LaunchAgent into the current GUI session
 - schedules an hourly run at minute `0`
+
+The installed files in `~/bin` should be Mach-O Swift executables. The old Bash
+implementation is intentionally not kept as a fallback.
 
 Change the hourly minute at install time:
 
@@ -111,6 +145,59 @@ MAC_SYNC_HOURLY_MINUTE=17 ./bin/mac-sync install
 
 The LaunchAgent stores both repo paths in its environment, so the automated run
 continues to use the same `mac-sync` and `dot-files` checkouts.
+
+## Update From Bash to Swift
+
+Use this section on Macs that already installed an older Bash-only `mac-sync`.
+The goal is to stop the old LaunchAgent, build or install the Swift binary, and
+overwrite `~/bin/mac-sync` and `~/bin/mac-spinner`.
+
+Stop the current LaunchAgent if it is loaded:
+
+```sh
+launch_agent="$HOME/Library/LaunchAgents/tools.xyzzy.mac-sync.plist"
+launchctl bootout "gui/$(id -u)" "$launch_agent" 2>/dev/null || true
+```
+
+Update the source checkout and build the Swift release binaries:
+
+```sh
+cd ~/github/mac-sync
+git pull --ff-only
+make build-release
+```
+
+Reinstall the command and LaunchAgent from the Swift build:
+
+```sh
+./bin/mac-sync install
+```
+
+If you prefer the Homebrew package instead of a source checkout:
+
+```sh
+brew tap stephenlclarke/tap
+brew reinstall mac-sync
+mac-sync install
+```
+
+Confirm that the installed commands are no longer Bash scripts:
+
+```sh
+file ~/bin/mac-sync ~/bin/mac-spinner
+~/bin/mac-spinner --message upgraded --pending
+~/bin/mac-sync status
+```
+
+`file` should report Mach-O executables. If it still reports shell scripts,
+rerun the install command from a built Swift checkout or from the Homebrew
+binary that should own this Mac.
+
+Run a manual sync after upgrading:
+
+```sh
+~/bin/mac-sync sync
+```
 
 ## Initial Sync
 
@@ -155,7 +242,7 @@ sequenceDiagram
   else local checkout stale or dirty
     CLI->>GitHub: git clone --depth 1 --branch main ...
   end
-  CLI->>CLI: install ~/bin/mac-sync and exec when changed
+  CLI->>CLI: install Swift ~/bin/mac-sync and exec when changed
   CLI->>Code: git -C ~/github/mac-sync pull --ff-only
   CLI->>Snap: git -C ~/github/dot-files pull --ff-only
   CLI->>Code: read config/sync-paths.txt
@@ -208,13 +295,14 @@ Local sync status is written outside git:
 
 Use restore when setting up a new Mac or copying a snapshot from another Mac.
 
-Clone both repos first, then install the command:
+Clone both repos first, then build and install the command:
 
 ```sh
 mkdir -p ~/github
 git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync
 git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
 cd ~/github/mac-sync
+make build-release
 ./bin/mac-sync install
 ```
 
@@ -325,7 +413,7 @@ For a replacement Mac, the usual order is:
 
 1. Clone `mac-sync` and `dot-files`.
 2. Install prerequisites.
-3. Run `./bin/mac-sync install`.
+3. Build or install the Swift binary, then run `./bin/mac-sync install`.
 4. Run `mac-sync restore --list-machines` and pick the old Mac snapshot.
 5. Run `MAC_SYNC_DRY_RUN=1 mac-sync restore --from <old-machine>`.
 6. Run `mac-sync restore --from <old-machine>`.

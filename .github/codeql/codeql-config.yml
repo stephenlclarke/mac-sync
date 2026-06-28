@@ -1,0 +1,11 @@
+name: mac-sync-codeql
+
+paths:
+  - Sources
+
+paths-ignore:
+  - .build/**
+  - .swiftpm/**
+  - dist/**
+  - Tests/**
+  - Tools/**

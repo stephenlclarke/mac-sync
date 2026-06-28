@@ -1,0 +1,45 @@
+name: Homebrew
+
+on:
+  push:
+    branches:
+      - main
+      - release
+      - "release-*"
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  formula:
+    name: Formula Syntax
+    runs-on: macos-26
+    steps:
+      - name: Checkout mac-sync
+        uses: actions/checkout@v7
+
+      - name: Validate Ruby syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -c Formula/mac-sync.rb
+
+      - name: Inspect formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew tap stephenlclarke/mac-sync "${GITHUB_WORKSPACE}"
+          brew trust --tap stephenlclarke/mac-sync
+          brew info --formula stephenlclarke/mac-sync/mac-sync
