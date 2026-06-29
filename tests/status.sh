@@ -3,14 +3,13 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-status.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
-readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly FAKE_BIN="${TMP_ROOT}/fake-bin"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
 readonly STDERR_FILE="${TMP_ROOT}/stderr"
@@ -55,7 +54,6 @@ run_mac_sync() {
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
@@ -67,7 +65,6 @@ run_mac_sync() {
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
@@ -79,27 +76,10 @@ run_mac_sync() {
 
 mkdir -p \
   "$FAKE_BIN" \
-  "$TEST_REPO/bin" \
   "$TEST_REPO/config" \
   "$TEST_MACHINES_REPO" \
   "$TEST_HOME"
 
-cat >"$FAKE_BIN/launchctl" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-case "${1:-}" in
-  print)
-    exit 0
-    ;;
-  *)
-    exit 2
-    ;;
-esac
-EOF
-chmod +x "$FAKE_BIN/launchctl"
-
-cp "$SCRIPT_PATH" "$TEST_REPO/bin/mac-sync"
 git -C "$TEST_REPO" init -b main >/dev/null
 git -C "$TEST_REPO" config user.name "mac-sync test"
 git -C "$TEST_REPO" config user.email "mac-sync@example.invalid"
@@ -113,7 +93,7 @@ cat >"$TEST_REPO/config/sync-paths.txt" <<'EOF'
 EOF
 
 : >"$TEST_REPO/config/excludes.txt"
-git -C "$TEST_REPO" add bin/mac-sync config/sync-paths.txt config/excludes.txt
+git -C "$TEST_REPO" add config/sync-paths.txt config/excludes.txt
 git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
 
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
@@ -145,8 +125,7 @@ assert_stdout_contains "local repo: $TEST_REPO"
 assert_stdout_contains "machines repo: $TEST_MACHINES_REPO"
 assert_stdout_lacks "machine dir:"
 assert_stdout_contains "status file: $TEST_HOME/Library/Application Support/mac-sync/status/target.env"
-assert_stdout_contains "LaunchAgent state: loaded"
-assert_stdout_contains "next scheduled run:"
+assert_stdout_contains "Homebrew service: use \`brew services info mac-sync\`"
 assert_stdout_contains "last sync: success"
 assert_stdout_contains "last sync finished:"
 assert_stdout_contains "last sync duration:"

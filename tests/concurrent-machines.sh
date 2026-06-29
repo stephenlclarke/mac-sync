@@ -3,13 +3,12 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-concurrent.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
-readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly REMOTE_WORK="${TMP_ROOT}/remote-work"
 readonly REMOTE_BARE="${TMP_ROOT}/machines.git"
 readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
@@ -52,24 +51,20 @@ run_mac_sync() {
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_SELF_UPDATE=0 \
     SCRIPT_COLOUR=off \
       "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   else
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_SELF_UPDATE=0 \
     SCRIPT_COLOUR=off \
       "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   fi
@@ -77,14 +72,8 @@ run_mac_sync() {
 
 mkdir -p \
   "$TEST_HOME" \
-  "$(dirname "$TEST_INSTALL")" \
-  "$TEST_REPO/bin" \
   "$TEST_REPO/config" \
   "$REMOTE_WORK/machines/other/home"
-
-cp "$SCRIPT_PATH" "$TEST_REPO/bin/mac-sync"
-cp "$SCRIPT_PATH" "$TEST_INSTALL"
-chmod +x "$TEST_INSTALL"
 
 cat >"$TEST_REPO/config/sync-paths.txt" <<'EOF'
 .bashrc

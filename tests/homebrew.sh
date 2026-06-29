@@ -3,14 +3,13 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-homebrew.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
 readonly TEST_HOME="${TMP_ROOT}/home"
-readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly FAKE_BIN="${TMP_ROOT}/fake-bin"
 readonly BREW_BUNDLE_LOG="${TMP_ROOT}/brew-bundle.log"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
@@ -54,7 +53,6 @@ run_mac_sync() {
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_VSCODE_EXTENSIONS=0 \
     BREW_FAKE_MODE="$mode" \
@@ -67,7 +65,6 @@ run_mac_sync() {
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
     MAC_SYNC_MACHINE=target \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_VSCODE_EXTENSIONS=0 \
     BREW_FAKE_MODE="$mode" \
@@ -80,7 +77,6 @@ run_mac_sync() {
 
 mkdir -p \
   "$FAKE_BIN" \
-  "$TEST_REPO/bin" \
   "$TEST_REPO/config" \
   "$TEST_MACHINES_REPO/machines/source/home" \
   "$TEST_HOME"
@@ -151,8 +147,6 @@ case "$1" in
 esac
 EOF
 chmod +x "$FAKE_BIN/brew"
-
-cp "$SCRIPT_PATH" "$TEST_REPO/bin/mac-sync"
 git -C "$TEST_REPO" init -b main >/dev/null
 git -C "$TEST_REPO" config user.name "mac-sync test"
 git -C "$TEST_REPO" config user.email "mac-sync@example.invalid"

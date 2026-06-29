@@ -3,7 +3,7 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 readonly USAGE_HEADER="USAGE:"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-help.XXXXXX")"

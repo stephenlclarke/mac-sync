@@ -6,6 +6,6 @@ This project is licensed under the GNU Affero General Public License v3.0
 ## Third-Party Materials
 
 At present, this repository does not vendor third-party source materials
-directly. It depends operationally on external tools and packages such as
-macFUSE and SSHFS, but their source or binary artifacts are not redistributed in
-this repository.
+directly. It depends operationally on external tools and packages such as Swift,
+Homebrew, `age`, GNU tar, Git, `rsync`, and VS Code's `code` CLI, but their
+source or binary artifacts are not redistributed in this repository.

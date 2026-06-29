@@ -4,7 +4,7 @@
 
 -
 
-## Type Of Change
+## Type of Change
 
 - [ ] Bug fix
 - [ ] New feature
@@ -12,7 +12,7 @@
 - [ ] Documentation update
 - [ ] Maintenance or workflow update
 
-## Motivation And Context
+## Motivation and Context
 
 Explain why this change is needed and link any related issue.
 

@@ -27,8 +27,8 @@ SWIFT_COVERAGE_TEST_ATTEMPTS ?= 3
 SWIFT_TEST_RUN_FLAGS ?= --no-parallel
 MAC_SYNC_BINARY ?= $(abspath .build/debug/mac-sync)
 MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
-SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines self-update
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md WORKFLOW.md
+SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
 .PHONY: all workflow ci clean run build build-release test resolve swift-test-build swift-test swift-coverage shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
@@ -209,7 +209,7 @@ check: lint
 lint: coverage-tools-test
 	@while IFS= read -r -d '' script; do \
 		bash -n "$$script"; \
-	done < <(find bin tests Tools -type f -name '*.sh' -print0)
+	done < <(find tests Tools -type f -name '*.sh' -print0)
 	$(SWIFT) package dump-package >/dev/null
 	@if command -v "$(MARKDOWNLINT)" >/dev/null 2>&1; then \
 		"$(MARKDOWNLINT)" $(MARKDOWN_FILES); \

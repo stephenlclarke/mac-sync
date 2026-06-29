@@ -147,6 +147,7 @@ sequenceDiagram
   participant Home as "$HOME"
   participant Code as "mac-sync repo"
   participant Snap as "dot-files repo"
+  participant GitHub
 
   User->>CLI: mac-sync sync
   CLI->>Code: git -C ~/github/mac-sync pull --ff-only
@@ -177,7 +178,7 @@ last sync result, storage totals, warnings, errors, remote repo, and commit.
 
 ## Hourly Sync
 
-Homebrew services owns the launchd job:
+Homebrew services own the launchd job:
 
 ```sh
 brew services start mac-sync

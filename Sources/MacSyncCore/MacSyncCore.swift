@@ -7,17 +7,10 @@ private struct ExitError: Error {
 
 private struct Config {
     let originalArgs: [String]
-    let selfPath: String
-    let selfDir: String
     let scriptName: String
     let homeDir: String
     let repoDir: String
     let machinesRepoDir: String
-    let installPath: String
-    let installDir: String
-    let spinnerInstallPath: String
-    let hourlyMinute: String
-    let launchAgentPathEnv: String
     let dryRun: String
     let dynamicRefs: String
     let homebrewSync: String
@@ -26,10 +19,6 @@ private struct Config {
     let githubReposSync: String
     let secretsSync: String
     let manifestSource: String
-    let selfUpdate: String
-    let selfUpdateMode: String
-    let selfUpdateRemote: String
-    let selfUpdateRef: String
     let brewBundleInstallFlags: String
     let pathsFile: String
     let excludesFile: String
@@ -37,13 +26,6 @@ private struct Config {
     let ageRecipientsFile: String
     let keychainService: String
     let keychainAccount: String
-    let repoScript: String
-    let repoSpinner: String
-    let selfSpinner: String
-    let launchAgentLabel: String
-    let launchAgentPlist: String
-    let logOut: String
-    let logErr: String
     let machineName: String
     let machinesRootDir: String
     let machineDir: String
@@ -63,31 +45,21 @@ private struct Config {
     let syncStatusFile: String
     let syncWarningsFile: String
     let syncErrorsFile: String
-    let selfUpdateStatusFile: String
 
     init(environment env: [String: String], originalArgs: [String], runner: ProcessRunner) {
         let selfPath = Config.realpathExisting(originalArgs.first ?? "mac-sync")
         let home = env["HOME"] ?? NSHomeDirectory()
         let repo = env["MAC_SYNC_REPO"] ?? "\(home)/github/mac-sync"
         let machinesRepo = env["MAC_SYNC_MACHINES_REPO"] ?? "\(home)/github/dot-files"
-        let install = env["MAC_SYNC_INSTALL_PATH"] ?? "\(home)/bin/mac-sync"
-        let installDir = (install as NSString).deletingLastPathComponent
         let machine = Config.computeMachineName(environment: env, runner: runner)
         let statusDir = env["MAC_SYNC_STATUS_DIR"] ?? "\(home)/Library/Application Support/mac-sync/status"
         let tmpDir = env["TMPDIR"] ?? "/tmp"
 
         self.originalArgs = Array(originalArgs.dropFirst())
-        self.selfPath = selfPath
-        self.selfDir = (selfPath as NSString).deletingLastPathComponent
         self.scriptName = (selfPath as NSString).lastPathComponent
         self.homeDir = home
         self.repoDir = repo
         self.machinesRepoDir = machinesRepo
-        self.installPath = install
-        self.installDir = installDir
-        self.spinnerInstallPath = "\(installDir)/mac-spinner"
-        self.hourlyMinute = env["MAC_SYNC_HOURLY_MINUTE"] ?? env["MAC_SYNC_DAILY_MINUTE"] ?? "0"
-        self.launchAgentPathEnv = env["MAC_SYNC_LAUNCH_AGENT_PATH"] ?? "\(home)/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         self.dryRun = env["MAC_SYNC_DRY_RUN"] ?? "0"
         self.dynamicRefs = env["MAC_SYNC_DYNAMIC_REFS"] ?? "1"
         self.homebrewSync = env["MAC_SYNC_HOMEBREW"] ?? "1"
@@ -96,10 +68,6 @@ private struct Config {
         self.githubReposSync = env["MAC_SYNC_GITHUB_REPOS"] ?? "1"
         self.secretsSync = env["MAC_SYNC_SECRETS"] ?? "1"
         self.manifestSource = env["MAC_SYNC_MANIFEST_SOURCE"] ?? "config"
-        self.selfUpdate = env["MAC_SYNC_SELF_UPDATE"] ?? "1"
-        self.selfUpdateMode = env["MAC_SYNC_SELF_UPDATE_MODE"] ?? "restart"
-        self.selfUpdateRemote = env["MAC_SYNC_SELF_UPDATE_REMOTE"] ?? ""
-        self.selfUpdateRef = env["MAC_SYNC_SELF_UPDATE_REF"] ?? "main"
         self.brewBundleInstallFlags = env["MAC_SYNC_BREW_BUNDLE_INSTALL_FLAGS"] ?? env["BREW_BUNDLE_INSTALL_FLAGS"] ?? ""
         self.pathsFile = env["MAC_SYNC_PATHS_FILE"] ?? "\(repo)/config/sync-paths.txt"
         self.excludesFile = env["MAC_SYNC_EXCLUDES_FILE"] ?? "\(repo)/config/excludes.txt"
@@ -107,13 +75,6 @@ private struct Config {
         self.ageRecipientsFile = env["MAC_SYNC_AGE_RECIPIENTS_FILE"] ?? "\(repo)/config/age-recipients.txt"
         self.keychainService = env["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
         self.keychainAccount = env["MAC_SYNC_KEYCHAIN_ACCOUNT"] ?? env["USER"] ?? runner.shell("id -un").stdout.trimmed
-        self.repoScript = "\(repo)/bin/mac-sync"
-        self.repoSpinner = "\(repo)/bin/mac-spinner"
-        self.selfSpinner = "\(self.selfDir)/mac-spinner"
-        self.launchAgentLabel = "tools.xyzzy.mac-sync"
-        self.launchAgentPlist = "\(home)/Library/LaunchAgents/tools.xyzzy.mac-sync.plist"
-        self.logOut = "/tmp/mac-sync.out"
-        self.logErr = "/tmp/mac-sync.err"
         self.machineName = machine
         self.machinesRootDir = "\(machinesRepo)/machines"
         self.machineDir = "\(machinesRepo)/machines/\(machine)"
@@ -133,7 +94,6 @@ private struct Config {
         self.syncStatusFile = "\(statusDir)/\(machine).env"
         self.syncWarningsFile = "\(statusDir)/\(machine).warnings.log"
         self.syncErrorsFile = "\(statusDir)/\(machine).errors.log"
-        self.selfUpdateStatusFile = "\(statusDir)/\(machine).self-update.env"
     }
 
     static func realpathExisting(_ path: String) -> String {
@@ -206,7 +166,6 @@ public final class MacSyncApp {
     private var lastNetByteChange = 0
     private var lastStorageFileCount = 0
     private var lastStorageByteCount = 0
-    private var selfUpdateScriptChanged = false
 
     public convenience init() {
         self.init(arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
@@ -238,10 +197,6 @@ public final class MacSyncApp {
             args.removeFirst()
         }
         switch command {
-        case "install", "bootstrap":
-            try cmdInstall()
-        case "uninstall":
-            cmdUninstall()
         case "sync", "run":
             try cmdSync()
         case "restore":
@@ -272,11 +227,8 @@ public final class MacSyncApp {
               \(config.scriptName) <command>
 
             COMMANDS:
-              install     Install or refresh mac-sync and its hourly LaunchAgent
-              bootstrap   Alias for install
-              uninstall   Unload the LaunchAgent and remove the installed command
               sync        Sync configured paths, commit machine changes, and push
-              run         LaunchAgent mode; alias for sync
+              run         Service mode; alias for sync
               restore     Restore this machine snapshot back into $HOME
               restore [--from <machine>|--select] [--force]
                           Restore another machine snapshot back into $HOME
@@ -286,7 +238,7 @@ public final class MacSyncApp {
               manifest    Show configured and discovered backup paths
               list        Show configured source paths and repo destinations
               paths       Alias for list
-              status      Show install, repo, LaunchAgent, git, and last-sync state
+              status      Show repo, git, local status, and last-sync state
               help [topic]
                           Show this help text or command-specific help
               -h, --help  Show this help text
@@ -295,11 +247,6 @@ public final class MacSyncApp {
               MAC_SYNC_REPO          mac-sync repo path. Default: $HOME/github/mac-sync
               MAC_SYNC_MACHINES_REPO Machine snapshot repo. Default: $HOME/github/dot-files
               MAC_SYNC_MACHINE       Machine directory name. Default: macOS host name
-              MAC_SYNC_INSTALL_PATH  Installed command. Default: $HOME/bin/mac-sync
-              MAC_SYNC_HOURLY_MINUTE LaunchAgent minute, 0-59. Default: 0
-              MAC_SYNC_DAILY_MINUTE  Legacy alias for MAC_SYNC_HOURLY_MINUTE
-              MAC_SYNC_LAUNCH_AGENT_PATH
-                                     PATH used by the LaunchAgent
               MAC_SYNC_STATUS_DIR    Local status directory
               MAC_SYNC_DRY_RUN       Set to 1 to preview sync and restore actions
               MAC_SYNC_DYNAMIC_REFS  Set to 0 to disable dotfile reference discovery
@@ -311,13 +258,6 @@ public final class MacSyncApp {
               MAC_SYNC_SECRETS       Set to 0 to disable encrypted secret snapshots
               MAC_SYNC_MANIFEST_SOURCE
                                      config, auto, or dot-files. Default: config
-              MAC_SYNC_SELF_UPDATE   Set to 0 to disable remote self-update checks
-              MAC_SYNC_SELF_UPDATE_MODE
-                                     restart or exit. Default: restart
-              MAC_SYNC_SELF_UPDATE_REMOTE
-                                     Git remote used for self-updates
-              MAC_SYNC_SELF_UPDATE_REF
-                                     Git branch used for self-updates. Default: main
               MAC_SYNC_KEYCHAIN_SERVICE
                                      Keychain service for the age identity
               MAC_SYNC_KEYCHAIN_ACCOUNT
@@ -325,7 +265,6 @@ public final class MacSyncApp {
               SCRIPT_COLOUR          Set to off, false, or 0 to disable colour
 
             EXAMPLES:
-              ./bin/mac-sync install
               mac-sync list
               mac-sync sync
               mac-sync restore --from old-mbp
@@ -335,7 +274,7 @@ public final class MacSyncApp {
               mac-sync secrets list --from old-mbp
               mac-sync help restore
               mac-sync help secrets
-              MAC_SYNC_MACHINE=work-mbp mac-sync install
+              MAC_SYNC_MACHINE=work-mbp mac-sync status
             """
         )
     }
@@ -582,15 +521,6 @@ public final class MacSyncApp {
     private func vscodeExtensionsSyncEnabled() -> Bool { enabled(config.vscodeExtensionsSync) }
     private func githubReposSyncEnabled() -> Bool { enabled(config.githubReposSync) }
     private func secretsSyncEnabled() -> Bool { enabled(config.secretsSync) }
-    private func selfUpdateEnabled() -> Bool {
-        enabled(config.selfUpdate, noValues: ["0", "off", "OFF", "false", "FALSE", "no", "NO"])
-    }
-
-    private func validateIntRange(name: String, value: String, min: Int, max: Int) throws {
-        guard let number = Int(value), number >= min, number <= max else {
-            try fail("\(name) must be an integer from \(min) to \(max)", code: 2)
-        }
-    }
 
     private func pathExists(_ path: String) -> Bool {
         fm.fileExists(atPath: path) || (try? fm.destinationOfSymbolicLink(atPath: path)) != nil
@@ -1715,7 +1645,6 @@ public final class MacSyncApp {
         try checkRuntime()
         try acquireLock()
         defer { releaseLock() }
-        try selfUpdateFromRemoteOrWarn()
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
         try syncSecretsArchive(mode: "required")
@@ -1772,7 +1701,6 @@ public final class MacSyncApp {
         try checkRuntime()
         try acquireLock()
         defer { releaseLock() }
-        try selfUpdateFromRemoteOrWarn()
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
         try syncHomebrewPackages()
@@ -1860,7 +1788,6 @@ public final class MacSyncApp {
         try checkRuntime()
         try acquireLock()
         defer { releaseLock() }
-        try selfUpdateFromRemoteOrWarn()
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
         try syncVscodeExtensions()
@@ -2118,217 +2045,6 @@ public final class MacSyncApp {
         progressDone(lastCommandOutput.contains("Already up to date.") ? "machines repo already up to date" : "pulled latest machines repo changes")
     }
 
-    private func isMachOExecutable(_ path: String) -> Bool {
-        guard fm.isExecutableFile(atPath: path),
-              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: 4), data.count == 4 else { return false }
-        let magicValues: Set<[UInt8]> = [
-            [0xCA, 0xFE, 0xBA, 0xBE],
-            [0xBE, 0xBA, 0xFE, 0xCA],
-            [0xFE, 0xED, 0xFA, 0xCF],
-            [0xCF, 0xFA, 0xED, 0xFE],
-        ]
-        return magicValues.contains(Array(data))
-    }
-
-    private func preferredExecutablePath(name: String, fallback: String) -> String {
-        let candidates = [
-            "\(config.selfDir)/\(name)",
-            "\(config.repoDir)/.build/release/\(name)",
-            "\(config.repoDir)/.build/debug/\(name)",
-        ]
-        return candidates.first { isMachOExecutable($0) } ?? fallback
-    }
-
-    private func commandSourcePath() -> String {
-        preferredExecutablePath(name: "mac-sync", fallback: config.selfPath)
-    }
-
-    private func spinnerSourcePath() -> String? {
-        let source = preferredExecutablePath(name: "mac-spinner", fallback: config.repoSpinner)
-        return fm.fileExists(atPath: source) ? source : nil
-    }
-
-    private func installSpinnerCommand() throws {
-        guard let source = spinnerSourcePath() else {
-            warning("spinner helper not found; skipping install: \(config.repoSpinner)")
-            return
-        }
-        let result = runner.run("install", ["-m", "755", source, config.spinnerInstallPath])
-        if result.status != 0 { throw ExitError(code: Int(result.status)) }
-    }
-
-    private func runningInstalledScript() -> Bool {
-        guard fm.fileExists(atPath: config.installPath) else { return false }
-        return Config.realpathExisting(config.selfPath) == Config.realpathExisting(config.installPath)
-    }
-
-    private func selfUpdateRemoteURL() -> String {
-        if !config.selfUpdateRemote.isEmpty { return config.selfUpdateRemote }
-        if isDirectory("\(config.repoDir)/.git") {
-            let result = runner.run("git", ["-C", config.repoDir, "remote", "get-url", "origin"])
-            if result.status == 0 { return result.stdout.trimmed }
-        }
-        return "https://github.com/stephenlclarke/mac-sync.git"
-    }
-
-    private func selfUpdateRemoteRefSHA(remote: String, ref: String) -> String? {
-        let heads = runner.shell("git ls-remote --heads \(ShellQuoter.quote(remote)) \(ShellQuoter.quote(ref)) 2>/dev/null | awk 'NR == 1 { print $1 }'").stdout.trimmed
-        if !heads.isEmpty { return heads }
-        let any = runner.shell("git ls-remote \(ShellQuoter.quote(remote)) \(ShellQuoter.quote(ref)) 2>/dev/null | awk 'NR == 1 { print $1 }'").stdout.trimmed
-        return any.isEmpty ? nil : any
-    }
-
-    private func selfUpdateCloneRef(_ ref: String) -> String {
-        if ref.hasPrefix("refs/heads/") { return String(ref.dropFirst("refs/heads/".count)) }
-        if ref.hasPrefix("refs/tags/") { return String(ref.dropFirst("refs/tags/".count)) }
-        return ref
-    }
-
-    private func selfUpdateLocalSourceCurrent(remoteSHA: String) -> Bool {
-        guard isDirectory("\(config.repoDir)/.git"), fm.fileExists(atPath: config.repoScript), repoClean(config.repoDir) else { return false }
-        return runner.run("git", ["-C", config.repoDir, "rev-parse", "HEAD"]).stdout.trimmed == remoteSHA
-    }
-
-    private func fileChecksum(_ file: String) -> String {
-        guard fm.fileExists(atPath: file) else { return "missing" }
-        let result = runner.run("cksum", [file]).stdout.split(separator: " ")
-        guard result.count >= 2 else { return "missing" }
-        return "\(result[0]):\(result[1])"
-    }
-
-    private func selfUpdateStateValue(_ key: String) -> String {
-        readText(config.selfUpdateStatusFile).splitLines().first { $0.hasPrefix("\(key)=") }?.dropFirst(key.count + 1).description ?? ""
-    }
-
-    private func selfUpdateStateCurrent(remote: String, ref: String, remoteSHA: String) -> Bool {
-        guard fm.fileExists(atPath: config.selfUpdateStatusFile) else { return false }
-        return selfUpdateStateValue("remote") == remote
-            && selfUpdateStateValue("ref") == ref
-            && selfUpdateStateValue("remote_sha") == remoteSHA
-            && selfUpdateStateValue("script_checksum") == fileChecksum(config.installPath)
-            && selfUpdateStateValue("spinner_checksum") == fileChecksum(config.spinnerInstallPath)
-    }
-
-    private func writeSelfUpdateState(remote: String, ref: String, remoteSHA: String) throws {
-        try writeText(
-            config.selfUpdateStatusFile,
-            """
-            remote=\(remote)
-            ref=\(ref)
-            remote_sha=\(remoteSHA)
-            script_checksum=\(fileChecksum(config.installPath))
-            spinner_checksum=\(fileChecksum(config.spinnerInstallPath))
-            """
-        )
-    }
-
-    private func cloneSelfUpdateSource(remote: String, ref: String, target: String) -> Bool {
-        runner.run("git", ["clone", "--quiet", "--depth", "1", "--branch", selfUpdateCloneRef(ref), remote, target]).status == 0
-    }
-
-    private func log(_ message: String) {
-        let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .medium)
-        let line = "[\(stamp)] \(message)\n"
-        if let data = line.data(using: .utf8) {
-            if fm.fileExists(atPath: config.logOut), let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: config.logOut)) {
-                _ = try? handle.seekToEnd()
-                _ = try? handle.write(contentsOf: data)
-                _ = try? handle.close()
-            } else {
-                fm.createFile(atPath: config.logOut, contents: data)
-            }
-        }
-    }
-
-    private func applySelfUpdateSource(sourceDir: String, sourceLabel: String) throws -> Bool {
-        selfUpdateScriptChanged = false
-        let sourceScript = "\(sourceDir)/bin/mac-sync"
-        let sourceSpinner = "\(sourceDir)/bin/mac-spinner"
-        if fm.fileExists(atPath: sourceSpinner), !filesEqual(sourceSpinner, config.spinnerInstallPath) {
-            try ensureDirectory(config.installDir)
-            let result = runner.run("install", ["-m", "755", sourceSpinner, config.spinnerInstallPath])
-            if result.status == 0 { log("updated installed spinner helper from \(sourceLabel)") }
-        }
-        guard fm.fileExists(atPath: sourceScript) else {
-            warning("self-update source is missing bin/mac-sync: \(sourceLabel)")
-            return false
-        }
-        if fm.fileExists(atPath: config.installPath), filesEqual(sourceScript, config.installPath) {
-            return true
-        }
-        try ensureDirectory(config.installDir)
-        let result = runner.run("install", ["-m", "755", sourceScript, config.installPath])
-        if result.status != 0 { return false }
-        selfUpdateScriptChanged = true
-        log("updated installed mac-sync from \(sourceLabel)")
-        return true
-    }
-
-    private func normalizedSelfUpdateMode() -> String {
-        switch config.selfUpdateMode {
-        case "restart", "reexec":
-            return "restart"
-        case "exit":
-            return "exit"
-        default:
-            warning("unknown MAC_SYNC_SELF_UPDATE_MODE: \(config.selfUpdateMode); using restart")
-            return "restart"
-        }
-    }
-
-    private func finishSelfUpdate(sourceLabel: String) throws {
-        guard selfUpdateScriptChanged else { return }
-        if normalizedSelfUpdateMode() == "exit" {
-            warning("mac-sync updated itself from \(sourceLabel)")
-            warning("Please re-run the sync using the new script: \(config.installPath) sync")
-            log("self-updated installed script and exited before continuing")
-            throw ExitError(code: 75)
-        }
-        warning("mac-sync updated itself from \(sourceLabel); restarting with the new script")
-        log("self-updated installed script and restarted")
-        releaseLock()
-        let result = runner.run(config.installPath, config.originalArgs, capture: true)
-        if !result.stdout.isEmpty { print(result.stdout, terminator: "") }
-        if !result.stderr.isEmpty { fputs(result.stderr, stderr) }
-        throw ExitError(code: Int(result.status))
-    }
-
-    private func selfUpdateFromRemoteOrWarn() throws {
-        guard selfUpdateEnabled(), config.dryRun != "1", runningInstalledScript() else { return }
-        let remote = selfUpdateRemoteURL()
-        guard let remoteSHA = selfUpdateRemoteRefSHA(remote: remote, ref: config.selfUpdateRef) else {
-            warning("could not check mac-sync self-update remote: \(remote) \(config.selfUpdateRef)")
-            return
-        }
-        let sourceDir: String
-        let sourceLabel: String
-        var tmpDir: String?
-        if selfUpdateLocalSourceCurrent(remoteSHA: remoteSHA) {
-            sourceDir = config.repoDir
-            sourceLabel = "\(config.repoDir) (\(config.selfUpdateRef)@\(remoteSHA.prefix(7)))"
-        } else if selfUpdateStateCurrent(remote: remote, ref: config.selfUpdateRef, remoteSHA: remoteSHA) {
-            return
-        } else {
-            let dir = try tempPath(prefix: "mac-sync-self-update", directory: true)
-            tmpDir = dir
-            guard cloneSelfUpdateSource(remote: remote, ref: config.selfUpdateRef, target: "\(dir)/source") else {
-                try? removePath(dir)
-                warning("could not clone mac-sync self-update source: \(remote) \(config.selfUpdateRef)")
-                return
-            }
-            sourceDir = "\(dir)/source"
-            sourceLabel = "\(remote) (\(config.selfUpdateRef)@\(remoteSHA.prefix(7)))"
-        }
-        if try applySelfUpdateSource(sourceDir: sourceDir, sourceLabel: sourceLabel) {
-            try writeSelfUpdateState(remote: remote, ref: config.selfUpdateRef, remoteSHA: remoteSHA)
-            if let tmpDir { try? removePath(tmpDir) }
-            try finishSelfUpdate(sourceLabel: sourceLabel)
-        }
-        if let tmpDir { try? removePath(tmpDir) }
-    }
-
     private func rebaseMachinesRepoBeforePush() -> Bool {
         guard branchHasUpstream(config.machinesRepoDir) else {
             progressDone("no upstream branch yet; skipping pre-push pull")
@@ -2536,7 +2252,6 @@ public final class MacSyncApp {
         try checkRuntime()
         try acquireLock()
         defer { releaseLock() }
-        try selfUpdateFromRemoteOrWarn()
         try startSyncStatus()
         do {
             try pullRepoIfSafe()
@@ -2679,99 +2394,6 @@ public final class MacSyncApp {
         }
     }
 
-    private func cmdInstall() throws {
-        try need("install")
-        try need("launchctl")
-        try validateIntRange(name: "MAC_SYNC_HOURLY_MINUTE", value: config.hourlyMinute, min: 0, max: 59)
-        try ensureDirectory(config.installDir)
-        try ensureDirectory((config.launchAgentPlist as NSString).deletingLastPathComponent)
-        var result = runner.run("install", ["-m", "755", commandSourcePath(), config.installPath])
-        if result.status != 0 { throw ExitError(code: Int(result.status)) }
-        try installSpinnerCommand()
-        try writeLaunchAgent()
-        _ = runner.run("launchctl", ["bootout", "gui/\(getuid())", config.launchAgentPlist])
-        result = runner.run("launchctl", ["bootstrap", "gui/\(getuid())", config.launchAgentPlist])
-        if result.status != 0 { throw ExitError(code: Int(result.status)) }
-        info("installed \(config.installPath)")
-        info("installed \(config.spinnerInstallPath)")
-        info("loaded \(config.launchAgentPlist)")
-    }
-
-    private func cmdUninstall() {
-        _ = runner.run("launchctl", ["bootout", "gui/\(getuid())", config.launchAgentPlist])
-        try? removePath(config.launchAgentPlist)
-        try? removePath(config.installPath)
-        try? removePath(config.spinnerInstallPath)
-        info("removed \(config.launchAgentPlist)")
-        info("removed \(config.installPath)")
-        info("removed \(config.spinnerInstallPath)")
-    }
-
-    private func xmlEscape(_ value: String) -> String {
-        value.replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
-            .replacingOccurrences(of: "'", with: "&apos;")
-    }
-
-    private func writeLaunchAgent() throws {
-        let optionalEnvironment = [
-            "SCRIPT_COLOUR",
-            "MAC_SYNC_SELF_UPDATE",
-            "MAC_SYNC_SELF_UPDATE_MODE",
-            "MAC_SYNC_SELF_UPDATE_REMOTE",
-            "MAC_SYNC_SELF_UPDATE_REF",
-        ].compactMap { key -> String? in
-            guard let value = environment[key], !value.isEmpty else { return nil }
-            return """
-                  <key>\(key)</key>
-                  <string>\(xmlEscape(value))</string>
-            """
-        }.joined(separator: "\n")
-        let plist = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-          <dict>
-            <key>Label</key>
-            <string>\(config.launchAgentLabel)</string>
-            <key>ProgramArguments</key>
-            <array>
-              <string>\(xmlEscape(config.installPath))</string>
-              <string>run</string>
-            </array>
-            <key>EnvironmentVariables</key>
-            <dict>
-              <key>MAC_SYNC_REPO</key>
-              <string>\(xmlEscape(config.repoDir))</string>
-              <key>MAC_SYNC_MACHINES_REPO</key>
-              <string>\(xmlEscape(config.machinesRepoDir))</string>
-              <key>MAC_SYNC_MACHINE</key>
-              <string>\(xmlEscape(config.machineName))</string>
-              <key>MAC_SYNC_GITHUB_ROOT</key>
-              <string>\(xmlEscape(config.githubRootDir))</string>
-              <key>PATH</key>
-              <string>\(xmlEscape(config.launchAgentPathEnv))</string>
-        \(optionalEnvironment)
-            </dict>
-            <key>RunAtLoad</key>
-            <true/>
-            <key>StartCalendarInterval</key>
-            <dict>
-              <key>Minute</key>
-              <integer>\(config.hourlyMinute)</integer>
-            </dict>
-            <key>StandardOutPath</key>
-            <string>\(xmlEscape(config.logOut))</string>
-            <key>StandardErrorPath</key>
-            <string>\(xmlEscape(config.logErr))</string>
-          </dict>
-        </plist>
-        """
-        try writeText(config.launchAgentPlist, plist)
-    }
-
     private func syncStatusValue(_ key: String) -> String {
         readText(config.syncStatusFile).splitLines().first { $0.hasPrefix("\(key)=") }?.dropFirst(key.count + 1).description ?? ""
     }
@@ -2795,56 +2417,17 @@ public final class MacSyncApp {
         for line in changes.splitLines() { info("  \(line)") }
     }
 
-    private func launchagentLoaded() -> Bool {
-        runner.run("launchctl", ["print", "gui/\(getuid())/\(config.launchAgentLabel)"]).status == 0
-    }
-
-    private func launchagentScheduledMinute() -> Int {
-        let text = readText(config.launchAgentPlist)
-        if let range = text.range(of: #"<key>Minute</key>\s*<integer>([0-9]+)</integer>"#, options: .regularExpression) {
-            let snippet = String(text[range])
-            let digits = snippet.replacingOccurrences(of: #"[^0-9]"#, with: "", options: .regularExpression)
-            if let value = Int(digits), value >= 0, value <= 59 { return value }
-        }
-        return Int(config.hourlyMinute) ?? 0
-    }
-
-    private func nextScheduledRun() -> String {
-        let now = Date()
-        let calendar = Calendar.current
-        let minute = launchagentScheduledMinute()
-        let currentMinute = calendar.component(.minute, from: now)
-        let currentSecond = calendar.component(.second, from: now)
-        let elapsed = currentMinute * 60 + currentSecond
-        let target = minute * 60
-        let delta = elapsed < target ? target - elapsed : 3600 - elapsed + target
-        let next = now.addingTimeInterval(TimeInterval(delta))
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss z"
-        return formatter.string(from: next)
-    }
-
     private func cmdStatus() {
         info("mac-sync version: \(repoCommitVersion(config.repoDir))")
         info("local repo: \(config.repoDir)")
         info("machines repo: \(config.machinesRepoDir)")
         info("machine: \(config.machineName)")
-        info("installed command: \(config.installPath)")
-        info("spinner command: \(config.spinnerInstallPath)")
         info("paths file: \(config.pathsFile)")
         info("manifest source: \(configuredManifestSourceLabel())")
         info("Homebrew snapshot dir: \(config.homebrewDir)")
         info("VS Code extension snapshot file: \(config.vscodeExtensionsFile)")
-        info("self-update remote: \(selfUpdateRemoteURL())")
-        info("self-update ref: \(config.selfUpdateRef)")
-        info("LaunchAgent: \(config.launchAgentPlist)")
         info("status file: \(config.syncStatusFile)")
-        info("self-update state file: \(config.selfUpdateStatusFile)")
-        info("stdout log: \(config.logOut)")
-        info("stderr log: \(config.logErr)")
-        info("install state: \(fm.isExecutableFile(atPath: config.installPath) ? "installed" : "not installed")")
-        info("LaunchAgent state: \(launchagentLoaded() ? "loaded" : "not loaded")")
-        info("next scheduled run: \(nextScheduledRun())")
+        info("Homebrew service: use `brew services info mac-sync`")
         info("machine snapshot stored: \(treeByteCount(config.machineDir)) bytes across \(treeFileCount(config.machineDir)) files")
         if fm.fileExists(atPath: config.syncStatusFile) {
             let remoteRepo = syncStatusValue("remote_repo").ifEmpty(runner.run("git", ["-C", config.machinesRepoDir, "remote", "get-url", "origin"]).stdout.trimmed.ifEmpty("unknown"))

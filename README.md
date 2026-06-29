@@ -24,52 +24,42 @@ Snapshots are written to:
 ~/github/dot-files/machines/<machine-name>/
 ```
 
-The command is implemented as a SwiftPM package. The reusable launcher lives in:
-
-```text
-bin/mac-sync
-```
-
-That launcher prefers `.build/release/mac-sync` or `.build/debug/mac-sync`, then
-falls back to `swift run` when no built binary exists.
+The command is implemented as a SwiftPM package and distributed as a
+Homebrew-managed Swift binary. Local source builds are for development and
+release packaging only.
 
 See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
 restore runbook.
 
 ## Install
 
-From Homebrew:
+Install with Homebrew:
 
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
 ```
 
-From this repo:
+Clone the config repo and machine snapshot repo at their default paths:
 
 ```sh
-make build
-./bin/mac-sync install
-```
-
-The machine snapshot repo must also exist locally:
-
-```sh
+git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync
 git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
 ```
 
-That command:
-
-- installs `mac-sync` to `~/bin/mac-sync`
-- installs the spinner helper to `~/bin/mac-spinner`
-- writes `~/Library/LaunchAgents/tools.xyzzy.mac-sync.plist`
-- loads the LaunchAgent into the current GUI session
-- schedules an hourly run at minute `0`
-
-Override install-time settings when needed:
+Use Homebrew to manage the scheduled service:
 
 ```sh
-MAC_SYNC_MACHINE=work-mbp MAC_SYNC_HOURLY_MINUTE=17 ./bin/mac-sync install
+brew services start mac-sync
+brew services restart mac-sync
+brew services stop mac-sync
+```
+
+For local development, build and run the Swift package directly:
+
+```sh
+make build
+.build/debug/mac-sync --help
 ```
 
 ## Usage
@@ -92,15 +82,12 @@ mac-sync help restore
 mac-sync help secrets
 mac-sync list
 mac-sync status
-mac-sync uninstall
 ```
 
 Commands:
 
-- `install`: install or refresh the command and hourly LaunchAgent
-- `uninstall`: unload the LaunchAgent and remove the installed command
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
-- `run`: LaunchAgent mode; same behavior as `sync`
+- `run`: service mode; same behavior as `sync`
 - `restore`: copy a machine snapshot from `dot-files` back into `$HOME` and
   re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
@@ -108,7 +95,7 @@ Commands:
 - `editor`: manage VS Code extension snapshots, diffs, and installs
 - `manifest`: show configured and dynamically discovered backup paths
 - `list`: show every configured source path and repo destination
-- `status`: show install, LaunchAgent, repo, git, and last-sync state
+- `status`: show repo, git, local status, and last-sync state
 - `help [topic]`: show general help or command-specific help
 
 During `sync`, in-progress work is shown with a compact three-dot figure-eight Braille
@@ -128,9 +115,8 @@ syntax checks, and branch prebuilt publishing for the Homebrew tap.
 
 ## Status
 
-Show the current `mac-sync` version SHA, install state, the LaunchAgent state,
-the next scheduled run, the last completed sync, the amount of data changed by
-that sync, total machine
+Show the current `mac-sync` version SHA, local repo paths, local status files,
+the last completed sync, the amount of data changed by that sync, total machine
 snapshot storage, and warning or error messages captured during the last sync:
 
 ```sh
@@ -144,7 +130,7 @@ repo. By default it is written under:
 ~/Library/Application Support/mac-sync/status/
 ```
 
-The status output also shows the LaunchAgent stdout and stderr log paths.
+Use `brew services info mac-sync` for the Homebrew service status.
 
 ## Restore
 
@@ -412,11 +398,6 @@ Environment overrides:
 - `MAC_SYNC_MACHINES_REPO`: machine snapshot repo path, defaulting to
   `~/github/dot-files`
 - `MAC_SYNC_MACHINE`: machine directory name, defaulting to the macOS host name
-- `MAC_SYNC_INSTALL_PATH`: installed command path, defaulting to `~/bin/mac-sync`
-- `MAC_SYNC_HOURLY_MINUTE`: LaunchAgent minute, defaulting to `0`
-- `MAC_SYNC_DAILY_MINUTE`: legacy alias for `MAC_SYNC_HOURLY_MINUTE`
-- `MAC_SYNC_LAUNCH_AGENT_PATH`: `PATH` used by the LaunchAgent, defaulting to
-  `~/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`
 - `MAC_SYNC_STATUS_DIR`: local status directory, defaulting to
   `~/Library/Application Support/mac-sync/status`
 - `MAC_SYNC_DRY_RUN=1`: preview sync or restore changes without writing files,
@@ -434,37 +415,11 @@ Environment overrides:
   The default `config` uses `config/sync-paths.txt`. The `dot-files`
   option is retained only for older dot-files checkouts that still expose
   `make print-mac-sync-paths`.
-- `MAC_SYNC_SELF_UPDATE=0`: disable the remote self-update check during
-  `sync` and `secrets sync`
-- `MAC_SYNC_SELF_UPDATE_MODE=exit`: install an updated command and exit instead
-  of restarting automatically. The default is `restart`.
-- `MAC_SYNC_SELF_UPDATE_REMOTE`: override the Git remote used for self-updates.
-  By default this is the local mac-sync origin, falling back to
-  `https://github.com/stephenlclarke/mac-sync.git`.
-- `MAC_SYNC_SELF_UPDATE_REF`: branch or ref used for self-updates, defaulting
-  to `main`
 - `MAC_SYNC_KEYCHAIN_SERVICE`: Keychain service for the `age` identity,
   defaulting to `mac-sync age identity`
 - `MAC_SYNC_KEYCHAIN_ACCOUNT`: Keychain account for the `age` identity,
   defaulting to `$USER` or `id -un`
 - `SCRIPT_COLOUR=off`: disable colour output
-
-## Self Update
-
-The GitHub remote is the canonical source for `bin/mac-sync` and
-`bin/mac-spinner`. At the start of `sync` and `secrets sync`, the installed
-`~/bin/mac-sync` command checks the configured remote ref directly with
-`git ls-remote`.
-
-When the local mac-sync checkout is clean and exactly matches that remote commit,
-the installed command updates from the local checkout. If the checkout is stale
-or dirty, `mac-sync` clones the remote ref to a temporary directory and updates
-from that clone instead.
-
-By default, an updated installed command restarts itself and continues the sync
-with the new script. Set `MAC_SYNC_SELF_UPDATE_MODE=exit` to keep the older
-behavior of installing the update and asking you to re-run, or
-`MAC_SYNC_SELF_UPDATE=0` to disable the check.
 
 ## Security Notes
 

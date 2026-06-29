@@ -7,7 +7,7 @@ All commit messages **must follow the
 format:
 
 ```text
-<type>(JIRA-KEY:scope): <short summary>
+<type>(optional-scope): <short summary>
 
 [optional body]
 
@@ -28,15 +28,7 @@ format:
 ### Examples
 
 ```text
-feat(DO-1431:decoder): add support for obfuscated fix tags
-fix(DO-1431:autogen): fix malformed xml
-BREAKING CHANGE(DO-1431): changed cmdline flag prefix to --
-```
-
-## 🛠️ Local Git Config (Optional)
-
-To enable a default commit message structure:
-
-```bash
-git config commit.template .gitmessage.txt
+feat(secrets): add archive integrity checks
+fix(ci): upload Swift coverage to SonarCloud
+docs: clarify Homebrew service setup
 ```

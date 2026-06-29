@@ -3,7 +3,7 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-spinner}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-spinner}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-spinner-test.XXXXXX")"
 readonly TMP_ROOT

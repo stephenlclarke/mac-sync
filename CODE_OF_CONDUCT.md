@@ -1,4 +1,4 @@
-# Code Of Conduct
+# Code of Conduct
 
 This project expects respectful, focused, and welcoming collaboration in issues, pull requests, discussions, reviews, and related community spaces.
 

@@ -3,14 +3,13 @@
 set -euo pipefail
 unset BASH_ENV ENV
 
-readonly SCRIPT_PATH="${1:-$(pwd)/bin/mac-sync}"
+readonly SCRIPT_PATH="${1:-$(pwd)/.build/debug/mac-sync}"
 readonly SCRIPT_RUNNER="${MAC_SYNC_TEST_RUNNER:-}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-github-repositories.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_HOME="${TMP_ROOT}/home"
 readonly TEST_REPO="${TMP_ROOT}/repo"
 readonly TEST_MACHINES_REPO="${TMP_ROOT}/machines-repo"
-readonly TEST_INSTALL="${TMP_ROOT}/bin/mac-sync"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
 readonly STDERR_FILE="${TMP_ROOT}/stderr"
 
@@ -43,24 +42,20 @@ run_mac_sync() {
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_SELF_UPDATE=0 \
     SCRIPT_COLOUR=off \
       "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   else
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
     MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
-    MAC_SYNC_INSTALL_PATH="$TEST_INSTALL" \
     MAC_SYNC_MACHINE=target \
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_SECRETS=0 \
-    MAC_SYNC_SELF_UPDATE=0 \
     SCRIPT_COLOUR=off \
       "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   fi
@@ -84,14 +79,8 @@ make_local_repo() {
 
 mkdir -p \
   "$TEST_HOME/github/not-a-repo" \
-  "$TEST_REPO/bin" \
   "$TEST_REPO/config" \
-  "$TEST_MACHINES_REPO" \
-  "$(dirname "$TEST_INSTALL")"
-
-cp "$SCRIPT_PATH" "$TEST_REPO/bin/mac-sync"
-cp "$SCRIPT_PATH" "$TEST_INSTALL"
-chmod +x "$TEST_INSTALL"
+  "$TEST_MACHINES_REPO"
 git -C "$TEST_REPO" init -b main >/dev/null
 git -C "$TEST_REPO" config user.name "mac-sync test"
 git -C "$TEST_REPO" config user.email "mac-sync@example.invalid"
