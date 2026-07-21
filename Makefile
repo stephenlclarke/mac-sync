@@ -30,13 +30,13 @@ MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release test resolve swift-test-build swift-test swift-coverage shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
 workflow: ci package
 
-ci: check coverage-check cli-smoke-built shell-test
+ci: check coverage-check cli-smoke-built
 
 resolve:
 	$(SWIFT) package resolve
@@ -76,7 +76,8 @@ swift-coverage: swift-test-build
 	fi
 	@rm -f .build/*/debug/codecov/*.profraw .build/*/debug/codecov/*.profdata .build/codecov/fallback.profdata coverage.lcov coverage.xml
 	@find .build -maxdepth 3 -path '*/debug' -type d -exec mkdir -p '{}/codecov' \;
-	@SWIFT_TEST_RESULT_LOG="$(SWIFT_TEST_RESULT_LOG)" SWIFT_TEST_ATTEMPTS="$(SWIFT_COVERAGE_TEST_ATTEMPTS)" SWIFT_TEST_ACCEPT_SIGNAL_13=0 Tools/ci/run-swift-test.sh $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --skip-build --enable-code-coverage $(SWIFT_TEST_RUN_FLAGS)
+	@SWIFT_TEST_RESULT_LOG="$(SWIFT_TEST_RESULT_LOG)" SWIFT_TEST_ATTEMPTS="$(SWIFT_COVERAGE_TEST_ATTEMPTS)" SWIFT_TEST_ACCEPT_SIGNAL_13=0 LLVM_PROFILE_FILE="$(abspath .build/codecov)/swift-test-%p.profraw" Tools/ci/run-swift-test.sh $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --skip-build --enable-code-coverage $(SWIFT_TEST_RUN_FLAGS)
+	@$(MAKE) coverage-shell-test
 	test_binary="$$(find .build -path '*.xctest/Contents/MacOS/*' -type f ! -path '*.dSYM/*' | while read -r file; do [[ -x "$$file" ]] && { printf '%s\n' "$$file"; break; }; done)"; \
 	profile=".build/codecov/fallback.profdata"; \
 	if [[ -z "$$test_binary" ]]; then \
@@ -94,9 +95,20 @@ swift-coverage: swift-test-build
 		-format=lcov \
 		-instr-profile="$$profile" \
 		"$$test_binary" \
+		--sources Sources/MacSyncCore/MacSyncCore.swift \
 		--sources Sources/MacSyncCore/Support.swift \
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
+
+coverage-shell-test:
+	@for test_name in $(SHELL_TESTS); do \
+		target="$(MAC_SYNC_BINARY)"; \
+		if [[ "$$test_name" == "spinner" ]]; then \
+			target="$(MAC_SPINNER_BINARY)"; \
+		fi; \
+		printf '== coverage %s ==\n' "$$test_name"; \
+		LLVM_PROFILE_FILE="$(abspath .build/codecov)/shell-$${test_name}-%p.profraw" bash "tests/$${test_name}.sh" "$$target"; \
+	done
 
 shell-test: build
 	@for test_name in $(SHELL_TESTS); do \

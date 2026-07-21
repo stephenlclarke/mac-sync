@@ -84,6 +84,10 @@ friendlier directory name:
 MAC_SYNC_MACHINE=work-mbp mac-sync status
 ```
 
+Machine names may contain letters, digits, `.`, `_`, and `-`, but cannot be
+`.` or `..` or start with `-`. Configured and persisted sync paths are checked
+for path traversal before they are read or written.
+
 The machine snapshot will be written under:
 
 ```text
@@ -137,6 +141,12 @@ During sync, `mac-sync`:
 7. Captures GitHub repos below `~/github` that have GitHub remotes.
 8. Updates an encrypted secrets snapshot when recipients and tools exist.
 9. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
+
+Homebrew and VS Code inventories are collected before their snapshot files are
+written. If either inventory command fails, sync stops and preserves the last
+complete snapshot. Existing encrypted secrets are also decrypted and compared
+before replacement; a decryption failure preserves the current archive and
+stops sync.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -368,4 +378,30 @@ mac-sync secrets list --from <machine>
 mac-sync secrets restore --from <machine>
 brew services restart mac-sync
 brew upgrade mac-sync
+```
+
+## Development and Release Validation
+
+Run the same local validation and release packaging used by CI:
+
+```sh
+cd ~/github/mac-sync
+make ci
+make package-release
+```
+
+`make ci` runs Swift unit tests and every shell regression against
+coverage-instrumented executables, writes `coverage.lcov` and the
+Sonar-compatible `coverage.xml`, and enforces at least 80% line coverage across
+the Swift core. It also runs CLI smoke checks and repository lint checks.
+
+Pushes to `main`, `release`, and `release-*` build and smoke-test prebuilt assets.
+Publishing to `stephenlclarke/homebrew-tap` requires the repository secret
+`HOMEBREW_TAP_TOKEN`; the workflow fails when it is absent, updates the formula,
+then installs and tests that formula from the canonical tap. Formula changes can
+also be checked locally with:
+
+```sh
+ruby -c Formula/mac-sync.rb
+brew style Formula/mac-sync.rb
 ```

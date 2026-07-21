@@ -62,6 +62,12 @@ run_mac_sync() {
   fi
 }
 
+run_mac_sync_expect_failure() {
+  if run_mac_sync "$@"; then
+    fail "expected mac-sync to fail: $*"
+  fi
+}
+
 mkdir -p \
   "$TEST_HOME" \
   "$TEST_REPO/config" \
@@ -104,3 +110,13 @@ assert_stdout_contains ".bashrc"
 
 MAC_SYNC_MANIFEST_SOURCE=dot-files run_mac_sync manifest configured
 assert_stdout_contains ".profile"
+
+cat >"$TEST_MACHINES_REPO/Makefile" <<'EOF'
+.PHONY: print-mac-sync-paths
+print-mac-sync-paths:
+	@printf '%s\n' '../../outside'
+EOF
+
+MAC_SYNC_MANIFEST_SOURCE=auto run_mac_sync_expect_failure manifest configured
+grep -F -- "unsafe sync path in dot-files manifest: ../../outside" "$STDERR_FILE" >/dev/null ||
+  fail "unsafe dot-files manifest did not fail closed"

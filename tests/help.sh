@@ -36,13 +36,13 @@ run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
-    MAC_SYNC_MACHINE=target \
+    MAC_SYNC_MACHINE="${MAC_SYNC_TEST_MACHINE:-target}" \
     SCRIPT_COLOUR=off \
       "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   else
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
-    MAC_SYNC_MACHINE=target \
+    MAC_SYNC_MACHINE="${MAC_SYNC_TEST_MACHINE:-target}" \
     SCRIPT_COLOUR=off \
       "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   fi
@@ -107,3 +107,6 @@ assert_stdout_contains "mac-sync manifest <command>"
 
 run_mac_sync_expect_failure help nope
 assert_stderr_contains "ERROR: unknown help topic: nope"
+
+MAC_SYNC_TEST_MACHINE=.. run_mac_sync_expect_failure status
+assert_stderr_contains "ERROR: invalid machine name: .."

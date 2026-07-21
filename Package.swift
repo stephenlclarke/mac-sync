@@ -13,21 +13,21 @@ let package = Package(
     targets: [
         .target(
             name: "MacSyncCore",
-            path: "Sources/MacSyncCore"
+            path: "Sources/MacSyncCore",
         ),
         .executableTarget(
             name: "MacSyncCLI",
             dependencies: ["MacSyncCore"],
-            path: "Sources/MacSyncCLI"
+            path: "Sources/MacSyncCLI",
         ),
         .executableTarget(
             name: "MacSyncSpinner",
-            path: "Sources/MacSyncSpinner"
+            path: "Sources/MacSyncSpinner",
         ),
         .testTarget(
             name: "MacSyncCoreTests",
             dependencies: ["MacSyncCore"],
-            path: "tests/MacSyncCoreTests"
+            path: "tests/MacSyncCoreTests",
         ),
-    ]
+    ],
 )

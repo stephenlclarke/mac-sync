@@ -36,6 +36,12 @@ jobs:
           set -euo pipefail
           ruby -c Formula/mac-sync.rb
 
+      - name: Validate Homebrew style
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew style Formula/mac-sync.rb
+
       - name: Inspect formula
         shell: bash
         run: |

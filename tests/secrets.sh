@@ -63,6 +63,7 @@ run_mac_sync() {
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     AGE_KEYGEN_FAIL="${AGE_KEYGEN_FAIL:-0}" \
+    AGE_DECRYPT_FAIL="${AGE_DECRYPT_FAIL:-0}" \
     KEYCHAIN_FAKE_DIR="$FAKE_KEYCHAIN" \
     PATH="${FAKE_BIN}:$PATH" \
     SCRIPT_COLOUR=off \
@@ -75,6 +76,7 @@ run_mac_sync() {
     MAC_SYNC_DYNAMIC_REFS=0 \
     MAC_SYNC_HOMEBREW=0 \
     AGE_KEYGEN_FAIL="${AGE_KEYGEN_FAIL:-0}" \
+    AGE_DECRYPT_FAIL="${AGE_DECRYPT_FAIL:-0}" \
     KEYCHAIN_FAKE_DIR="$FAKE_KEYCHAIN" \
     PATH="${FAKE_BIN}:$PATH" \
     SCRIPT_COLOUR=off \
@@ -132,6 +134,10 @@ cat >"$FAKE_BIN/age" <<'EOF'
 set -euo pipefail
 
 if [[ "${1:-}" == "-d" ]]; then
+  if [[ "${AGE_DECRYPT_FAIL:-0}" == "1" ]]; then
+    printf '%s\n' 'forced age decryption failure' >&2
+    exit 42
+  fi
   archive=""
   while [[ "$#" -gt 0 ]]; do
     case "$1" in
@@ -295,6 +301,13 @@ assert_stdout_contains "encrypted secrets snapshot unchanged"
 [[ "$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
   || fail "unchanged secrets sync rewrote the archive"
 
+printf 'changed-token-value\n' >"$TEST_HOME/.secrets/token"
+AGE_DECRYPT_FAIL=1 run_mac_sync_expect_failure secrets sync
+assert_file_contains "$STDERR_FILE" "existing encrypted secrets snapshot cannot be decrypted; refusing to replace it"
+[[ "$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
+  || fail "undecryptable secrets snapshot was replaced"
+printf 'token-value\n' >"$TEST_HOME/.secrets/token"
+
 run_mac_sync secrets list
 assert_stdout_contains ".ssh/config"
 assert_stdout_contains ".ssh/id_ed25519"
@@ -305,6 +318,7 @@ assert_file_contains "$STDERR_FILE" "secret restore would overwrite existing fil
 
 rm -rf "$TEST_HOME/.ssh" "$TEST_HOME/.secrets"
 run_mac_sync secrets restore
+assert_file_not_contains "$STDOUT_FILE" "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age"
 assert_file_contents "$TEST_HOME/.ssh/config" "Host example"
 assert_file_contents "$TEST_HOME/.ssh/id_ed25519" "private-key"
 assert_file_contents "$TEST_HOME/.secrets/token" "token-value"

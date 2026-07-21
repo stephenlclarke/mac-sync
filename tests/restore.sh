@@ -59,6 +59,28 @@ run_mac_sync() {
   fi
 }
 
+run_mac_sync_with_input() {
+  local input="$1"
+  shift
+  local command=("$SCRIPT_PATH" "$@")
+
+  if [[ -n "$SCRIPT_RUNNER" ]]; then
+    command=("$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@")
+  fi
+
+  printf '%s\n' "$input" | env \
+    HOME="$TEST_HOME" \
+    MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_MACHINES_REPO="$TEST_MACHINES_REPO" \
+    MAC_SYNC_MACHINE=target \
+    MAC_SYNC_HOMEBREW=0 \
+    MAC_SYNC_SECRETS=0 \
+    PATH="${FAKE_BIN}:$PATH" \
+    REAL_GIT="$SYSTEM_GIT" \
+    SCRIPT_COLOUR=off \
+    "${command[@]}" >"${TMP_ROOT}/stdout" 2>"${TMP_ROOT}/stderr"
+}
+
 mkdir -p \
   "$FAKE_BIN" \
   "$TEST_REPO/config" \
@@ -158,3 +180,16 @@ assert_file_contents "$TEST_HOME/.bashrc" "repo-bash"
 run_mac_sync restore --list-machines
 grep -F "source" "${TMP_ROOT}/stdout" >/dev/null || fail "missing source machine listing"
 grep -F "target (current default)" "${TMP_ROOT}/stdout" >/dev/null || fail "missing default machine listing"
+
+rm -f "$TEST_HOME/.bashrc"
+run_mac_sync_with_input 1 restore --select
+grep -F "Select a machine by number or name:" "${TMP_ROOT}/stdout" >/dev/null \
+  || fail "missing interactive machine selection prompt"
+assert_file_contents "$TEST_HOME/.bashrc" "repo-bash"
+
+printf '../../outside\n' >"$TEST_MACHINES_REPO/machines/source/dynamic-sync-paths.txt"
+if run_mac_sync restore --from source; then
+  fail "unsafe persisted dynamic path was accepted"
+fi
+grep -F "unsafe dynamic sync path" "${TMP_ROOT}/stderr" >/dev/null \
+  || fail "missing unsafe dynamic path error"

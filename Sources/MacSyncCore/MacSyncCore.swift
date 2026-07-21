@@ -56,44 +56,44 @@ private struct Config {
         let tmpDir = env["TMPDIR"] ?? "/tmp"
 
         self.originalArgs = Array(originalArgs.dropFirst())
-        self.scriptName = (selfPath as NSString).lastPathComponent
-        self.homeDir = home
-        self.repoDir = repo
-        self.machinesRepoDir = machinesRepo
-        self.dryRun = env["MAC_SYNC_DRY_RUN"] ?? "0"
-        self.dynamicRefs = env["MAC_SYNC_DYNAMIC_REFS"] ?? "1"
-        self.homebrewSync = env["MAC_SYNC_HOMEBREW"] ?? "1"
-        self.vscodeExtensionsSync = env["MAC_SYNC_VSCODE_EXTENSIONS"] ?? "1"
-        self.githubRootDir = env["MAC_SYNC_GITHUB_ROOT"] ?? "\(home)/github"
-        self.githubReposSync = env["MAC_SYNC_GITHUB_REPOS"] ?? "1"
-        self.secretsSync = env["MAC_SYNC_SECRETS"] ?? "1"
-        self.manifestSource = env["MAC_SYNC_MANIFEST_SOURCE"] ?? "config"
-        self.brewBundleInstallFlags = env["MAC_SYNC_BREW_BUNDLE_INSTALL_FLAGS"] ?? env["BREW_BUNDLE_INSTALL_FLAGS"] ?? ""
-        self.pathsFile = env["MAC_SYNC_PATHS_FILE"] ?? "\(repo)/config/sync-paths.txt"
-        self.excludesFile = env["MAC_SYNC_EXCLUDES_FILE"] ?? "\(repo)/config/excludes.txt"
-        self.secretPathsFile = env["MAC_SYNC_SECRET_PATHS_FILE"] ?? "\(repo)/config/secret-paths.txt"
-        self.ageRecipientsFile = env["MAC_SYNC_AGE_RECIPIENTS_FILE"] ?? "\(repo)/config/age-recipients.txt"
-        self.keychainService = env["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
-        self.keychainAccount = env["MAC_SYNC_KEYCHAIN_ACCOUNT"] ?? env["USER"] ?? runner.shell("id -un").stdout.trimmed
-        self.machineName = machine
-        self.machinesRootDir = "\(machinesRepo)/machines"
-        self.machineDir = "\(machinesRepo)/machines/\(machine)"
-        self.machineHomeDir = "\(machinesRepo)/machines/\(machine)/home"
-        self.machineAbsoluteDir = "\(machinesRepo)/machines/\(machine)/absolute"
-        self.dynamicPathsFile = "\(machinesRepo)/machines/\(machine)/dynamic-sync-paths.txt"
-        self.homebrewDir = "\(machinesRepo)/machines/\(machine)/homebrew"
-        self.editorDir = "\(machinesRepo)/machines/\(machine)/editor"
-        self.vscodeExtensionsFile = "\(machinesRepo)/machines/\(machine)/editor/vscode-extensions.txt"
-        self.githubReposDir = "\(machinesRepo)/machines/\(machine)/github-repositories"
-        self.githubReposFile = "\(machinesRepo)/machines/\(machine)/github-repositories/repositories.txt"
-        self.secretsDir = "\(machinesRepo)/machines/\(machine)/secrets"
-        self.secretsArchive = "\(machinesRepo)/machines/\(machine)/secrets/secrets.tar.gz.age"
-        self.secretsIncludedPathsFile = "\(machinesRepo)/machines/\(machine)/secrets/included-paths.txt"
-        self.lockDir = "\(tmpDir)/mac-sync-\(machine).lock"
+        scriptName = (selfPath as NSString).lastPathComponent
+        homeDir = home
+        repoDir = repo
+        machinesRepoDir = machinesRepo
+        dryRun = env["MAC_SYNC_DRY_RUN"] ?? "0"
+        dynamicRefs = env["MAC_SYNC_DYNAMIC_REFS"] ?? "1"
+        homebrewSync = env["MAC_SYNC_HOMEBREW"] ?? "1"
+        vscodeExtensionsSync = env["MAC_SYNC_VSCODE_EXTENSIONS"] ?? "1"
+        githubRootDir = env["MAC_SYNC_GITHUB_ROOT"] ?? "\(home)/github"
+        githubReposSync = env["MAC_SYNC_GITHUB_REPOS"] ?? "1"
+        secretsSync = env["MAC_SYNC_SECRETS"] ?? "1"
+        manifestSource = env["MAC_SYNC_MANIFEST_SOURCE"] ?? "config"
+        brewBundleInstallFlags = env["MAC_SYNC_BREW_BUNDLE_INSTALL_FLAGS"] ?? env["BREW_BUNDLE_INSTALL_FLAGS"] ?? ""
+        pathsFile = env["MAC_SYNC_PATHS_FILE"] ?? "\(repo)/config/sync-paths.txt"
+        excludesFile = env["MAC_SYNC_EXCLUDES_FILE"] ?? "\(repo)/config/excludes.txt"
+        secretPathsFile = env["MAC_SYNC_SECRET_PATHS_FILE"] ?? "\(repo)/config/secret-paths.txt"
+        ageRecipientsFile = env["MAC_SYNC_AGE_RECIPIENTS_FILE"] ?? "\(repo)/config/age-recipients.txt"
+        keychainService = env["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
+        keychainAccount = env["MAC_SYNC_KEYCHAIN_ACCOUNT"] ?? env["USER"] ?? runner.shell("id -un").stdout.trimmed
+        machineName = machine
+        machinesRootDir = "\(machinesRepo)/machines"
+        machineDir = "\(machinesRepo)/machines/\(machine)"
+        machineHomeDir = "\(machinesRepo)/machines/\(machine)/home"
+        machineAbsoluteDir = "\(machinesRepo)/machines/\(machine)/absolute"
+        dynamicPathsFile = "\(machinesRepo)/machines/\(machine)/dynamic-sync-paths.txt"
+        homebrewDir = "\(machinesRepo)/machines/\(machine)/homebrew"
+        editorDir = "\(machinesRepo)/machines/\(machine)/editor"
+        vscodeExtensionsFile = "\(machinesRepo)/machines/\(machine)/editor/vscode-extensions.txt"
+        githubReposDir = "\(machinesRepo)/machines/\(machine)/github-repositories"
+        githubReposFile = "\(machinesRepo)/machines/\(machine)/github-repositories/repositories.txt"
+        secretsDir = "\(machinesRepo)/machines/\(machine)/secrets"
+        secretsArchive = "\(machinesRepo)/machines/\(machine)/secrets/secrets.tar.gz.age"
+        secretsIncludedPathsFile = "\(machinesRepo)/machines/\(machine)/secrets/included-paths.txt"
+        lockDir = "\(tmpDir)/mac-sync-\(machine).lock"
         self.statusDir = statusDir
-        self.syncStatusFile = "\(statusDir)/\(machine).env"
-        self.syncWarningsFile = "\(statusDir)/\(machine).warnings.log"
-        self.syncErrorsFile = "\(statusDir)/\(machine).errors.log"
+        syncStatusFile = "\(statusDir)/\(machine).env"
+        syncWarningsFile = "\(statusDir)/\(machine).warnings.log"
+        syncErrorsFile = "\(statusDir)/\(machine).errors.log"
     }
 
     static func realpathExisting(_ path: String) -> String {
@@ -173,13 +173,16 @@ public final class MacSyncApp {
 
     public init(arguments: [String], environment: [String: String]) {
         self.environment = environment
-        self.invocationArguments = arguments
-        self.runner = ProcessRunner(environment: environment)
-        self.config = Config(environment: environment, originalArgs: arguments, runner: self.runner)
+        invocationArguments = arguments
+        runner = ProcessRunner(environment: environment)
+        config = Config(environment: environment, originalArgs: arguments, runner: runner)
     }
 
     public func run() -> Int {
         do {
+            guard MacSyncPaths.safeMachineName(config.machineName) else {
+                try fail("invalid machine name: \(config.machineName)", code: 2)
+            }
             try main(Array(invocationArguments.dropFirst()))
             return 0
         } catch let error as ExitError {
@@ -275,7 +278,7 @@ public final class MacSyncApp {
               mac-sync help restore
               mac-sync help secrets
               MAC_SYNC_MACHINE=work-mbp mac-sync status
-            """
+            """,
         )
     }
 
@@ -311,7 +314,7 @@ public final class MacSyncApp {
               \(config.scriptName) restore --from old-mbp
               \(config.scriptName) restore --from old-mbp --force
               MAC_SYNC_DRY_RUN=1 \(config.scriptName) restore --from old-mbp
-            """
+            """,
         )
     }
 
@@ -346,7 +349,7 @@ public final class MacSyncApp {
               \(config.scriptName) secrets restore --from old-mbp
               \(config.scriptName) secrets restore --from old-mbp --force
               \(config.scriptName) secrets test
-            """
+            """,
         )
     }
 
@@ -374,7 +377,7 @@ public final class MacSyncApp {
               \(config.scriptName) packages install --from old-mbp
               \(config.scriptName) packages install --from old-mbp --formulae-only
               \(config.scriptName) packages install --from old-mbp --admin-user adm-sclarke
-            """
+            """,
         )
     }
 
@@ -400,7 +403,7 @@ public final class MacSyncApp {
               \(config.scriptName) editor sync
               \(config.scriptName) editor diff --from old-mbp
               \(config.scriptName) editor install --from old-mbp
-            """
+            """,
         )
     }
 
@@ -421,7 +424,7 @@ public final class MacSyncApp {
               \(config.scriptName) manifest list
               \(config.scriptName) manifest configured
               \(config.scriptName) manifest source
-            """
+            """,
         )
     }
 
@@ -452,20 +455,26 @@ public final class MacSyncApp {
     private func errorMessage(_ message: String) {
         errorCount += 1
         let line = "ERROR: \(message)"
-        if runActive { errorMessages.append(line) }
+        if runActive {
+            errorMessages.append(line)
+        }
         fputs("\(line)\n", stderr)
     }
 
     private func warning(_ message: String) {
         warningCount += 1
         let line = "WARN: \(message)"
-        if runActive { warningMessages.append(line) }
+        if runActive {
+            warningMessages.append(line)
+        }
         fputs("\(line)\n", stderr)
     }
 
     private func fail(_ message: String, code: Int = 1, usage: Bool = false) throws -> Never {
         errorMessage(message)
-        if usage { self.usage() }
+        if usage {
+            self.usage()
+        }
         throw ExitError(code: code)
     }
 
@@ -473,8 +482,13 @@ public final class MacSyncApp {
         print(message)
     }
 
-    private var pendingMark: String { "\u{2813}" }
-    private var doneMark: String { "\u{2714}\u{FE0E}" }
+    private var pendingMark: String {
+        "\u{2813}"
+    }
+
+    private var doneMark: String {
+        "\u{2714}\u{FE0E}"
+    }
 
     private func progressPending(_ message: String) {
         info("\(pendingMark) \(message)")
@@ -493,7 +507,7 @@ public final class MacSyncApp {
         _ message: String,
         _ executable: String,
         _ arguments: [String],
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
     ) -> Bool {
         progressPending(message)
         let result = runner.run(executable, arguments, workingDirectory: workingDirectory)
@@ -516,11 +530,25 @@ public final class MacSyncApp {
         !noValues.contains(value)
     }
 
-    private func dynamicRefsEnabled() -> Bool { enabled(config.dynamicRefs) }
-    private func homebrewSyncEnabled() -> Bool { enabled(config.homebrewSync) }
-    private func vscodeExtensionsSyncEnabled() -> Bool { enabled(config.vscodeExtensionsSync) }
-    private func githubReposSyncEnabled() -> Bool { enabled(config.githubReposSync) }
-    private func secretsSyncEnabled() -> Bool { enabled(config.secretsSync) }
+    private func dynamicRefsEnabled() -> Bool {
+        enabled(config.dynamicRefs)
+    }
+
+    private func homebrewSyncEnabled() -> Bool {
+        enabled(config.homebrewSync)
+    }
+
+    private func vscodeExtensionsSyncEnabled() -> Bool {
+        enabled(config.vscodeExtensionsSync)
+    }
+
+    private func githubReposSyncEnabled() -> Bool {
+        enabled(config.githubReposSync)
+    }
+
+    private func secretsSyncEnabled() -> Bool {
+        enabled(config.secretsSync)
+    }
 
     private func pathExists(_ path: String) -> Bool {
         fm.fileExists(atPath: path) || (try? fm.destinationOfSymbolicLink(atPath: path)) != nil
@@ -630,34 +658,46 @@ public final class MacSyncApp {
         guard fm.fileExists(atPath: config.pathsFile) else {
             try fail("missing paths file: \(config.pathsFile)")
         }
-        return readConfigLines(config.pathsFile)
+        return try validatedSyncPaths(readConfigLines(config.pathsFile), source: config.pathsFile)
     }
 
-    private func configuredManifestPathsFromDotFiles() -> [String]? {
-        guard fm.fileExists(atPath: "\(config.machinesRepoDir)/Makefile"), runner.commandExists("make") else {
+    private func dotFilesManifestAvailable() -> Bool {
+        fm.fileExists(atPath: "\(config.machinesRepoDir)/Makefile") && runner.commandExists("make")
+    }
+
+    private func configuredManifestPathsFromDotFiles() throws -> [String]? {
+        guard dotFilesManifestAvailable() else {
             return nil
         }
         let result = runner.run(
             "make",
             ["--no-print-directory", "-s", "-C", config.machinesRepoDir, "print-mac-sync-paths"],
-            extraEnvironment: ["BASH_ENV": "", "ENV": ""]
+            extraEnvironment: ["BASH_ENV": "", "ENV": ""],
         )
         guard result.status == 0 else { return nil }
         let lines = result.stdout.splitLines().filter { !$0.trimmed.isEmpty }
         guard !lines.isEmpty else { return nil }
         var seen = Set<String>()
-        return lines.filter { seen.insert($0).inserted }
+        let paths = lines.filter { seen.insert($0).inserted }
+        return try validatedSyncPaths(paths, source: "dot-files manifest")
+    }
+
+    private func validatedSyncPaths(_ paths: [String], source: String) throws -> [String] {
+        for path in paths where !MacSyncPaths.safeSyncPath(path) {
+            try fail("unsafe sync path in \(source): \(path)", code: 2)
+        }
+        return paths
     }
 
     private func configuredManifestPaths() throws -> [String] {
         switch config.manifestSource {
         case "auto":
-            if let paths = configuredManifestPathsFromDotFiles() {
+            if let paths = try configuredManifestPathsFromDotFiles() {
                 return paths
             }
             return try configuredManifestPathsFromFile()
         case "dot-files":
-            guard let paths = configuredManifestPathsFromDotFiles() else {
+            guard let paths = try configuredManifestPathsFromDotFiles() else {
                 try fail("dot-files manifest source is unavailable: \(config.machinesRepoDir)/Makefile")
             }
             return paths
@@ -671,11 +711,11 @@ public final class MacSyncApp {
     private func configuredManifestSourceLabel() -> String {
         switch config.manifestSource {
         case "auto":
-            return configuredManifestPathsFromDotFiles() == nil ? "config" : "dot-files"
+            dotFilesManifestAvailable() ? "dot-files" : "config"
         case "dot-files", "config":
-            return config.manifestSource
+            config.manifestSource
         default:
-            return "invalid"
+            "invalid"
         }
     }
 
@@ -694,8 +734,12 @@ public final class MacSyncApp {
     private func homeRelativePath(_ path: String) -> String? {
         guard path.hasPrefix("\(config.homeDir)/") else { return nil }
         var rel = String(path.dropFirst(config.homeDir.count + 1))
-        if rel.hasPrefix("./") { rel.removeFirst(2) }
-        while rel.hasSuffix("/") { rel.removeLast() }
+        if rel.hasPrefix("./") {
+            rel.removeFirst(2)
+        }
+        while rel.hasSuffix("/") {
+            rel.removeLast()
+        }
         return rel.isEmpty ? nil : rel
     }
 
@@ -717,13 +761,17 @@ public final class MacSyncApp {
             return false
         }
         for prefix in [".cache/", ".local/", ".Trash/", ".cargo/bin/", ".colima/_lima/", ".secrets/", ".codex-secrets/"] {
-            if rel == String(prefix.dropLast()) || rel.hasPrefix(prefix) { return false }
+            if rel == String(prefix.dropLast()) || rel.hasPrefix(prefix) {
+                return false
+            }
         }
-        if rel.hasPrefix(".gnupg/") && rel != ".gnupg/common.conf" {
+        if rel.hasPrefix(".gnupg/"), rel != ".gnupg/common.conf" {
             return false
         }
         if rel.hasPrefix(".ssh/") {
-            if rel == ".ssh/config" || rel.hasSuffix(".pub") { return true }
+            if rel == ".ssh/config" || rel.hasSuffix(".pub") {
+                return true
+            }
             return false
         }
         for suffix in [".pem", ".ppk", ".p12", ".pfx", ".key"] where rel.hasSuffix(suffix) {
@@ -734,7 +782,7 @@ public final class MacSyncApp {
 
     private func dynamicSyncRoot(for rel: String) -> String {
         let parts = rel.split(separator: "/").map(String.init)
-        if parts.count >= 3, (rel.hasPrefix(".config/") || rel.hasPrefix(".zsh/")) {
+        if parts.count >= 3, rel.hasPrefix(".config/") || rel.hasPrefix(".zsh/") {
             return "\(parts[0])/\(parts[1])"
         }
         if parts.count >= 4, rel.hasPrefix(".tmux/plugins/") {
@@ -766,7 +814,8 @@ public final class MacSyncApp {
             let nsLine = line as NSString
             if let loopRegex,
                let match = loopRegex.firstMatch(in: line, range: NSRange(location: 0, length: nsLine.length)),
-               match.numberOfRanges > 1 {
+               match.numberOfRanges > 1
+            {
                 let names = nsLine.substring(with: match.range(at: 1)).split { $0 == " " || $0 == "\t" }
                 matches.append(contentsOf: names.filter { $0.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil }.map { "\(config.homeDir)/.\($0)" })
             }
@@ -819,7 +868,7 @@ public final class MacSyncApp {
     private func writeDynamicPathsManifest(_ paths: [String]) throws {
         try writeText(
             config.dynamicPathsFile,
-            "# Generated by mac-sync. Do not edit.\n# HOME-relative dynamic paths discovered from dotfile references.\n" + paths.joined(separator: "\n") + (paths.isEmpty ? "" : "\n")
+            "# Generated by mac-sync. Do not edit.\n# HOME-relative dynamic paths discovered from dotfile references.\n" + paths.joined(separator: "\n") + (paths.isEmpty ? "" : "\n"),
         )
     }
 
@@ -832,8 +881,12 @@ public final class MacSyncApp {
     private func pruneStaleDynamicPaths(currentDynamic: [String], configured: [String]) throws {
         guard dynamicRefsEnabled(), fm.fileExists(atPath: config.dynamicPathsFile) else { return }
         for rel in storedDynamicManifestPaths() where safeDynamicRelPath(rel) {
-            if currentDynamic.contains(where: { pathsOverlap(rel, $0) }) { continue }
-            if configured.contains(where: { pathsOverlap(rel, $0) }) { continue }
+            if currentDynamic.contains(where: { pathsOverlap(rel, $0) }) {
+                continue
+            }
+            if configured.contains(where: { pathsOverlap(rel, $0) }) {
+                continue
+            }
             let dest = destPath(for: rel)
             guard pathExists(dest) else { continue }
             if config.dryRun == "1" {
@@ -847,13 +900,17 @@ public final class MacSyncApp {
 
     private func manifestPaths() throws -> [String] {
         var seen = Set<String>()
-        return (try configuredManifestPaths() + dynamicManifestPaths()).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
+        return try (configuredManifestPaths() + dynamicManifestPaths()).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
     }
 
     private func restoreManifestPaths(machine: String) throws -> [String] {
         var seen = Set<String>()
         let dynamicFile = "\(config.machinesRootDir)/\(machine)/dynamic-sync-paths.txt"
-        return (try configuredManifestPaths() + storedDynamicManifestPaths(dynamicFile)).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
+        let dynamic = storedDynamicManifestPaths(dynamicFile)
+        for path in dynamic where !safeDynamicRelPath(path) {
+            try fail("unsafe dynamic sync path in \(dynamicFile): \(path)", code: 2)
+        }
+        return try (configuredManifestPaths() + dynamic).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
     }
 
     private func machineSnapshotNames() -> [String] {
@@ -862,7 +919,9 @@ public final class MacSyncApp {
     }
 
     private func resolveMachineSnapshotName(_ requested: String) -> String? {
-        if isDirectory("\(config.machinesRootDir)/\(requested)") { return requested }
+        if isDirectory("\(config.machinesRootDir)/\(requested)") {
+            return requested
+        }
         let lower = requested.lowercased()
         let matches = machineSnapshotNames().filter { $0.lowercased() == lower }
         return matches.count == 1 ? matches[0] : nil
@@ -878,6 +937,23 @@ public final class MacSyncApp {
         for name in names {
             info(name == config.machineName ? "  \(name) (current default)" : "  \(name)")
         }
+    }
+
+    private func selectMachineSnapshot() throws -> String {
+        let names = machineSnapshotNames()
+        guard !names.isEmpty else {
+            machineSnapshotSuggestionLines()
+            try fail("no machine snapshots are available")
+        }
+        info("Available machine snapshots in \(config.machinesRootDir):")
+        for (index, name) in names.enumerated() {
+            info("  \(index + 1). \(name)\(name == config.machineName ? " (current default)" : "")")
+        }
+        print("Select a machine by number or name: ", terminator: "")
+        guard let input = readLine(), let selected = MacSyncPaths.selectedMachineName(input: input, available: names) else {
+            try fail("invalid machine selection", code: 2)
+        }
+        return selected
     }
 
     private func resolveRequestedMachine(_ requested: String) throws -> String {
@@ -899,7 +975,7 @@ public final class MacSyncApp {
         readConfigLines(file)
     }
 
-    private func currentHomebrewList(_ kind: String) -> [String] {
+    private func currentHomebrewList(_ kind: String) throws -> [String] {
         guard runner.commandExists("brew") else { return [] }
         let result: CommandResult
         switch kind {
@@ -916,6 +992,10 @@ public final class MacSyncApp {
         default:
             return []
         }
+        guard result.status == 0 else {
+            fputs(result.combinedOutput, stderr)
+            try fail("Homebrew inventory command failed: \(kind)")
+        }
         return uniqueSorted(result.stdout.splitLines().filter { !$0.trimmed.isEmpty })
     }
 
@@ -925,7 +1005,7 @@ public final class MacSyncApp {
 
     private func writeHomebrewSnapshot() throws {
         try ensureDirectory(config.homebrewDir)
-        let lists: [(String, String, [String])] = [
+        let lists: [(String, String, [String])] = try [
             ("taps.txt", "Installed Homebrew taps.", currentHomebrewList("taps")),
             ("formulae.txt", "Installed Homebrew formulae.", currentHomebrewList("formulae")),
             ("casks.txt", "Installed Homebrew casks.", currentHomebrewList("casks")),
@@ -933,7 +1013,7 @@ public final class MacSyncApp {
         for (file, description, values) in lists {
             try writeText(
                 "\(config.homebrewDir)/\(file)",
-                "# Generated by mac-sync. Do not edit.\n# \(description)\n" + values.joined(separator: "\n") + (values.isEmpty ? "" : "\n")
+                "# Generated by mac-sync. Do not edit.\n# \(description)\n" + values.joined(separator: "\n") + (values.isEmpty ? "" : "\n"),
             )
         }
         try writeHomebrewBrewfile(homebrewDir: config.homebrewDir, formulaeOnly: false, target: "\(config.homebrewDir)/Brewfile", restore: false)
@@ -970,7 +1050,7 @@ public final class MacSyncApp {
         info("  \(prefix) \(values.map(ShellQuoter.quote).joined(separator: " "))")
     }
 
-    private func printHomebrewRestoreCommands(machine: String) {
+    private func printHomebrewRestoreCommands(machine: String) throws {
         guard homebrewSyncEnabled() else { return }
         let dir = homebrewDir(for: machine)
         guard fm.fileExists(atPath: "\(dir)/taps.txt") || fm.fileExists(atPath: "\(dir)/formulae.txt") || fm.fileExists(atPath: "\(dir)/casks.txt") else {
@@ -979,11 +1059,11 @@ public final class MacSyncApp {
         let desiredTaps = uniqueSorted(homebrewListFileLines("\(dir)/taps.txt"))
         let desiredFormulae = uniqueSorted(homebrewListFileLines("\(dir)/formulae.txt"))
         let desiredCasks = uniqueSorted(homebrewListFileLines("\(dir)/casks.txt"))
-        let currentTaps = Set(currentHomebrewList("taps"))
-        let currentFormulae = Set(currentHomebrewList("formulae"))
-        let currentCasks = Set(currentHomebrewList("casks"))
-        let outdatedFormulae = Set(currentHomebrewList("outdated-formulae"))
-        let outdatedCasks = Set(currentHomebrewList("outdated-casks"))
+        let currentTaps = try Set(currentHomebrewList("taps"))
+        let currentFormulae = try Set(currentHomebrewList("formulae"))
+        let currentCasks = try Set(currentHomebrewList("casks"))
+        let outdatedFormulae = try Set(currentHomebrewList("outdated-formulae"))
+        let outdatedCasks = try Set(currentHomebrewList("outdated-casks"))
 
         let missingTaps = desiredTaps.filter { !currentTaps.contains($0) }
         let missingFormulae = desiredFormulae.filter { !currentFormulae.contains($0) }
@@ -1026,7 +1106,9 @@ public final class MacSyncApp {
             let commandLine = "\(ShellQuoter.quote(brewPath)) bundle install --file=\(ShellQuoter.quote(tmpBrewfile)) \(config.brewBundleInstallFlags)"
             let result = runner.run("/usr/bin/su", ["-l", adminUser, "-c", commandLine])
             try? removePath(tmpBrewfile)
-            if result.status != 0 { throw ExitError(code: Int(result.status)) }
+            if result.status != 0 {
+                throw ExitError(code: Int(result.status))
+            }
             return
         }
         let flags = config.brewBundleInstallFlags.split(separator: " ").map(String.init)
@@ -1054,15 +1136,20 @@ public final class MacSyncApp {
         "\(config.machinesRootDir)/\(machine)/editor/vscode-extensions.txt"
     }
 
-    private func currentVscodeExtensions() -> [String] {
+    private func currentVscodeExtensions() throws -> [String] {
         guard runner.commandExists("code") else { return [] }
-        return uniqueSorted(runner.run("code", ["--list-extensions", "--show-versions"]).stdout.splitLines().filter { !$0.trimmed.isEmpty })
+        let result = runner.run("code", ["--list-extensions", "--show-versions"])
+        guard result.status == 0 else {
+            fputs(result.combinedOutput, stderr)
+            try fail("VS Code extension inventory command failed")
+        }
+        return uniqueSorted(result.stdout.splitLines().filter { !$0.trimmed.isEmpty })
     }
 
     private func writeVscodeExtensionsSnapshot() throws {
         try writeText(
             config.vscodeExtensionsFile,
-            "# Generated by mac-sync. Do not edit.\n# Installed VS Code extensions with versions.\n" + currentVscodeExtensions().joined(separator: "\n") + "\n"
+            "# Generated by mac-sync. Do not edit.\n# Installed VS Code extensions with versions.\n" + currentVscodeExtensions().joined(separator: "\n") + "\n",
         )
     }
 
@@ -1086,17 +1173,17 @@ public final class MacSyncApp {
         uniqueSorted(readConfigLines(file))
     }
 
-    private func vscodeExtensionDiff(snapshotFile: String) -> (install: [String], remove: [String]) {
+    private func vscodeExtensionDiff(snapshotFile: String) throws -> (install: [String], remove: [String]) {
         let desired = Set(vscodeExtensionLines(snapshotFile))
-        let current = Set(currentVscodeExtensions())
+        let current = try Set(currentVscodeExtensions())
         return (Array(desired.subtracting(current)).sorted(), Array(current.subtracting(desired)).sorted())
     }
 
-    private func printVscodeExtensionRestoreCommands(machine: String) {
+    private func printVscodeExtensionRestoreCommands(machine: String) throws {
         guard vscodeExtensionsSyncEnabled() else { return }
         let file = vscodeExtensionsFile(for: machine)
         guard fm.fileExists(atPath: file) else { return }
-        let diff = vscodeExtensionDiff(snapshotFile: file)
+        let diff = try vscodeExtensionDiff(snapshotFile: file)
         guard !diff.install.isEmpty || !diff.remove.isEmpty else { return }
         info()
         info("VS Code extensions differ from the \(machine) snapshot.")
@@ -1113,18 +1200,24 @@ public final class MacSyncApp {
         let file = vscodeExtensionsFile(for: machine)
         guard fm.fileExists(atPath: file) else { try fail("missing VS Code extension snapshot: \(file)") }
         guard runner.commandExists("code") else { try fail("missing dependency: code") }
-        let diff = vscodeExtensionDiff(snapshotFile: file)
+        let diff = try vscodeExtensionDiff(snapshotFile: file)
         for ext in diff.remove {
             let extID = String(ext.split(separator: "@").first ?? "")
             info("remove VS Code extension \(extID)")
             if config.dryRun != "1" {
-                _ = runner.run("code", ["--uninstall-extension", extID])
+                let result = runner.run("code", ["--uninstall-extension", extID])
+                if result.status != 0 {
+                    throw ExitError(code: Int(result.status))
+                }
             }
         }
         for ext in diff.install {
             info("install VS Code extension \(ext)")
             if config.dryRun != "1" {
-                _ = runner.run("code", ["--install-extension", ext])
+                let result = runner.run("code", ["--install-extension", ext])
+                if result.status != 0 {
+                    throw ExitError(code: Int(result.status))
+                }
             }
         }
         info("applied VS Code extensions from \(file)")
@@ -1166,11 +1259,13 @@ public final class MacSyncApp {
 
     private func githubRepoHasParentWorktree(repoReal: String, rootReal: String) -> Bool {
         var parent = (repoReal as NSString).deletingLastPathComponent
-        while parent != rootReal && parent != "/" && !parent.isEmpty {
+        while parent != rootReal, parent != "/", !parent.isEmpty {
             let top = runner.run("git", ["-C", parent, "rev-parse", "--show-toplevel"]).stdout.trimmed
             if !top.isEmpty {
                 let ancestor = Config.realpathExisting(top)
-                if ancestor != repoReal, repoReal.hasPrefix("\(ancestor)/") { return true }
+                if ancestor != repoReal, repoReal.hasPrefix("\(ancestor)/") {
+                    return true
+                }
             }
             parent = (parent as NSString).deletingLastPathComponent
         }
@@ -1200,7 +1295,7 @@ public final class MacSyncApp {
     private func writeGitHubRepositoriesSnapshot() throws {
         try writeText(
             config.githubReposFile,
-            "# Generated by mac-sync. Do not edit.\n# Format: relative-path<TAB>github-clone-url\n" + localGitHubRepositoryLines().joined(separator: "\n") + "\n"
+            "# Generated by mac-sync. Do not edit.\n# Format: relative-path<TAB>github-clone-url\n" + localGitHubRepositoryLines().joined(separator: "\n") + "\n",
         )
     }
 
@@ -1221,9 +1316,13 @@ public final class MacSyncApp {
         let file = githubRepositoriesFile(for: machine)
         guard fm.fileExists(atPath: file) else { return }
         info("restoring GitHub repositories from: \(file)")
-        if config.dryRun != "1" { try ensureDirectory(config.githubRootDir) }
+        if config.dryRun != "1" {
+            try ensureDirectory(config.githubRootDir)
+        }
         for rawLine in readText(file).splitLines() {
-            if rawLine.isEmpty || rawLine.hasPrefix("#") { continue }
+            if rawLine.isEmpty || rawLine.hasPrefix("#") {
+                continue
+            }
             let parts = rawLine.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
             guard parts.count == 2 else {
                 warning("skip malformed GitHub repository manifest line for: \(parts.first ?? rawLine)")
@@ -1270,7 +1369,9 @@ public final class MacSyncApp {
 
     private func secretManifestPaths() -> [String] {
         readConfigLines(config.secretPathsFile).filter { rel in
-            if safeSecretRelPath(rel) { return true }
+            if safeSecretRelPath(rel) {
+                return true
+            }
             warning("skip unsafe secret path: \(rel)")
             return false
         }
@@ -1300,7 +1401,7 @@ public final class MacSyncApp {
         guard !fm.fileExists(atPath: config.secretPathsFile) else { return }
         try writeText(
             config.secretPathsFile,
-            "# Paths are relative to $HOME and are encrypted before syncing.\n# Keep this list narrow; the decrypted archive restores into $HOME.\n.ssh\n.secrets\n"
+            "# Paths are relative to $HOME and are encrypted before syncing.\n# Keep this list narrow; the decrypted archive restores into $HOME.\n.ssh\n.secrets\n",
         )
     }
 
@@ -1308,7 +1409,7 @@ public final class MacSyncApp {
         guard !fm.fileExists(atPath: config.ageRecipientsFile) else { return }
         try writeText(
             config.ageRecipientsFile,
-            "# Public age recipients that can decrypt encrypted secret snapshots.\n# Add one age1... recipient per trusted Mac or recovery key.\n"
+            "# Public age recipients that can decrypt encrypted secret snapshots.\n# Add one age1... recipient per trusted Mac or recovery key.\n",
         )
     }
 
@@ -1345,7 +1446,9 @@ public final class MacSyncApp {
 
     private func storeKeychainIdentity(_ identity: String) throws {
         let result = runner.run("security", ["add-generic-password", "-a", config.keychainAccount, "-s", config.keychainService, "-w", identity, "-U"])
-        if result.status != 0 { throw ExitError(code: Int(result.status)) }
+        if result.status != 0 {
+            throw ExitError(code: Int(result.status))
+        }
     }
 
     private func recipientFromIdentityFile(_ identityFile: String) throws -> String {
@@ -1422,7 +1525,11 @@ public final class MacSyncApp {
         }
         if branchAheadOfUpstream(config.repoDir) {
             info("pushing \(branch) to origin")
-            _ = runner.run("git", ["-C", config.repoDir, "push", "-u", "origin", branch])
+            let result = runner.run("git", ["-C", config.repoDir, "push", "-u", "origin", branch])
+            if result.status != 0 {
+                fputs(result.combinedOutput, stderr)
+                throw ExitError(code: Int(result.status))
+            }
         } else {
             info("no local commits to push")
         }
@@ -1442,14 +1549,16 @@ public final class MacSyncApp {
     private func writeSecretsIncludedPathsManifest(_ includedFile: String) throws {
         try writeText(
             config.secretsIncludedPathsFile,
-            "# Generated by mac-sync. Do not edit.\n# HOME-relative paths included in secrets.tar.gz.age.\n" + readText(includedFile)
+            "# Generated by mac-sync. Do not edit.\n# HOME-relative paths included in secrets.tar.gz.age.\n" + readText(includedFile),
         )
     }
 
     private func syncSecretsArchive(mode: String = "auto") throws {
         guard secretsSyncEnabled() else { return }
         guard ageRecipientsPresent() else {
-            if mode == "required" { try fail("no age recipients configured; run: \(config.scriptName) secrets init") }
+            if mode == "required" {
+                try fail("no age recipients configured; run: \(config.scriptName) secrets init")
+            }
             return
         }
         if mode == "required" {
@@ -1460,17 +1569,20 @@ public final class MacSyncApp {
             return
         }
         if !runner.commandExists("age") || !runner.commandExists("gzip") || !runner.commandExists("gtar") {
-            if mode == "required" { try checkSecretsRuntime() }
+            if mode == "required" {
+                try checkSecretsRuntime()
+            }
             warning("age, gzip, or gtar not found; skipping encrypted secrets snapshot")
             return
         }
         let tmpDir = try tempPath(prefix: "mac-sync-secrets", directory: true)
         defer { try? removePath(tmpDir) }
         let included = "\(tmpDir)/included-paths.txt"
-        let archive = "\(tmpDir)/secrets.tar.gz.age"
         let existingArchive = "\(tmpDir)/existing-secrets.tar.gz"
         let identity = "\(tmpDir)/identity.txt"
         let plainArchive = "\(tmpDir)/secrets.tar.gz"
+        let stagedArchive = "\(config.secretsDir)/.secrets.tar.gz.age.\(UUID().uuidString).tmp"
+        defer { try? removePath(stagedArchive) }
         let includedPaths = secretManifestPaths().filter { pathExists(sourcePath(for: $0)) }
         if mode == "required" {
             for rel in secretManifestPaths() where !pathExists(sourcePath(for: rel)) {
@@ -1478,12 +1590,14 @@ public final class MacSyncApp {
             }
         }
         guard !includedPaths.isEmpty else {
-            if mode == "required" { warning("no configured secret paths exist; skipping encrypted secrets snapshot") }
+            if mode == "required" {
+                warning("no configured secret paths exist; skipping encrypted secrets snapshot")
+            }
             return
         }
         try writeText(included, includedPaths.joined(separator: "\n") + "\n")
         if config.dryRun == "1" {
-            progressPending("would update encrypted secrets snapshot: \(config.secretsArchive)")
+            progressPending("would update encrypted secrets snapshot")
             return
         }
         progressPending("updating encrypted secrets snapshot")
@@ -1495,22 +1609,24 @@ public final class MacSyncApp {
             if decrypt.status == 0,
                let plainData = try? Data(contentsOf: URL(fileURLWithPath: plainArchive)),
                let existingData = try? Data(contentsOf: URL(fileURLWithPath: existingArchive)),
-               plainData == existingData {
+               plainData == existingData
+            {
                 progressDone("encrypted secrets snapshot unchanged")
                 return
             } else if decrypt.status != 0 {
-                warning("could not decrypt existing encrypted secrets snapshot; rewriting it")
+                try fail("existing encrypted secrets snapshot cannot be decrypted; refusing to replace it")
             }
         }
-        let encrypt = runner.shell("age -R \(ShellQuoter.quote(config.ageRecipientsFile)) -o \(ShellQuoter.quote(archive)) < \(ShellQuoter.quote(plainArchive))")
+        let encrypt = runner.shell("age -R \(ShellQuoter.quote(config.ageRecipientsFile)) -o \(ShellQuoter.quote(stagedArchive)) < \(ShellQuoter.quote(plainArchive))")
         if encrypt.status != 0 {
             fputs(encrypt.combinedOutput, stderr)
             throw ExitError(code: Int(encrypt.status))
         }
-        try? removePath(config.secretsArchive)
-        try fm.moveItem(atPath: archive, toPath: config.secretsArchive)
+        guard rename(stagedArchive, config.secretsArchive) == 0 else {
+            try fail("could not replace encrypted secrets snapshot: \(String(cString: strerror(errno)))")
+        }
         try writeSecretsIncludedPathsManifest(included)
-        progressDone("updated encrypted secrets snapshot: \(config.secretsArchive)")
+        progressDone("updated encrypted secrets snapshot")
     }
 
     private func safeArchiveEntry(_ entry: String) -> Bool {
@@ -1532,7 +1648,6 @@ public final class MacSyncApp {
         guard fm.fileExists(atPath: archive) else { return }
         info()
         info("Encrypted secrets snapshot found:")
-        info("  \(archive)")
         info("To inspect it:")
         info("  \(config.scriptName) secrets list --from \(ShellQuoter.quote(machine))")
         info("To restore it:")
@@ -1559,7 +1674,9 @@ public final class MacSyncApp {
         try checkKeychainRuntime()
         try requireKeychainIdentity()
         let archive = secretsArchive(for: fromMachine)
-        guard fm.fileExists(atPath: archive) else { try fail("missing encrypted secrets snapshot: \(archive)") }
+        guard fm.fileExists(atPath: archive) else {
+            try fail("missing encrypted secrets snapshot for machine: \(fromMachine)")
+        }
         let identity = try tempPath(prefix: "mac-sync-age-identity")
         defer { try? removePath(identity) }
         try writeKeychainIdentityFile(identity)
@@ -1592,7 +1709,9 @@ public final class MacSyncApp {
         try checkKeychainRuntime()
         try requireKeychainIdentity()
         let archive = secretsArchive(for: fromMachine)
-        guard fm.fileExists(atPath: archive) else { try fail("missing encrypted secrets snapshot: \(archive)") }
+        guard fm.fileExists(atPath: archive) else {
+            try fail("missing encrypted secrets snapshot for machine: \(fromMachine)")
+        }
         let identity = try tempPath(prefix: "mac-sync-age-identity")
         defer { try? removePath(identity) }
         try writeKeychainIdentityFile(identity)
@@ -1601,16 +1720,18 @@ public final class MacSyncApp {
             try fail("unsafe archive entry: \(entry)")
         }
         let conflicts = entries.filter { !$0.hasSuffix("/") && pathExists(sourcePath(for: $0)) }
-        if !force && !conflicts.isEmpty {
+        if !force, !conflicts.isEmpty {
             errorMessage("secret restore would overwrite existing files; re-run with --force")
-            for conflict in conflicts { fputs("  \(conflict)\n", stderr) }
+            for conflict in conflicts {
+                fputs("  \(conflict)\n", stderr)
+            }
             throw ExitError(code: 1)
         }
         if config.dryRun == "1" {
-            info("would restore encrypted secrets from: \(archive)")
+            info("would restore encrypted secrets snapshot from machine: \(fromMachine)")
             return
         }
-        info("restoring encrypted secrets from: \(archive)")
+        info("restoring encrypted secrets snapshot from machine: \(fromMachine)")
         let result = runner.shell("age -d -i \(ShellQuoter.quote(identity)) \(ShellQuoter.quote(archive)) | gtar -xzf - -C \(ShellQuoter.quote(config.homeDir))")
         if result.status != 0 {
             fputs(result.combinedOutput, stderr)
@@ -1654,7 +1775,9 @@ public final class MacSyncApp {
     private func cmdSecrets(_ arguments: [String]) throws {
         var args = arguments
         let command = args.first ?? "help"
-        if !args.isEmpty { args.removeFirst() }
+        if !args.isEmpty {
+            args.removeFirst()
+        }
         switch command {
         case "init":
             guard args.isEmpty else { try fail("secrets init does not accept options", code: 2) }
@@ -1679,7 +1802,9 @@ public final class MacSyncApp {
     private func cmdPackages(_ arguments: [String]) throws {
         var args = arguments
         let command = args.first ?? "help"
-        if !args.isEmpty { args.removeFirst() }
+        if !args.isEmpty {
+            args.removeFirst()
+        }
         switch command {
         case "sync":
             guard args.isEmpty else { try fail("packages sync does not accept options", code: 2) }
@@ -1704,7 +1829,9 @@ public final class MacSyncApp {
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
         try syncHomebrewPackages()
-        if config.dryRun != "1" { try writeMachineMetadata() }
+        if config.dryRun != "1" {
+            try writeMachineMetadata()
+        }
         try commitAndPush()
     }
 
@@ -1727,7 +1854,7 @@ public final class MacSyncApp {
     private func cmdPackagesDiff(_ args: [String]) throws {
         try checkRuntime()
         try pullMachinesRepoIfSafe()
-        printHomebrewRestoreCommands(machine: try parseFromOption(args, commandName: "packages diff"))
+        try printHomebrewRestoreCommands(machine: parseFromOption(args, commandName: "packages diff"))
     }
 
     private func cmdPackagesInstall(_ arguments: [String]) throws {
@@ -1754,19 +1881,21 @@ public final class MacSyncApp {
         }
         try checkRuntime()
         try pullMachinesRepoIfSafe()
-        try installHomebrewSnapshot(machine: try resolveRequestedMachine(machine), formulaeOnly: formulaeOnly, adminUser: adminUser)
+        try installHomebrewSnapshot(machine: resolveRequestedMachine(machine), formulaeOnly: formulaeOnly, adminUser: adminUser)
     }
 
     private func cmdPackagesList(_ args: [String]) throws {
         try checkRuntime()
         try pullMachinesRepoIfSafe()
-        try listHomebrewSnapshot(machine: try parseFromOption(args, commandName: "packages list"))
+        try listHomebrewSnapshot(machine: parseFromOption(args, commandName: "packages list"))
     }
 
     private func cmdEditor(_ arguments: [String]) throws {
         var args = arguments
         let command = args.first ?? "help"
-        if !args.isEmpty { args.removeFirst() }
+        if !args.isEmpty {
+            args.removeFirst()
+        }
         switch command {
         case "sync":
             guard args.isEmpty else { try fail("editor sync does not accept options", code: 2) }
@@ -1791,20 +1920,22 @@ public final class MacSyncApp {
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
         try syncVscodeExtensions()
-        if config.dryRun != "1" { try writeMachineMetadata() }
+        if config.dryRun != "1" {
+            try writeMachineMetadata()
+        }
         try commitAndPush()
     }
 
     private func cmdEditorDiff(_ args: [String]) throws {
         try checkRuntime()
         try pullMachinesRepoIfSafe()
-        printVscodeExtensionRestoreCommands(machine: try parseFromOption(args, commandName: "editor diff"))
+        try printVscodeExtensionRestoreCommands(machine: parseFromOption(args, commandName: "editor diff"))
     }
 
     private func cmdEditorInstall(_ args: [String]) throws {
         try checkRuntime()
         try pullMachinesRepoIfSafe()
-        try installVscodeExtensionsSnapshot(machine: try parseFromOption(args, commandName: "editor install"))
+        try installVscodeExtensionsSnapshot(machine: parseFromOption(args, commandName: "editor install"))
     }
 
     private func cmdEditorList(_ args: [String]) throws {
@@ -1814,26 +1945,36 @@ public final class MacSyncApp {
         let file = vscodeExtensionsFile(for: machine)
         guard fm.fileExists(atPath: file) else { try fail("missing VS Code extension snapshot: \(file)") }
         info(file)
-        for line in readText(file).splitLines() { info("  \(line)") }
+        for line in readText(file).splitLines() {
+            info("  \(line)")
+        }
     }
 
     private func cmdManifest(_ arguments: [String]) throws {
         var args = arguments
         let command = args.first ?? "list"
-        if !args.isEmpty { args.removeFirst() }
+        if !args.isEmpty {
+            args.removeFirst()
+        }
         switch command {
         case "list":
             guard args.isEmpty else { try fail("manifest list does not accept options", code: 2) }
             try checkRuntime()
-            for path in try manifestPaths() { info(path) }
+            for path in try manifestPaths() {
+                info(path)
+            }
         case "configured":
             guard args.isEmpty else { try fail("manifest configured does not accept options", code: 2) }
             try checkRuntime()
-            for path in try configuredManifestPaths() { info(path) }
+            for path in try configuredManifestPaths() {
+                info(path)
+            }
         case "dynamic":
             guard args.isEmpty else { try fail("manifest dynamic does not accept options", code: 2) }
             try checkRuntime()
-            for path in dynamicManifestPaths() { info(path) }
+            for path in dynamicManifestPaths() {
+                info(path)
+            }
         case "source":
             guard args.isEmpty else { try fail("manifest source does not accept options", code: 2) }
             try checkRuntime()
@@ -1881,7 +2022,9 @@ public final class MacSyncApp {
         }
         try ensureDirectory(parent)
         var args = isDirectory(src) ? ["-a", "--delete", "--itemize-changes", "--out-format=%i %n"] : ["-aL", "--itemize-changes", "--out-format=%i %n"]
-        if fm.fileExists(atPath: config.excludesFile) { args.append("--exclude-from=\(config.excludesFile)") }
+        if fm.fileExists(atPath: config.excludesFile) {
+            args.append("--exclude-from=\(config.excludesFile)")
+        }
         if isDirectory(src) {
             try ensureDirectory(dest)
             let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"])
@@ -1931,10 +2074,16 @@ public final class MacSyncApp {
             try ensureDirectory(dest)
             info("restore directory: \(src) -> \(dest)")
             var args = ["-a"]
-            if !force { args.append("--update") }
-            if fm.fileExists(atPath: config.excludesFile) { args.append("--exclude-from=\(config.excludesFile)") }
+            if !force {
+                args.append("--update")
+            }
+            if fm.fileExists(atPath: config.excludesFile) {
+                args.append("--exclude-from=\(config.excludesFile)")
+            }
             let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"])
-            if result.status != 0 { throw ExitError(code: Int(result.status)) }
+            if result.status != 0 {
+                throw ExitError(code: Int(result.status))
+            }
             return
         }
         if isDirectory(dest) {
@@ -1965,13 +2114,17 @@ public final class MacSyncApp {
         try ensureDirectory(parent)
         info("restore file: \(src) -> \(dest)")
         var args = ["-a"]
-        if fm.fileExists(atPath: config.excludesFile) { args.append("--exclude-from=\(config.excludesFile)") }
+        if fm.fileExists(atPath: config.excludesFile) {
+            args.append("--exclude-from=\(config.excludesFile)")
+        }
         let result = runner.run("rsync", args + [src, dest])
-        if result.status != 0 { throw ExitError(code: Int(result.status)) }
+        if result.status != 0 {
+            throw ExitError(code: Int(result.status))
+        }
     }
 
     private func modificationDate(_ path: String) -> Date {
-        ((try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast)
+        (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? Date.distantPast
     }
 
     private func filesEqual(_ left: String, _ right: String) -> Bool {
@@ -1997,7 +2150,7 @@ public final class MacSyncApp {
             - LocalHostName: `\(localHostName.isEmpty ? "unknown" : localHostName)`
             - OS: `\(osName.isEmpty ? "unknown" : osName) \(osVersion.isEmpty ? "unknown" : osVersion)`
             - Architecture: `\(arch.isEmpty ? "unknown" : arch)`
-            """
+            """,
         )
     }
 
@@ -2071,14 +2224,16 @@ public final class MacSyncApp {
     }
 
     private func pushMachinesRepoWithRetries(branch: String) -> Bool {
-        for attempt in 1...3 {
+        for attempt in 1 ... 3 {
             guard rebaseMachinesRepoBeforePush() else { return false }
             if runWithProgressCommand("pushing \(branch) to origin", "git", ["-C", config.machinesRepoDir, "push", "-u", "origin", branch]) {
                 progressDone("pushed \(branch) to origin")
                 return true
             }
             printProgressCommandOutput()
-            if attempt == 3 { return false }
+            if attempt == 3 {
+                return false
+            }
             warning("machines repo push failed; rebasing and retrying (\(attempt)/3)")
         }
         return false
@@ -2114,7 +2269,7 @@ public final class MacSyncApp {
             warning("detached HEAD; skipping git push")
             return
         }
-        if !committed && !branchAheadOfUpstream(config.machinesRepoDir) {
+        if !committed, !branchAheadOfUpstream(config.machinesRepoDir) {
             progressDone("no local commits to push")
             return
         }
@@ -2157,7 +2312,9 @@ public final class MacSyncApp {
         guard let enumerator = fm.enumerator(atPath: dir) else { return 0 }
         var count = 0
         for case let path as String in enumerator {
-            if !isDirectory("\(dir)/\(path)") { count += 1 }
+            if !isDirectory("\(dir)/\(path)") {
+                count += 1
+            }
         }
         return count
     }
@@ -2269,7 +2426,9 @@ public final class MacSyncApp {
                 try ensureDirectory(config.machineAbsoluteDir)
             }
             progressPending("syncing configured paths")
-            for rel in manifest { try syncOnePath(rel) }
+            for rel in manifest {
+                try syncOnePath(rel)
+            }
             progressDone("synced configured paths")
             try pruneStaleDynamicPaths(currentDynamic: dynamicExtra, configured: configured)
             try syncHomebrewPackages()
@@ -2277,7 +2436,9 @@ public final class MacSyncApp {
             try syncGitHubRepositories()
             try syncSecretsArchive(mode: "auto")
             if config.dryRun != "1" {
-                if dynamicRefsEnabled() { try writeDynamicPathsManifest(dynamicExtra) }
+                if dynamicRefsEnabled() {
+                    try writeDynamicPathsManifest(dynamicExtra)
+                }
                 try writeMachineMetadata()
             }
             captureSyncFinishMetrics()
@@ -2322,7 +2483,9 @@ public final class MacSyncApp {
                 throw ExitError(code: 2)
             }
         }
-        if fromProvided && selectMachine { try fail("--from and --select cannot be used together", code: 2) }
+        if fromProvided && selectMachine {
+            try fail("--from and --select cannot be used together", code: 2)
+        }
         try checkRuntime()
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
@@ -2339,8 +2502,7 @@ public final class MacSyncApp {
             }
             fromMachine = resolved
         } else if selectMachine || !isDirectory("\(config.machinesRootDir)/\(config.machineName)") {
-            machineSnapshotSuggestionLines()
-            try fail("current machine snapshot is missing; re-run with --from <machine>")
+            fromMachine = try selectMachineSnapshot()
         }
         let machineDir = "\(config.machinesRootDir)/\(fromMachine)"
         guard isDirectory(machineDir) else { try fail("missing machine snapshot: \(machineDir)") }
@@ -2353,8 +2515,8 @@ public final class MacSyncApp {
         for rel in try restoreManifestPaths(machine: fromMachine) {
             try restoreOnePath(machine: fromMachine, rel: rel, force: force)
         }
-        printHomebrewRestoreCommands(machine: fromMachine)
-        printVscodeExtensionRestoreCommands(machine: fromMachine)
+        try printHomebrewRestoreCommands(machine: fromMachine)
+        try printVscodeExtensionRestoreCommands(machine: fromMachine)
         try restoreGitHubRepositories(machine: fromMachine)
         printSecretsRestoreHint(machine: fromMachine)
     }
@@ -2372,7 +2534,7 @@ public final class MacSyncApp {
         info("GitHub repo snapshot file: \(config.githubReposFile)")
         info("secret paths file: \(config.secretPathsFile)")
         info("age recipients file: \(config.ageRecipientsFile)")
-        info("encrypted secrets archive: \(config.secretsArchive)")
+        info("encrypted secrets archive: configured")
         info("dynamic refs: \(dynamicRefsEnabled() ? "enabled" : "disabled")")
         info("Homebrew sync: \(homebrewSyncEnabled() ? "enabled" : "disabled")")
         info("VS Code extension sync: \(vscodeExtensionsSyncEnabled() ? "enabled" : "disabled")")
@@ -2382,13 +2544,12 @@ public final class MacSyncApp {
         for rel in try manifestPaths() {
             let src = sourcePath(for: rel)
             let dest = destPath(for: rel)
-            let state: String
-            if !pathExists(src) {
-                state = "missing"
+            let state = if !pathExists(src) {
+                "missing"
             } else if isDirectory(src) {
-                state = "dir"
+                "dir"
             } else {
-                state = "file"
+                "file"
             }
             info("\(state.padding(toLength: 8, withPad: " ", startingAt: 0)) \(src) -> \(dest)")
         }
@@ -2414,7 +2575,9 @@ public final class MacSyncApp {
         let changes = runner.run("git", ["-C", repo, "status", "--short"]).stdout.trimmed
         guard !changes.isEmpty else { return }
         info("\(title) local changes:")
-        for line in changes.splitLines() { info("  \(line)") }
+        for line in changes.splitLines() {
+            info("  \(line)")
+        }
     }
 
     private func cmdStatus() {

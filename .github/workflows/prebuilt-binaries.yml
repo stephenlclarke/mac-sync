@@ -48,6 +48,7 @@ jobs:
               lane="main"
               formula="mac-sync.rb"
               formula_class="MacSync"
+              formula_name="mac-sync"
               label="main lane"
               ;;
             release|release-*)
@@ -58,6 +59,7 @@ jobs:
               lane="release"
               formula="mac-sync-${formula_slug}.rb"
               formula_class="$(python3 -c 'import re, sys; print("MacSync" + "".join(part.capitalize() for part in re.split(r"[^a-zA-Z0-9]+", sys.argv[1]) if part))' "$formula_slug")"
+              formula_name="mac-sync-${formula_slug}"
               label="${GITHUB_REF_NAME} branch"
               ;;
             *)
@@ -73,6 +75,7 @@ jobs:
             printf 'lane=%s\n' "$lane"
             printf 'formula=%s\n' "$formula"
             printf 'formula_class=%s\n' "$formula_class"
+            printf 'formula_name=%s\n' "$formula_name"
             printf 'label=%s\n' "$label"
             printf 'asset_slug=%s\n' "$asset_slug"
             printf 'tag=homebrew-%s\n' "$asset_slug"
@@ -86,6 +89,17 @@ jobs:
           MAC_SYNC_BRANCH: ${{ github.ref_name }}
           MAC_SYNC_COMMIT: ${{ github.sha }}
           MAC_SYNC_LANE: ${{ steps.lane.outputs.lane }}
+
+      - name: Test packaged executables
+        env:
+          ASSET: ${{ steps.lane.outputs.asset }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="$(mktemp -d)"
+          tar -xzf "${RUNNER_TEMP}/${ASSET}" -C "$package_root"
+          "$package_root/mac-sync/bin/mac-sync" --help >/dev/null
+          "$package_root/mac-sync/bin/mac-spinner" --message package-smoke --pending >/dev/null
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
@@ -143,9 +157,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
-            printf 'available=false\n' >> "$GITHUB_OUTPUT"
-            printf 'HOMEBREW_TAP_TOKEN is not set; skipping stephenlclarke/homebrew-tap update.\n'
-            exit 0
+            printf '::error title=Homebrew tap publish blocked::HOMEBREW_TAP_TOKEN is required to update stephenlclarke/homebrew-tap.\n'
+            exit 1
           fi
           printf 'available=true\n' >> "$GITHUB_OUTPUT"
 
@@ -197,3 +210,15 @@ jobs:
           git add "Formula/${{ steps.lane.outputs.formula }}"
           git commit -m "chore(homebrew): update ${{ github.ref_name }} mac-sync formula"
           git push
+
+      - name: Verify Homebrew tap installation
+        if: steps.tap-token.outputs.available == 'true'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew untap stephenlclarke/tap >/dev/null 2>&1 || true
+          brew tap stephenlclarke/tap
+          brew install --formula stephenlclarke/tap/${{ steps.lane.outputs.formula_name }}
+          brew test stephenlclarke/tap/${{ steps.lane.outputs.formula_name }}

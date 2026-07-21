@@ -2,8 +2,8 @@ class MacSync < Formula
   desc "Curated Mac dotfile, package, secret, and repository snapshot sync tool"
   homepage "https://github.com/stephenlclarke/mac-sync"
   url "https://github.com/stephenlclarke/mac-sync/releases/download/homebrew-main/mac-sync-main-release-arm64.tar.gz"
-  version "release-bootstrap"
-  sha256 :no_check
+  version "main-release-9949da3c4147"
+  sha256 "e69394173da02cd76ce1f2a6f664eaf1717059f63368722b57914c12527a772c"
   license "AGPL-3.0-or-later"
 
   depends_on "age"
@@ -14,6 +14,8 @@ class MacSync < Formula
   def install
     payload = if (buildpath/"mac-sync/bin").directory?
       buildpath/"mac-sync/bin"
+    elsif (buildpath/"bin").directory?
+      buildpath/"bin"
     else
       buildpath
     end
@@ -48,7 +50,7 @@ class MacSync < Formula
   end
 
   test do
-    assert_match "Usage:", shell_output("#{bin}/mac-sync --help")
+    assert_match "USAGE:", shell_output("#{bin}/mac-sync --help")
     assert_match "brew smoke", shell_output("#{bin}/mac-spinner --message 'brew smoke' --pending")
   end
 end

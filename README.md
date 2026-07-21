@@ -109,9 +109,11 @@ make ci
 make package-release
 ```
 
-CI runs Swift unit tests with coverage, the existing shell regression suite,
-CLI smoke checks, CodeQL, SonarCloud analysis, sanitizer jobs, Homebrew formula
-syntax checks, and branch prebuilt publishing for the Homebrew tap.
+CI runs Swift unit tests and the shell regression suite against coverage-instrumented
+binaries, then enforces at least 80% line coverage across `MacSyncCore.swift` and
+`Support.swift`. It also runs CLI smoke checks, CodeQL, SonarCloud analysis,
+sanitizer jobs, Homebrew formula checks, and branch prebuilt publishing for the
+Homebrew tap. The generated Sonar-compatible report is `coverage.xml`.
 
 ## Status
 
@@ -287,6 +289,10 @@ recipient to the repo. Future encrypted snapshots are encrypted to every
 recipient in `config/age-recipients.txt`, so any matching Keychain identity can
 decrypt them.
 
+Before replacing an existing encrypted archive, `mac-sync` decrypts and compares
+it with the new snapshot. If that verification fails, sync stops and preserves
+the existing archive.
+
 ## Packages
 
 Homebrew package state is captured during normal `mac-sync sync` when `brew` is
@@ -369,6 +375,9 @@ generated per-machine manifest is persisted to:
 ~/github/dot-files/machines/<machine-name>/editor/vscode-extensions.txt
 ```
 
+If a Homebrew or VS Code inventory command fails, sync stops without replacing
+the previous package or extension snapshot with an empty result.
+
 Git repositories under `~/github`, including nested paths such as
 `xyzzy.tools/fixdecoder_rs`, are captured during sync when they have at least
 one GitHub remote. The generated per-machine clone list is persisted to:
@@ -428,6 +437,11 @@ material such as SSH private keys, cloud credentials, token files, shell
 history, or decrypted secret directories to `config/sync-paths.txt`.
 The machine snapshot repo should also ignore common credential-bearing paths
 under `machines/`, but the path manifest is still the real safety boundary.
+
+Machine names and configured or persisted paths are validated before use.
+Machine names cannot be `.` or `..`, start with `-`, or contain characters
+outside letters, digits, `.`, `_`, and `-`; path traversal components are
+rejected.
 
 Use encrypted secrets for `~/.ssh`, `~/.secrets`, or similar sensitive paths.
 Only encrypted `*.age` snapshots and public recipients belong in git. The

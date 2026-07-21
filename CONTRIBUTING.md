@@ -32,3 +32,17 @@ feat(secrets): add archive integrity checks
 fix(ci): upload Swift coverage to SonarCloud
 docs: clarify Homebrew service setup
 ```
+
+## Validation
+
+Before opening a pull request, run:
+
+```sh
+make ci
+make package-release
+```
+
+`make ci` runs lint checks, Swift unit tests, the shell regression suite, CLI
+smoke tests, and an 80% minimum line-coverage check for the Swift core. Coverage
+is written to `coverage.lcov` and `coverage.xml`; CI passes `coverage.xml` to
+SonarCloud.

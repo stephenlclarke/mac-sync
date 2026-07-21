@@ -33,16 +33,16 @@ private func usage(scriptName: String) {
 
         ENVIRONMENT:
           SCRIPT_COLOUR     Set to off, false, or 0 to disable colour.
-        """
+        """,
     )
 }
 
 private func colourEnabled() -> Bool {
     switch ProcessInfo.processInfo.environment["SCRIPT_COLOUR"] ?? "" {
     case "off", "OFF", "false", "FALSE", "0":
-        return false
+        false
     default:
-        return isatty(STDOUT_FILENO) == 1
+        isatty(STDOUT_FILENO) == 1
     }
 }
 
