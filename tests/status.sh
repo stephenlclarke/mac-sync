@@ -106,6 +106,9 @@ EOF
 git -C "$TEST_REPO" add config/sync-paths.txt config/excludes.txt
 git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
 
+mkdir -p "$TEST_MACHINES_REPO/machines/target/home"
+printf 'stale repo bash\n' >"$TEST_MACHINES_REPO/machines/target/home/.bashrc"
+touch -t 202701010000 "$TEST_MACHINES_REPO/machines/target/home/.bashrc"
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
 mkdir -p "$TEST_HOME/.config/tool"
 printf 'tool setting\n' >"$TEST_HOME/.config/tool/settings"
@@ -114,6 +117,7 @@ run_mac_sync sync
 assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.bashrc" "home bash"
 assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.config/tool/settings" "tool setting"
 assert_stdout_contains "new snapshot file:"
+assert_stdout_contains "updated snapshot file:"
 assert_stdout_lacks "sync directory:"
 [[ -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.env" ]] \
   || fail "missing local status file"
@@ -174,3 +178,13 @@ assert_stdout_contains "WARN: no origin remote configured for machines repo; ski
 assert_stdout_contains "last sync error messages: none"
 assert_stdout_contains "machines repo local changes:"
 assert_stdout_contains "?? README.md"
+
+MACHINES_ORIGIN="${TMP_ROOT}/machines-origin.git"
+git init --bare "$MACHINES_ORIGIN" >/dev/null
+git -C "$TEST_MACHINES_REPO" remote add origin "$MACHINES_ORIGIN"
+printf 'manual local change\n' >"$TEST_MACHINES_REPO/machines/target/local-change.txt"
+
+run_mac_sync sync
+assert_file_contents \
+  "$TEST_HOME/Library/Application Support/mac-sync/status/target.local-changes.log" \
+  "?? machines/target/local-change.txt"

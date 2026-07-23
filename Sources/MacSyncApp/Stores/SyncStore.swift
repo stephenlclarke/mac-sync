@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 import MacSyncCore
@@ -15,13 +16,17 @@ final class SyncStore: ObservableObject {
     @Published private(set) var isCheckingGitHubAccess = false
     @Published private(set) var encryptedSecretEntries: [String: [String]] = [:]
     @Published private(set) var encryptedSecretErrors: [String: String] = [:]
+    @Published private(set) var encryptedSecretFailures: [String: EncryptedSecretsInspectionError] = [:]
     @Published private(set) var loadingEncryptedSecrets = Set<String>()
     @Published private(set) var syncScheduleStatus: SyncScheduleStatus
+    @Published private(set) var syncIssues: [SyncIssue]
+    @Published private(set) var requestedNavigation: NavigationItem?
     @Published var isSetupSheetPresented = false
 
     private var repository: SyncRepository
     private let baseEnvironment: [String: String]
     private var commandEnvironment: [String: String]
+    private var issueRepository: SyncIssueRepository
     private var process: Process?
     private var savedSelection: [String]
 
@@ -48,6 +53,7 @@ final class SyncStore: ObservableObject {
         commandEnvironment = appEnvironment
         self.repository = repository
         let initialOverview = repository.load()
+        let initialIssueRepository = SyncIssueRepository(configuration: initialOverview.configuration)
         overview = initialOverview
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
@@ -59,6 +65,10 @@ final class SyncStore: ObservableObject {
             executableURL: MacSyncCommandLocator.scheduledExecutableURL(environment: appEnvironment),
             environment: appEnvironment
         ).status()
+        issueRepository = initialIssueRepository
+        syncIssues = initialIssueRepository.issues(for: initialOverview)
+        requestedNavigation = nil
+        updateDockBadge()
     }
 
     var isRunning: Bool {
@@ -73,9 +83,14 @@ final class SyncStore: ObservableObject {
         selectedPaths != savedSelection
     }
 
+    var openIssueCount: Int {
+        syncIssues.filter(\.requiresManualIntervention).count
+    }
+
     func reload() {
         let selectionHasChanges = hasUnsavedSelection
         overview = repository.load()
+        reloadSyncIssues()
         if !selectionHasChanges {
             savedSelection = repository.configuredPaths()
             selectedPaths = savedSelection
@@ -239,6 +254,23 @@ final class SyncStore: ObservableObject {
         }
     }
 
+    func requestManualTriage() {
+        requestedNavigation = .triage
+    }
+
+    func consumeNavigationRequest() {
+        requestedNavigation = nil
+    }
+
+    func updateIssue(_ issue: SyncIssue, disposition: SyncIssueDisposition, note: String) {
+        do {
+            try issueRepository.update(issueID: issue.id, disposition: disposition, note: note)
+            reloadSyncIssues()
+        } catch {
+            errorMessage = "Unable to save manual triage: \(error.localizedDescription)"
+        }
+    }
+
     func reloadSyncSchedule() {
         syncScheduleStatus = scheduleManager().status()
     }
@@ -263,6 +295,14 @@ final class SyncStore: ObservableObject {
         encryptedSecretErrors[machine]
     }
 
+    func encryptedSecretsRecoverySuggestion(for machine: String) -> String? {
+        encryptedSecretFailures[machine]?.recoverySuggestion
+    }
+
+    func canPrepareEncryptedSecretsAccess(for machine: String) -> Bool {
+        encryptedSecretFailures[machine]?.supportsAccessSetup == true
+    }
+
     func isLoadingEncryptedSecrets(for machine: String) -> Bool {
         loadingEncryptedSecrets.contains(machine)
     }
@@ -273,6 +313,7 @@ final class SyncStore: ObservableObject {
 
         loadingEncryptedSecrets.insert(machine)
         encryptedSecretErrors[machine] = nil
+        encryptedSecretFailures[machine] = nil
         let environment = commandEnvironment
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -287,9 +328,16 @@ final class SyncStore: ObservableObject {
                 case let .failure(error):
                     self?.encryptedSecretEntries[machine] = nil
                     self?.encryptedSecretErrors[machine] = error.localizedDescription
+                    self?.encryptedSecretFailures[machine] = error as? EncryptedSecretsInspectionError
                 }
             }
         }
+    }
+
+    func prepareEncryptedSecretsAccess() {
+        guardSetup()
+        guard isSetupComplete else { return }
+        run(arguments: ["secrets", "init"], action: .preparingEncryptedSecretsAccess)
     }
 
     func dismissError() {
@@ -367,16 +415,22 @@ final class SyncStore: ObservableObject {
 
     private func finish(process: Process) {
         let status = process.terminationStatus
+        let completedAction = activeAction
         if status != 0 {
             errorMessage = "mac-sync finished with exit status \(status)."
         }
         activeAction = nil
         self.process = nil
+        if completedAction == .preparingEncryptedSecretsAccess {
+            encryptedSecretEntries.removeAll()
+            encryptedSecretErrors.removeAll()
+            encryptedSecretFailures.removeAll()
+        }
         reload()
     }
 
     private func applyRepositoryLocations(_ locations: RepositoryLocations) {
-        var environment = baseEnvironment
+        var environment = MacSyncRuntimeEnvironment.prepared(baseEnvironment)
         environment.removeValue(forKey: "MAC_SYNC_REPO")
         environment["MAC_SYNC_MACHINES_REPO"] = locations.dataRepository
         commandEnvironment = environment
@@ -386,6 +440,8 @@ final class SyncStore: ObservableObject {
         gitHubReports = setupService.initialGitHubReports(for: repositoryInspections)
         isSetupComplete = repositoryInspections.allSatisfy(\.isReady)
         overview = repository.load()
+        issueRepository = SyncIssueRepository(configuration: overview.configuration)
+        reloadSyncIssues()
         let configuredPaths = repository.configuredPaths()
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
@@ -420,5 +476,16 @@ final class SyncStore: ObservableObject {
             arguments += ["--path", path]
         }
         return arguments
+    }
+
+    private func reloadSyncIssues() {
+        syncIssues = issueRepository.issues(for: overview)
+        updateDockBadge()
+    }
+
+    private func updateDockBadge() {
+        let badge = openIssueCount == 0 ? nil : "\(openIssueCount)"
+        NSApplication.shared.dockTile.badgeLabel = badge
+        NSApplication.shared.dockTile.display()
     }
 }

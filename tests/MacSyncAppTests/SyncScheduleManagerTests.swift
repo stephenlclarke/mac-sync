@@ -93,6 +93,48 @@ final class SyncScheduleManagerTests: XCTestCase {
         XCTAssertNil(propertyList["StartInterval"])
     }
 
+    func testCreatesCalendarLaunchAgentForDifferentTimesOnTheSameDay() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = FakeLaunchdRunner()
+        let manager = scheduleManager(fixture: fixture, runner: runner)
+        let schedule = SyncSchedule.calendar(entries: [
+            SyncScheduleCalendarEntry(weekday: .monday, hour: 9, minute: 0),
+            SyncScheduleCalendarEntry(weekday: .tuesday, hour: 11, minute: 30),
+            SyncScheduleCalendarEntry(weekday: .monday, hour: 17, minute: 45),
+        ])
+
+        let status = try manager.configure(schedule: schedule)
+
+        XCTAssertEqual(
+            status.state,
+            .configured(.calendar(entries: [
+                SyncScheduleCalendarEntry(weekday: .monday, hour: 9, minute: 0),
+                SyncScheduleCalendarEntry(weekday: .monday, hour: 17, minute: 45),
+                SyncScheduleCalendarEntry(weekday: .tuesday, hour: 11, minute: 30),
+            ]))
+        )
+        XCTAssertEqual(
+            status.detail,
+            "Runs Mon at 09:00, 17:45; Tue at 11:30 through this Mac's launchd agent."
+        )
+        let data = try Data(contentsOf: manager.agentURL)
+        let propertyList = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let calendarEntries = try XCTUnwrap(propertyList["StartCalendarInterval"] as? [[String: Any]])
+        XCTAssertEqual(
+            calendarEntries.map { entry in
+                [
+                    (entry["Weekday"] as? NSNumber)?.intValue ?? -1,
+                    (entry["Hour"] as? NSNumber)?.intValue ?? -1,
+                    (entry["Minute"] as? NSNumber)?.intValue ?? -1,
+                ]
+            },
+            [[1, 9, 0], [1, 17, 45], [2, 11, 30]]
+        )
+    }
+
     private func makeFixture() throws -> Fixture {
         let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let home = root.appendingPathComponent("home")

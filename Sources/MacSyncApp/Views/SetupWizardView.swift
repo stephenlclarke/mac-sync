@@ -14,8 +14,8 @@ struct SetupWizardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Label("Set up Mac Sync", systemImage: "arrow.triangle.2.circlepath.circle.fill")
                     .font(.title.bold())
                 Text("One private repository holds every Mac's snapshots and its own Mac Sync configuration. dot-files is not changed.")
@@ -116,8 +116,9 @@ struct SetupWizardView: View {
                 .disabled(!model.hasAllRepositories || model.isWorking)
             }
         }
-        .padding(24)
-        .frame(minWidth: 760, idealWidth: 900, maxWidth: 980, maxHeight: .infinity, alignment: .topLeading)
+        .padding(20)
+        .frame(minWidth: 760, idealWidth: 900, maxWidth: 980, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .task {
             model.refresh()
         }

@@ -24,6 +24,12 @@ Snapshots are written to:
 ~/github/mac-sync-data/machines/<machine-name>/
 ```
 
+Each Mac is the golden source for its own selected files. A normal sync always
+publishes those local files over that Mac's snapshot in `mac-sync-data`; the
+repository never wins a timestamp-based conflict. Copying a peer snapshot into
+a Mac is a separate, explicit action: missing files are added, while existing
+local files are kept unless the user chooses to replace them.
+
 The project provides both a Swift command-line engine and a native SwiftUI Mac
 app with xyzzy.tools branding. Homebrew installs the CLI, the menu-bar app, and
 the bundled application icon. Local source builds are for development and
@@ -70,8 +76,8 @@ only—GitHub credentials continue to be managed by your existing SSH setup or
 Git credential helper/Keychain. The Homebrew CLI and both scheduling options
 read the same locations.
 
-Use **Settings → Automatic sync** in Mac Sync to run at a chosen time on any
-combination of days, choose a preset interval, or enter a custom interval from
+Use **Settings → Automatic sync** in Mac Sync to run at one or more chosen
+times on specific days, choose a preset interval, or enter a custom interval from
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
 same local configuration as the CLI. If you use the app-managed schedule, stop
 the optional Homebrew service first so there is only one automatic sync job:
@@ -101,7 +107,10 @@ uses the existing CLI and the same configuration and snapshot repositories, so
 there is no separate sync implementation or additional state store.
 
 - **Overview** shows the last completed sync, live activity, warnings, errors,
-  the snapshot footprint for this Mac, and the available peer snapshots.
+  the snapshot footprint for this Mac, and the available peer snapshots. A
+  skipped pre-operation pull shows the recorded and current local Git changes
+  in this Mac's snapshot, or marks a historical warning as resolved once the
+  snapshot is clean again.
 - **This Mac** lists the configured snapshot roots and every regular file and
   folder currently stored for the local machine. The configurable outline and
   archive browser behave like purpose-built file managers: expand or collapse
@@ -113,11 +122,12 @@ there is no separate sync implementation or additional state store.
   separately: a trusted recipient can use **View Encrypted Secrets** to list
   archive file and folder names. The app never displays secret values.
 - **Other Macs** offers the same archive browser and lets you choose exact
-  files or folders, preview their restore, then restore only those paths to
-  this Mac. When a peer has encrypted secrets, trusted recipients can inspect
+  files or folders, preview their copy, then copy only those paths from the
+  source snapshot in `mac-sync-data` into this Mac. The source archive is not
+  changed. When a peer has encrypted secrets, trusted recipients can inspect
   its archive entries before deciding whether to restore them in Terminal. A
-  real restore keeps newer local files unless the explicit replace option is
-  selected.
+  manual copy always asks whether to keep this Mac's existing files or replace
+  them with the selected peer snapshot.
 - **Sync Selection** starts from
   `machines/<this-Mac>/config/sync-paths.txt`. Select files and folders from
   the Mac, drag or paste files from Finder, expand or collapse parent folders,
@@ -128,8 +138,13 @@ there is no separate sync implementation or additional state store.
   restores. It shows file-level uploads and downloads, whether an item was new,
   updated, removed, or skipped, and the source and destination paths. Preview
   runs are deliberately not added to the history.
-- **Automatic sync** in Settings installs a per-user `launchd` schedule. Choose
-  a time and any days of the week, a preset interval, or a custom interval; Mac
+- **Manual Triage** is a local queue for warnings and errors from completed
+  syncs. It never pauses scheduled or background syncs. Review an issue later,
+  add a note, acknowledge it to clear the Dock badge, or mark it resolved. The
+  triage state is stored under `status/issues/` on this Mac and is never synced.
+- **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
+  or more day-and-time entries, including multiple times on the same day, choose
+  a preset interval, or use a custom interval; Mac
   Sync keeps the schedule local and never stores credentials in the launch
   agent.
 
@@ -198,7 +213,8 @@ Homebrew tap. The generated Sonar-compatible report is `coverage.xml`.
 
 Show the current `mac-sync` version SHA, local repo paths, local status files,
 the last completed sync, the amount of data changed by that sync, total machine
-snapshot storage, and warning or error messages captured during the last sync:
+snapshot storage, warning or error messages, and the captured local Git changes
+that caused a pre-operation pull to be skipped:
 
 ```sh
 mac-sync status
@@ -260,9 +276,10 @@ It also compares the selected machine's Homebrew snapshot with the local
 Homebrew and VS Code extension state and re-clones missing GitHub repositories
 from the selected machine's saved clone list into `~/github`.
 
-By default, restore copies missing files and files that are newer in the repo
-snapshot while keeping newer local files in `$HOME`. Use `--force` to overwrite
-newer local files and resolve file/directory conflicts in favor of the snapshot:
+By default, restore copies only missing files. Existing local files in `$HOME`
+remain the golden source regardless of their timestamp. Use `--force` only when
+you have explicitly decided to replace existing local files and resolve
+file/directory conflicts in favour of the snapshot:
 
 ```sh
 mac-sync restore --from old-mbp --force
@@ -274,9 +291,13 @@ Preview a restore without changing local files:
 MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp
 ```
 
-In the Mac app, select **Restore specific paths only** when bringing a peer
-snapshot to this Mac and choose the snapshot roots to copy. The CLI equivalent
-accepts one or more `--path` options:
+In the Mac app on the destination Mac, browse the source under **Other Macs**,
+select the files or folders, and choose **Copy to This Mac**. This uses the
+shared `mac-sync-data` snapshot as the transfer medium and never changes the
+source Mac or its archive. Before the app writes any existing local files, it
+asks you to keep this Mac's copy or replace it with the selected peer snapshot.
+Select **Copy specific paths only** to review the exact paths. The CLI
+equivalent accepts one or more `--path` options:
 
 ```sh
 mac-sync restore --from old-mbp --path .zshrc --path .config/tool
@@ -348,7 +369,10 @@ Once at least one recipient is configured, hourly sync writes:
 ```text
 ~/github/mac-sync-data/machines/<machine-name>/secrets/secrets.tar.gz.age
 ~/github/mac-sync-data/machines/<machine-name>/secrets/included-paths.txt
+~/github/mac-sync-data/machines/<machine-name>/secrets/recipients.txt
 ```
+
+`recipients.txt` records the public recipients used for that archive. When the shared recipient registry changes, the next sync from a Mac that can decrypt the archive re-encrypts it for the new recipient set even when the secret files have not changed. This is how a newly trusted Mac gains access without exposing any secret values.
 
 You can also update only the encrypted secret snapshot:
 
@@ -386,8 +410,9 @@ mac-sync secrets test
 ```
 
 Each trusted Mac should run `mac-sync secrets init`, which adds that Mac's public
-recipient to the shared registry. Future encrypted snapshots are encrypted to
-every registered recipient, so any matching Keychain identity can decrypt them.
+recipient to the shared registry. The Mac app offers the same action as **Set Up
+This Mac's Access** when it cannot inspect an archive. It publishes only the
+public recipient and never replaces an archive that this Mac cannot decrypt.
 After adding a new Mac, run `mac-sync sync` once on each source Mac to re-encrypt
 its current archive for the new recipient.
 

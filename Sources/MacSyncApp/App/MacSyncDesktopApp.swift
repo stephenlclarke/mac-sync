@@ -58,6 +58,11 @@ struct MacSyncDesktopApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(!store.isSetupComplete)
 
+                Button("Review Manual Triage") {
+                    store.requestManualTriage()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+
                 Divider()
 
                 Button("Refresh Status") {
@@ -88,6 +93,9 @@ struct MacSyncDesktopApp: App {
         if store.isRunning {
             return "arrow.triangle.2.circlepath.circle.fill"
         }
-        return store.overview.status.result.systemImage
+        if store.openIssueCount > 0 {
+            return "exclamationmark.triangle.fill"
+        }
+        return "arrow.triangle.2.circlepath"
     }
 }

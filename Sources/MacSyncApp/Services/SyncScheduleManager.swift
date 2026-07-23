@@ -30,9 +30,21 @@ enum SyncScheduleWeekday: Int, CaseIterable, Hashable, Identifiable {
     }
 }
 
+struct SyncScheduleCalendarEntry: Equatable, Hashable {
+    let weekday: SyncScheduleWeekday
+    let hour: Int
+    let minute: Int
+}
+
 enum SyncSchedule: Equatable {
     case interval(minutes: Int)
-    case calendar(days: [SyncScheduleWeekday], hour: Int, minute: Int)
+    case calendar(entries: [SyncScheduleCalendarEntry])
+
+    static func calendar(days: [SyncScheduleWeekday], hour: Int, minute: Int) -> SyncSchedule {
+        .calendar(entries: days.map { weekday in
+            SyncScheduleCalendarEntry(weekday: weekday, hour: hour, minute: minute)
+        })
+    }
 }
 
 enum SyncScheduleState: Equatable {
@@ -72,7 +84,7 @@ enum SyncScheduleError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .invalidSchedule:
-            "Choose a valid automatic sync interval, or at least one day and time."
+            "Choose a valid automatic sync interval, or at least one day-and-time entry."
         case .missingExecutable:
             "The mac-sync command is unavailable. Reinstall the app before scheduling automatic sync."
         case .launchdUnavailable:
@@ -208,12 +220,22 @@ struct SyncScheduleManager {
         switch schedule {
         case let .interval(minutes):
             return intervalDescription(minutes: minutes)
-        case let .calendar(days, hour, minute):
-            let weekdayNames = days
-                .sorted { displayOrder(for: $0) < displayOrder(for: $1) }
-                .map(\.shortTitle)
-                .joined(separator: ", ")
-            return "every \(weekdayNames) at \(String(format: "%02d:%02d", hour, minute))"
+        case let .calendar(entries):
+            let sortedEntries = sortedCalendarEntries(entries)
+            guard let first = sortedEntries.first else { return "at an invalid time" }
+            if sortedEntries.allSatisfy({ $0.hour == first.hour && $0.minute == first.minute }) {
+                let weekdayNames = sortedEntries.map(\.weekday.shortTitle).joined(separator: ", ")
+                return "every \(weekdayNames) at \(formattedTime(hour: first.hour, minute: first.minute))"
+            }
+            let entriesByWeekday = Dictionary(grouping: sortedEntries, by: \.weekday)
+            return SyncScheduleWeekday.displayOrder.compactMap { weekday in
+                guard let weekdayEntries = entriesByWeekday[weekday] else { return nil }
+                let times = weekdayEntries
+                    .map { formattedTime(hour: $0.hour, minute: $0.minute) }
+                    .joined(separator: ", ")
+                return "\(weekday.shortTitle) at \(times)"
+            }
+            .joined(separator: "; ")
         }
     }
 
@@ -240,13 +262,15 @@ struct SyncScheduleManager {
         switch schedule {
         case let .interval(minutes):
             return isValid(intervalMinutes: minutes)
-        case let .calendar(days, hour, minute):
-            let uniqueDays = Set(days)
-            return !uniqueDays.isEmpty
-                && uniqueDays.count == days.count
-                && days.allSatisfy { SyncScheduleWeekday.allCases.contains($0) }
-                && (0 ... 23).contains(hour)
-                && (0 ... 59).contains(minute)
+        case let .calendar(entries):
+            let uniqueEntries = Set(entries)
+            return !entries.isEmpty
+                && uniqueEntries.count == entries.count
+                && entries.allSatisfy { entry in
+                    SyncScheduleWeekday.allCases.contains(entry.weekday)
+                        && (0 ... 23).contains(entry.hour)
+                        && (0 ... 59).contains(entry.minute)
+                }
         }
     }
 
@@ -268,7 +292,7 @@ struct SyncScheduleManager {
         }
 
         guard !entries.isEmpty else { return nil }
-        let parsedEntries = entries.compactMap { entry -> (SyncScheduleWeekday, Int, Int)? in
+        let parsedEntries = entries.compactMap { entry -> SyncScheduleCalendarEntry? in
             guard let rawWeekday = (entry["Weekday"] as? NSNumber)?.intValue,
                   let weekday = SyncScheduleWeekday(rawValue: rawWeekday == 7 ? 0 : rawWeekday),
                   let hour = (entry["Hour"] as? NSNumber)?.intValue,
@@ -278,23 +302,37 @@ struct SyncScheduleManager {
             else {
                 return nil
             }
-            return (weekday, hour, minute)
+            return SyncScheduleCalendarEntry(weekday: weekday, hour: hour, minute: minute)
         }
 
-        guard parsedEntries.count == entries.count,
-              let firstEntry = parsedEntries.first,
-              parsedEntries.allSatisfy({ $0.1 == firstEntry.1 && $0.2 == firstEntry.2 })
-        else {
+        guard parsedEntries.count == entries.count else {
             return nil
         }
 
-        let days = parsedEntries.map(\.0)
-        let schedule = SyncSchedule.calendar(days: days, hour: firstEntry.1, minute: firstEntry.2)
+        let schedule = SyncSchedule.calendar(entries: parsedEntries)
         return isValid(schedule: schedule) ? schedule : nil
     }
 
     private static func displayOrder(for weekday: SyncScheduleWeekday) -> Int {
         SyncScheduleWeekday.displayOrder.firstIndex(of: weekday) ?? Int.max
+    }
+
+    private static func sortedCalendarEntries(_ entries: [SyncScheduleCalendarEntry]) -> [SyncScheduleCalendarEntry] {
+        entries.sorted { left, right in
+            let leftDay = displayOrder(for: left.weekday)
+            let rightDay = displayOrder(for: right.weekday)
+            if leftDay != rightDay {
+                return leftDay < rightDay
+            }
+            if left.hour != right.hour {
+                return left.hour < right.hour
+            }
+            return left.minute < right.minute
+        }
+    }
+
+    private static func formattedTime(hour: Int, minute: Int) -> String {
+        String(format: "%02d:%02d", hour, minute)
     }
 
     private func launchAgentValues(
@@ -314,14 +352,13 @@ struct SyncScheduleManager {
         switch schedule {
         case let .interval(minutes):
             values["StartInterval"] = minutes * 60
-        case let .calendar(days, hour, minute):
-            values["StartCalendarInterval"] = days
-                .sorted { Self.displayOrder(for: $0) < Self.displayOrder(for: $1) }
-                .map { weekday in
+        case let .calendar(entries):
+            values["StartCalendarInterval"] = Self.sortedCalendarEntries(entries)
+                .map { entry in
                     [
-                        "Weekday": weekday.rawValue,
-                        "Hour": hour,
-                        "Minute": minute,
+                        "Weekday": entry.weekday.rawValue,
+                        "Hour": entry.hour,
+                        "Minute": entry.minute,
                     ]
                 }
         }

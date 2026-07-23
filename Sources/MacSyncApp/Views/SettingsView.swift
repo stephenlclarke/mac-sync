@@ -6,13 +6,7 @@ struct SettingsView: View {
     @ObservedObject var store: SyncStore
     @State private var scheduleChoice = SyncScheduleChoice.hourly
     @State private var customIntervalMinutes = ""
-    @State private var selectedWeekdays = Set<SyncScheduleWeekday>(SyncScheduleWeekday.displayOrder)
-    @State private var scheduledTime = Calendar.autoupdatingCurrent.date(
-        bySettingHour: 9,
-        minute: 0,
-        second: 0,
-        of: Date()
-    ) ?? Date()
+    @State private var calendarRules = [CalendarScheduleRule.default]
     @State private var scheduleValidationMessage: String?
 
     var body: some View {
@@ -85,24 +79,46 @@ struct SettingsView: View {
                 }
 
                 if scheduleChoice == .daysAndTime {
-                    HStack(spacing: 6) {
-                        Text("Days")
-                            .frame(width: 42, alignment: .leading)
-                        ForEach(SyncScheduleWeekday.displayOrder) { weekday in
-                            Toggle(weekday.shortTitle, isOn: weekdayBinding(for: weekday))
-                                .toggleStyle(.button)
-                                .help(weekday.shortTitle)
-                        }
-                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach($calendarRules) { $rule in
+                            HStack(spacing: 10) {
+                                Picker("Day", selection: $rule.weekday) {
+                                    ForEach(SyncScheduleWeekday.displayOrder) { weekday in
+                                        Text(weekday.shortTitle).tag(weekday)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 96)
 
-                    DatePicker(
-                        "Time",
-                        selection: $scheduledTime,
-                        displayedComponents: .hourAndMinute
-                    )
-                    Text("Runs at this Mac's local time on each selected day.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                                DatePicker(
+                                    "Time",
+                                    selection: $rule.time,
+                                    displayedComponents: .hourAndMinute
+                                )
+                                .labelsHidden()
+
+                                Button {
+                                    calendarRules.removeAll { $0.id == rule.id }
+                                } label: {
+                                    Label("Remove time", systemImage: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(calendarRules.count == 1)
+                                .help("Remove this day-and-time entry")
+                            }
+                        }
+
+                        Button {
+                            calendarRules.append(CalendarScheduleRule.default)
+                        } label: {
+                            Label("Add day and time", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderless)
+
+                        Text("Add one or more local sync times. A day can appear more than once.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let scheduleValidationMessage {
@@ -162,20 +178,16 @@ struct SettingsView: View {
             }
             schedule = .interval(minutes: minutes)
         case .daysAndTime:
-            guard !selectedWeekdays.isEmpty else {
-                scheduleValidationMessage = "Select at least one day for the automatic sync."
+            let entries = calendarRules.map(\.entry)
+            guard !entries.isEmpty else {
+                scheduleValidationMessage = "Add at least one day and time for the automatic sync."
                 return
             }
-            let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: scheduledTime)
-            guard let hour = components.hour, let minute = components.minute else {
-                scheduleValidationMessage = "Choose a valid local time for the automatic sync."
+            guard Set(entries).count == entries.count else {
+                scheduleValidationMessage = "Each day and time combination can only be scheduled once."
                 return
             }
-            schedule = .calendar(
-                days: SyncScheduleWeekday.displayOrder.filter { selectedWeekdays.contains($0) },
-                hour: hour,
-                minute: minute
-            )
+            schedule = .calendar(entries: entries)
         default:
             guard let minutes = scheduleChoice.intervalMinutes else {
                 return
@@ -203,29 +215,47 @@ struct SettingsView: View {
                 scheduleChoice = .custom
                 customIntervalMinutes = "\(minutes)"
             }
-        case let .calendar(days, hour, minute):
+        case let .calendar(entries):
             scheduleChoice = .daysAndTime
-            selectedWeekdays = Set(days)
-            scheduledTime = Calendar.autoupdatingCurrent.date(
-                bySettingHour: hour,
-                minute: minute,
-                second: 0,
-                of: Date()
-            ) ?? Date()
+            calendarRules = entries.map(CalendarScheduleRule.init)
         }
     }
+}
 
-    private func weekdayBinding(for weekday: SyncScheduleWeekday) -> Binding<Bool> {
-        Binding(
-            get: { selectedWeekdays.contains(weekday) },
-            set: { isSelected in
-                if isSelected {
-                    selectedWeekdays.insert(weekday)
-                } else {
-                    selectedWeekdays.remove(weekday)
-                }
-            }
+private struct CalendarScheduleRule: Identifiable {
+    let id = UUID()
+    var weekday: SyncScheduleWeekday
+    var time: Date
+
+    static var `default`: CalendarScheduleRule {
+        CalendarScheduleRule(weekday: .monday, time: time(hour: 9, minute: 0))
+    }
+
+    init(weekday: SyncScheduleWeekday, time: Date) {
+        self.weekday = weekday
+        self.time = time
+    }
+
+    init(entry: SyncScheduleCalendarEntry) {
+        self.init(weekday: entry.weekday, time: Self.time(hour: entry.hour, minute: entry.minute))
+    }
+
+    var entry: SyncScheduleCalendarEntry {
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: time)
+        return SyncScheduleCalendarEntry(
+            weekday: weekday,
+            hour: components.hour ?? 0,
+            minute: components.minute ?? 0
         )
+    }
+
+    private static func time(hour: Int, minute: Int) -> Date {
+        Calendar.autoupdatingCurrent.date(
+            bySettingHour: hour,
+            minute: minute,
+            second: 0,
+            of: Date()
+        ) ?? Date()
     }
 }
 
@@ -258,7 +288,7 @@ private enum SyncScheduleChoice: String, CaseIterable, Identifiable {
         case .daily:
             "Every day"
         case .daysAndTime:
-            "Days and time"
+            "Days and times"
         case .custom:
             "Custom interval"
         }

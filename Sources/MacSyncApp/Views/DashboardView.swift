@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DashboardView: View {
     @ObservedObject var store: SyncStore
+    let openManualTriage: () -> Void
+    @State private var localChangesExpanded = false
 
     var body: some View {
         ScrollView {
@@ -9,11 +11,15 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Your sync control room")
                         .font(.largeTitle.bold())
-                    Text("Inspect the snapshot for this Mac, browse other Macs, and safely publish or restore selected files.")
+                    Text("Inspect the snapshot for this Mac, browse other Macs, and safely publish or copy selected files.")
                         .foregroundStyle(.secondary)
                 }
 
                 statusCard
+
+                if store.openIssueCount > 0 {
+                    manualTriageCard
+                }
 
                 HStack(alignment: .top, spacing: 14) {
                     MetricCard(
@@ -140,15 +146,137 @@ struct DashboardView: View {
                             .textSelection(.enabled)
                     }
                     ForEach(store.overview.status.warnings, id: \.self) { message in
-                        Label(message, systemImage: "exclamationmark.circle")
-                            .foregroundStyle(.orange)
-                            .textSelection(.enabled)
+                        if isCurrentMachineLocalChangesWarning(message) {
+                            localChangesWarning
+                        } else {
+                            Label(message, systemImage: "exclamationmark.circle")
+                                .foregroundStyle(.orange)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    private var manualTriageCard: some View {
+        GroupBox {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "exclamationmark.bubble.fill")
+                    .font(.title2)
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(store.openIssueCount) issue\(store.openIssueCount == 1 ? "" : "s") need manual triage")
+                        .fontWeight(.semibold)
+                    Text("Syncs continue in the background. Review, acknowledge, or resolve these items when you are ready.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Review Issues") {
+                    openManualTriage()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(4)
+        } label: {
+            Text("Manual triage")
+        }
+    }
+
+    @ViewBuilder
+    private var localChangesWarning: some View {
+        let status = store.overview.status
+        if localChangesWarningIsResolved, status.recordedLocalChanges.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Resolved: this Mac's snapshot is currently clean", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(historicalWarningDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            DisclosureGroup(isExpanded: $localChangesExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !status.recordedLocalChanges.isEmpty {
+                        localChangesList(
+                            title: "Changes recorded when the pull was skipped",
+                            changes: status.recordedLocalChanges
+                        )
+                    }
+
+                    if let currentChanges = status.currentLocalChanges {
+                        if currentChanges.isEmpty {
+                            Text(historicalWarningDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            if !status.recordedLocalChanges.isEmpty {
+                                Divider()
+                            }
+                            localChangesList(
+                                title: "Changes still present now",
+                                changes: currentChanges
+                            )
+                            Text("The next sync will publish this Mac's selected files but will keep the pre-sync pull paused until these changes are committed or reverted.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Mac Sync cannot inspect the current snapshot. Use Refresh after the mac-sync-data checkout is available.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 22)
+                .padding(.top, 4)
+            } label: {
+                Label(localChangesWarningTitle, systemImage: "exclamationmark.circle")
+                    .foregroundStyle(localChangesWarningIsResolved ? .green : .orange)
+            }
+            .tint(localChangesWarningIsResolved ? .green : .orange)
+        }
+    }
+
+    private func localChangesList(title: String, changes: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(changes, id: \.self) { change in
+                Text(change)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var localChangesWarningTitle: String {
+        if localChangesWarningIsResolved {
+            return "Resolved: this Mac's snapshot is currently clean"
+        }
+        let count = store.overview.status.currentLocalChanges?.count
+            ?? store.overview.status.recordedLocalChanges.count
+        return count == 0
+            ? "Git pull was skipped; snapshot state needs checking"
+            : "Git pull was skipped; \(count) local snapshot \(count == 1 ? "change" : "changes") need attention"
+    }
+
+    private var localChangesWarningIsResolved: Bool {
+        store.overview.status.currentLocalChanges?.isEmpty == true
+    }
+
+    private var historicalWarningDetail: String {
+        if let finishedAt = store.overview.status.finishedAt {
+            return "The pre-sync pull was skipped at \(finishedAt), but those changes are no longer present. The next sync will pull normally."
+        }
+        return "The pre-sync pull was skipped during the last recorded sync, but those changes are no longer present. The next sync will pull normally."
+    }
+
+    private func isCurrentMachineLocalChangesWarning(_ message: String) -> Bool {
+        message.contains("current machine snapshot has local changes")
     }
 
     private var statusDetail: String {

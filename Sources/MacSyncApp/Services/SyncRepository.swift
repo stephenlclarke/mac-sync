@@ -237,6 +237,10 @@ struct SyncRepository {
             .unknown
         }
 
+        let warnings = readLines("\(prefix).warnings.log")
+        let recordedLocalChanges = readGitStatusLines("\(prefix).local-changes.log")
+        let hasLocalChangesWarning = warnings.contains(where: isCurrentMachineLocalChangesWarning)
+
         return SyncStatus(
             result: result,
             startedAt: values["started_at"],
@@ -250,9 +254,36 @@ struct SyncRepository {
             errorCount: Int(values["error_count"] ?? "") ?? 0,
             lastCommit: values["last_commit"],
             remoteRepository: values["remote_repo"],
-            warnings: readLines("\(prefix).warnings.log"),
-            errors: readLines("\(prefix).errors.log")
+            warnings: warnings,
+            errors: readLines("\(prefix).errors.log"),
+            recordedLocalChanges: recordedLocalChanges,
+            currentLocalChanges: hasLocalChangesWarning
+                ? currentMachineLocalChanges(configuration: configuration)
+                : nil
         )
+    }
+
+    private func isCurrentMachineLocalChangesWarning(_ message: String) -> Bool {
+        message.contains("current machine snapshot has local changes")
+    }
+
+    /// Reads the present working-tree state for a historical pull warning. The
+    /// result is deliberately separate from the recorded list: a successful
+    /// sync can resolve the earlier change before the user opens the app.
+    private func currentMachineLocalChanges(configuration: SyncConfiguration) -> [String]? {
+        let result = ProcessRunner(environment: environment).run(
+            "git",
+            [
+                "-C", configuration.dataRepository,
+                "status", "--short", "--untracked-files=all",
+                "--", "machines/\(configuration.machineName)",
+            ]
+        )
+        guard result.status == 0 else { return nil }
+        return result.stdout
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\r")) }
+            .filter { !$0.isEmpty }
     }
 
     private func readHistory(configuration: SyncConfiguration) -> [SyncHistoryRecord] {
@@ -437,6 +468,12 @@ struct SyncRepository {
         readText(path)
             .split(separator: "\n")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    private func readGitStatusLines(_ path: String) -> [String] {
+        readText(path)
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: CharacterSet(charactersIn: "\r")) }
     }
 
     private func readText(_ path: String) -> String {

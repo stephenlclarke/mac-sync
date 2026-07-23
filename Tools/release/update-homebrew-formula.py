@@ -44,10 +44,10 @@ def main() -> None:
     formula = path_under_workspace(args.formula, workspace)
     template = path_under_workspace(args.template, workspace) if args.template is not None else None
 
-    if formula.exists():
-        text = formula.read_text(encoding="utf-8")
-    elif template is not None:
+    if template is not None:
         text = template.read_text(encoding="utf-8")
+    elif formula.exists():
+        text = formula.read_text(encoding="utf-8")
     else:
         raise SystemExit(f"formula does not exist and no template was supplied: {formula}")
 

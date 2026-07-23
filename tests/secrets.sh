@@ -293,6 +293,7 @@ assert_file_contains "$TEST_REPO/config/age-recipients.txt" "age1fakepublicrecip
 run_mac_sync secrets sync
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".ssh"
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".secrets"
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/recipients.txt" "age1fakepublicrecipient"
 [[ -f "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age" ]] || fail "missing encrypted archive"
 
 archive_checksum="$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")"
@@ -300,6 +301,15 @@ run_mac_sync secrets sync
 assert_stdout_contains "encrypted secrets snapshot unchanged"
 [[ "$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \
   || fail "unchanged secrets sync rewrote the archive"
+
+# Adding a trusted Mac must re-encrypt the existing archive even if the secret
+# files themselves have not changed. The public recipient manifest makes this
+# deterministic for both new and legacy snapshots.
+printf '%s\n' 'age1anothertrustedrecipient' >>"$TEST_REPO/config/age-recipients.txt"
+run_mac_sync secrets sync
+assert_stdout_contains "updated encrypted secrets snapshot"
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/recipients.txt" "age1anothertrustedrecipient"
+archive_checksum="$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")"
 
 printf 'changed-token-value\n' >"$TEST_HOME/.secrets/token"
 AGE_DECRYPT_FAIL=1 run_mac_sync_expect_failure secrets sync

@@ -49,6 +49,42 @@ final class EncryptedSecretsInspectorTests: XCTestCase {
             XCTAssertFalse(error.localizedDescription.contains("sensitive"))
         }
     }
+
+    func testIdentifiesAnArchiveThatDoesNotTrustThisMac() {
+        let runner = FakeEncryptedSecretsRunner(
+            result: CommandResult(
+                status: 1,
+                stdout: "",
+                stderr: "age: error: no identity matched any of the recipients\n"
+            )
+        )
+        let inspector = EncryptedSecretsInspector(
+            environment: [:],
+            executablePath: "/tmp/mac-sync",
+            runner: runner
+        )
+
+        XCTAssertThrowsError(try inspector.entries(from: "peer")) { error in
+            XCTAssertEqual(error as? EncryptedSecretsInspectionError, .accessNotGranted)
+            XCTAssertFalse(error.localizedDescription.contains("recipients"))
+        }
+    }
+
+    func testIdentifiesAMissingEncryptionCommandWithoutExposingOutput() {
+        let runner = FakeEncryptedSecretsRunner(
+            result: CommandResult(status: 1, stdout: "", stderr: "ERROR: missing required command: age\n")
+        )
+        let inspector = EncryptedSecretsInspector(
+            environment: [:],
+            executablePath: "/tmp/mac-sync",
+            runner: runner
+        )
+
+        XCTAssertThrowsError(try inspector.entries(from: "peer")) { error in
+            XCTAssertEqual(error as? EncryptedSecretsInspectionError, .missingRuntimeDependency)
+            XCTAssertFalse(error.localizedDescription.contains("ERROR:"))
+        }
+    }
 }
 
 private final class FakeEncryptedSecretsRunner: EncryptedSecretsCommandRunning {

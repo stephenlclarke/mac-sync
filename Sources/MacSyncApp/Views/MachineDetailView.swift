@@ -169,15 +169,15 @@ struct MachineDetailView: View {
                 .disabled(store.isRunning)
             } else {
                 Menu {
-                    Button("Preview Restore") {
+                    Button("Preview Copy") {
                         store.previewRestore(from: machine.name)
                     }
-                    Button("Restore to This Mac...") {
+                    Button("Copy to This Mac...") {
                         restorePaths = nil
                         showRestoreSheet = true
                     }
                 } label: {
-                    Label("Bring to This Mac", systemImage: "arrow.down.to.line.compact")
+                    Label("Copy to This Mac", systemImage: "arrow.down.to.line.compact")
                 }
                 .disabled(store.isRunning)
             }
@@ -235,7 +235,7 @@ struct MachineDetailView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Snapshot contents")
                         .font(.headline)
-                    Text("\(machine.fileCount) files, \(SyncFormatting.bytes(machine.totalByteCount)). Secret archive entries are available separately with a trusted Keychain identity.")
+                    Text(snapshotBrowserDescription)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -307,6 +307,12 @@ struct MachineDetailView: View {
         .help("Expand, collapse, copy, or reveal configured roots")
     }
 
+    private var snapshotBrowserDescription: String {
+        let archiveSummary = "\(machine.fileCount) files, \(SyncFormatting.bytes(machine.totalByteCount)). Secret archive entries are available separately with a trusted Keychain identity."
+        guard !isCurrentMachine else { return archiveSummary }
+        return "\(archiveSummary) Select files or folders, then choose Copy to This Mac; the source archive is unchanged."
+    }
+
     private var snapshotBrowserActions: some View {
         Menu {
             Section("Selected items") {
@@ -334,12 +340,12 @@ struct MachineDetailView: View {
 
                 if !isCurrentMachine {
                     Divider()
-                    Button("Preview Restore to This Mac") {
+                    Button("Preview Copy to This Mac") {
                         store.previewRestore(from: machine.name, paths: selectedSnapshotRestorePaths)
                     }
                     .disabled(selectedSnapshotRestorePaths.isEmpty || store.isRunning)
 
-                    Button("Restore to This Mac…") {
+                    Button("Copy to This Mac…") {
                         restorePaths = selectedSnapshotRestorePaths
                         showRestoreSheet = true
                     }
@@ -362,7 +368,7 @@ struct MachineDetailView: View {
             Label("Snapshot actions", systemImage: "ellipsis.circle")
         }
         .menuStyle(.borderlessButton)
-        .help("Preview, restore, reveal, or organise the snapshot browser")
+        .help("Preview, copy, reveal, or organise the snapshot browser")
     }
 
     private func snapshotContentRow(_ node: SnapshotContentNode) -> some View {
@@ -487,14 +493,14 @@ struct MachineDetailView: View {
     private func snapshotRestoreMenu(for file: SnapshotFile) -> some View {
         if !isCurrentMachine {
             Divider()
-            Button("Preview Restore to This Mac") {
+            Button("Preview Copy to This Mac") {
                 store.previewRestore(
                     from: machine.name,
                     paths: SnapshotContentsTree.restorePaths(for: [file.displayPath])
                 )
             }
             .disabled(store.isRunning)
-            Button("Restore to This Mac…") {
+            Button("Copy to This Mac…") {
                 restorePaths = SnapshotContentsTree.restorePaths(for: [file.displayPath])
                 showRestoreSheet = true
             }
@@ -762,6 +768,7 @@ private struct EncryptedSecretsSheet: View {
     let machine: MachineSnapshot
     @ObservedObject var store: SyncStore
     @Binding var isPresented: Bool
+    @State private var showAccessSetupConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -793,6 +800,17 @@ private struct EncryptedSecretsSheet: View {
         }
         .padding(24)
         .frame(width: 620)
+        .confirmationDialog(
+            "Publish this Mac's encrypted-secrets access?",
+            isPresented: $showAccessSetupConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Set Up and Publish Access") {
+                store.prepareEncryptedSecretsAccess()
+            }
+        } message: {
+            Text("Mac Sync will create or reuse this Mac's Keychain identity, then publish only its public recipient to mac-sync-data with Git. It will not decrypt, replace, or expose this archive. Afterwards, run Sync Now on a Mac that can already open the archive to re-encrypt it for this Mac.")
+        }
         .task {
             if store.encryptedSecrets(for: machine.name) == nil {
                 store.inspectEncryptedSecrets(from: machine.name)
@@ -802,7 +820,14 @@ private struct EncryptedSecretsSheet: View {
 
     @ViewBuilder
     private var archiveContents: some View {
-        if store.isLoadingEncryptedSecrets(for: machine.name) {
+        if store.activeAction == .preparingEncryptedSecretsAccess {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Publishing this Mac's public recipient…")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if store.isLoadingEncryptedSecrets(for: machine.name) {
             HStack(spacing: 10) {
                 ProgressView()
                 Text("Unlocking archive entries with Keychain…")
@@ -810,9 +835,22 @@ private struct EncryptedSecretsSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = store.encryptedSecretsError(for: machine.name) {
-            Label(error, systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                if let recovery = store.encryptedSecretsRecoverySuggestion(for: machine.name) {
+                    Text(recovery)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if store.canPrepareEncryptedSecretsAccess(for: machine.name) {
+                    Button("Set Up This Mac's Access…") {
+                        showAccessSetupConfirmation = true
+                    }
+                    .disabled(store.isRunning)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         } else if let entries = store.encryptedSecrets(for: machine.name) {
             if entries.isEmpty {
                 archiveEmptyState(
@@ -858,9 +896,9 @@ private struct RestoreSheet: View {
     @ObservedObject var store: SyncStore
     @Binding var isPresented: Bool
     let availablePaths: [String]
-    @State private var force = false
     @State private var restoreSelectedPaths = false
     @State private var selectedPaths: Set<String>
+    @State private var showConflictDecision = false
 
     init(
         machine: MachineSnapshot,
@@ -882,16 +920,15 @@ private struct RestoreSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label("Restore from \(machine.name)", systemImage: "arrow.down.to.line.compact")
+            Label(sheetTitle, systemImage: "arrow.down.to.line.compact")
                 .font(.title2.bold())
-            Text("This restores the selected machine snapshot to your home folder. By default, newer local files are kept and file or folder conflicts are not replaced.")
+            Text(sheetExplanation)
                 .foregroundStyle(.secondary)
-            Toggle("Replace newer local files and resolve file/folder conflicts", isOn: $force)
-            Toggle("Restore specific paths only", isOn: $restoreSelectedPaths)
+            Toggle("Copy specific paths only", isOn: $restoreSelectedPaths)
             if restoreSelectedPaths {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Snapshot paths")
+                        Text("Source snapshot paths")
                             .font(.headline)
                         Spacer()
                         Button("Select All") {
@@ -912,13 +949,13 @@ private struct RestoreSheet: View {
                         }
                     }
                     .frame(height: 190)
-                    Text("A selected restore copies only these paths and intentionally skips package, editor, repository, and secrets restore steps.")
+                    Text("A selected copy transfers only these paths and intentionally skips package, editor, repository, and secrets restore steps.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             if machine.hasEncryptedSecrets {
-                Label("The encrypted secrets archive remains opt-in and is not restored by this action.", systemImage: "lock.fill")
+                Label("The encrypted secrets archive remains opt-in and is not copied by this action.", systemImage: "lock.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -927,14 +964,13 @@ private struct RestoreSheet: View {
                     isPresented = false
                 }
                 Spacer()
-                Button("Preview") {
+                Button("Preview Copy") {
                     store.previewRestore(from: machine.name, paths: restorePaths)
                     isPresented = false
                 }
                 .disabled(restoreSelectedPaths && selectedPaths.isEmpty)
-                Button("Restore", role: force ? .destructive : nil) {
-                    store.restore(from: machine.name, force: force, paths: restorePaths)
-                    isPresented = false
+                Button("Copy…") {
+                    showConflictDecision = true
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(restoreSelectedPaths && selectedPaths.isEmpty)
@@ -942,10 +978,40 @@ private struct RestoreSheet: View {
         }
         .padding(24)
         .frame(width: 560)
+        .confirmationDialog(
+            "How should existing local files be handled?",
+            isPresented: $showConflictDecision,
+            titleVisibility: .visible
+        ) {
+            Button("Keep Existing Local Files") {
+                copy(force: false)
+            }
+            Button("Replace with \(machine.name) Snapshot", role: .destructive) {
+                copy(force: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(conflictDecisionExplanation)
+        }
     }
 
     private var restorePaths: [String]? {
         restoreSelectedPaths ? selectedPaths.sorted() : nil
+    }
+
+    private var sheetTitle: String {
+        isCurrentMachineSnapshot ? "Restore archived copy" : "Copy from \(machine.name)"
+    }
+
+    private var sheetExplanation: String {
+        if isCurrentMachineSnapshot {
+            return "This restores selected files from this Mac's local archive to your home folder. Existing local files stay in place unless you explicitly choose to replace them."
+        }
+        return "This copies the selected machine snapshot from mac-sync-data into your home folder. This Mac remains the source of truth, so you will choose how to handle any existing local files before copying."
+    }
+
+    private var isCurrentMachineSnapshot: Bool {
+        machine.name == store.overview.configuration.machineName
     }
 
     private func pathDetail(for path: String) -> String {
@@ -953,6 +1019,16 @@ private struct RestoreSheet: View {
             return "Selected from snapshot contents"
         }
         return configuredPath.isDynamic ? "Auto-discovered path" : "Saved sync selection"
+    }
+
+    private var conflictDecisionExplanation: String {
+        let itemDescription = restoreSelectedPaths ? "the selected paths" : "this snapshot"
+        return "This is a manual copy of \(itemDescription) from \(machine.name). Keep Existing Local Files preserves this Mac's copies and adds only missing files. Replace with Snapshot overwrites existing files and resolves file or folder conflicts in favour of \(machine.name)."
+    }
+
+    private func copy(force: Bool) {
+        store.restore(from: machine.name, force: force, paths: restorePaths)
+        isPresented = false
     }
 }
 

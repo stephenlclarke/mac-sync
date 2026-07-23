@@ -53,6 +53,54 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertEqual(overview.peerMachines.first?.configuredPaths.map(\.path), [".config/example"])
     }
 
+    func testLoadsRecordedCurrentMachineLocalChanges() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        try write(
+            "result=success\n",
+            to: fixture.status.appendingPathComponent("local.env")
+        )
+        try write(
+            "WARN: current machine snapshot has local changes; skipping pre-operation git pull\n",
+            to: fixture.status.appendingPathComponent("local.warnings.log")
+        )
+        try write(
+            " M machines/local/home/.zshrc\n?? machines/local/home/.config/tool/new-setting.json\n",
+            to: fixture.status.appendingPathComponent("local.local-changes.log")
+        )
+
+        let overview = SyncRepository(environment: fixture.environment).load()
+
+        XCTAssertEqual(
+            overview.status.recordedLocalChanges,
+            [
+                " M machines/local/home/.zshrc",
+                "?? machines/local/home/.config/tool/new-setting.json",
+            ]
+        )
+        XCTAssertNil(overview.status.currentLocalChanges)
+    }
+
+    func testSeparatesCurrentSnapshotChangesFromHistoricalWarning() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        XCTAssertEqual(ProcessRunner().run("git", ["-C", fixture.data.path, "init"]).status, 0)
+        try write(
+            "result=success\n",
+            to: fixture.status.appendingPathComponent("local.env")
+        )
+        try write(
+            "WARN: current machine snapshot has local changes; skipping pre-operation git pull\n",
+            to: fixture.status.appendingPathComponent("local.warnings.log")
+        )
+        try write("shell", to: fixture.data.appendingPathComponent("machines/local/home/.zshrc"))
+
+        let overview = SyncRepository(environment: fixture.environment).load()
+
+        XCTAssertEqual(overview.status.recordedLocalChanges, [])
+        XCTAssertEqual(overview.status.currentLocalChanges, ["?? machines/local/home/.zshrc"])
+    }
+
     func testSaveConfiguredPathsNormalizesAndPreservesOrder() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }

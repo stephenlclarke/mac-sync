@@ -12,6 +12,16 @@ struct MenuBarStatusView: View {
 
         Divider()
 
+        if store.openIssueCount > 0 {
+            Text("\(store.openIssueCount) issue\(store.openIssueCount == 1 ? "" : "s") need manual triage")
+            Button("Review Manual Triage") {
+                store.requestManualTriage()
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            Divider()
+        }
+
         if !store.isSetupComplete {
             Text("Repository setup required")
             Button("Set Up Mac Sync…") {

@@ -172,7 +172,18 @@ touch -t 202301010000 "$TEST_HOME/.dynamicrc"
 printf 'repo-dynamic-newer\n' >"$TEST_MACHINES_REPO/machines/source/home/.dynamicrc"
 touch -t 202401010000 "$TEST_MACHINES_REPO/machines/source/home/.dynamicrc"
 run_mac_sync restore --from source
+assert_file_contents "$TEST_HOME/.dynamicrc" "local-old"
+
+run_mac_sync restore --from source --force
 assert_file_contents "$TEST_HOME/.dynamicrc" "repo-dynamic-newer"
+
+printf 'local-setting\n' >"$TEST_HOME/.config/tool/settings"
+touch -t 202301010000 "$TEST_HOME/.config/tool/settings"
+run_mac_sync restore --from source
+assert_file_contents "$TEST_HOME/.config/tool/settings" "local-setting"
+
+run_mac_sync restore --from source --force
+assert_file_contents "$TEST_HOME/.config/tool/settings" "repo-setting"
 
 rm -f "$TEST_HOME/.dynamicrc"
 MAC_SYNC_DRY_RUN=1 run_mac_sync restore --from source

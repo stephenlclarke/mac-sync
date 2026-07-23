@@ -96,7 +96,7 @@ swift-coverage: swift-test-build
 		printf 'llvm-profdata is required; install the active Swift toolchain or set SWIFT_LLVM_PROFDATA=/path/to/llvm-profdata\n' >&2; \
 		exit 1; \
 	fi
-	@rm -f .build/*/debug/codecov/*.profraw .build/*/debug/codecov/*.profdata .build/codecov/fallback.profdata coverage.lcov coverage.xml
+	@rm -f .build/*/debug/codecov/*.profraw .build/*/debug/codecov/*.profdata .build/codecov/*.profraw .build/codecov/*.profdata coverage.lcov coverage.xml
 	@find .build -maxdepth 3 -path '*/debug' -type d -exec mkdir -p '{}/codecov' \;
 	@SWIFT_TEST_RESULT_LOG="$(SWIFT_TEST_RESULT_LOG)" SWIFT_TEST_ATTEMPTS="$(SWIFT_COVERAGE_TEST_ATTEMPTS)" SWIFT_TEST_ACCEPT_SIGNAL_13=0 LLVM_PROFILE_FILE="$(abspath .build/codecov)/swift-test-%p.profraw" Tools/ci/run-swift-test.sh $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --skip-build --enable-code-coverage $(SWIFT_TEST_RUN_FLAGS)
 	@$(MAKE) coverage-shell-test

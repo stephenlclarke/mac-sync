@@ -6,6 +6,7 @@ enum NavigationItem: Hashable {
     case thisMac
     case selection
     case history
+    case triage
     case machine(String)
 }
 
@@ -52,6 +53,10 @@ struct SyncStatus: Equatable {
     let remoteRepository: String?
     let warnings: [String]
     let errors: [String]
+    let recordedLocalChanges: [String]
+    /// `nil` means the live working tree could not be inspected. An empty
+    /// array means this Mac's snapshot is currently clean.
+    let currentLocalChanges: [String]?
 
     static let empty = SyncStatus(
         result: .unknown,
@@ -67,7 +72,9 @@ struct SyncStatus: Equatable {
         lastCommit: nil,
         remoteRepository: nil,
         warnings: [],
-        errors: []
+        errors: [],
+        recordedLocalChanges: [],
+        currentLocalChanges: nil
     )
 }
 
@@ -405,15 +412,18 @@ enum SyncAction: Equatable {
     case syncing
     case previewingRestore(String)
     case restoring(String)
+    case preparingEncryptedSecretsAccess
 
     var title: String {
         switch self {
         case .syncing:
             "Syncing this Mac"
         case let .previewingRestore(machine):
-            "Previewing restore from \(machine)"
+            "Previewing copy from \(machine)"
         case let .restoring(machine):
-            "Restoring from \(machine)"
+            "Copying from \(machine)"
+        case .preparingEncryptedSecretsAccess:
+            "Preparing encrypted secrets access"
         }
     }
 }

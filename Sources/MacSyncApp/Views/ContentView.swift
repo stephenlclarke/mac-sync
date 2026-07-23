@@ -16,6 +16,19 @@ struct ContentView: View {
                         .tag(NavigationItem.selection)
                     Label("Sync History", systemImage: "clock.arrow.circlepath")
                         .tag(NavigationItem.history)
+                    HStack {
+                        Label("Manual Triage", systemImage: "exclamationmark.bubble")
+                        Spacer()
+                        if store.openIssueCount > 0 {
+                            Text("\(store.openIssueCount)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.red, in: Capsule())
+                        }
+                    }
+                    .tag(NavigationItem.triage)
                 }
 
                 Section("Other Macs") {
@@ -37,6 +50,12 @@ struct ContentView: View {
         }
         .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in
             store.reload()
+        }
+        .onAppear {
+            applyRequestedNavigation()
+        }
+        .onChange(of: store.requestedNavigation) { _ in
+            applyRequestedNavigation()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -92,7 +111,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $store.isSetupSheetPresented) {
             SetupWizardView(store: store)
-                .frame(minWidth: 760, idealWidth: 900, minHeight: 560, idealHeight: 590)
+                .frame(minWidth: 760, idealWidth: 900, maxWidth: 980)
         }
     }
 
@@ -100,7 +119,9 @@ struct ContentView: View {
     private var detail: some View {
         switch selection ?? .dashboard {
         case .dashboard:
-            DashboardView(store: store)
+            DashboardView(store: store) {
+                selection = .triage
+            }
         case .thisMac:
             if let machine = store.overview.currentMachine {
                 MachineDetailView(machine: machine, isCurrentMachine: true, store: store)
@@ -111,6 +132,8 @@ struct ContentView: View {
             SelectionEditorView(store: store)
         case .history:
             SyncHistoryView(store: store)
+        case .triage:
+            SyncIssuesView(store: store)
         case let .machine(name):
             if let machine = store.overview.peerMachines.first(where: { $0.name == name }) {
                 MachineDetailView(machine: machine, isCurrentMachine: false, store: store)
@@ -121,6 +144,12 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    private func applyRequestedNavigation() {
+        guard let requested = store.requestedNavigation else { return }
+        selection = requested
+        store.consumeNavigationRequest()
     }
 }
 
