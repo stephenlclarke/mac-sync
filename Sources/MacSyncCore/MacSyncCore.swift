@@ -2050,7 +2050,12 @@ public final class MacSyncApp {
         return "<>ch.".contains(characters[0]) && "fdLDS".contains(characters[1])
     }
 
-    private func printSyncedDirectoryChanges(srcRoot: String, destRoot: String, changes: String) {
+    private func printSyncedDirectoryChanges(
+        srcRoot: String,
+        destRoot: String,
+        changes: String,
+        destinationWasNew: Bool = false
+    ) {
         for line in changes.splitLines() where !line.isEmpty {
             let parts = line.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             guard parts.count == 2 else { continue }
@@ -2061,7 +2066,7 @@ public final class MacSyncApp {
             if code == "*deleting" {
                 progressDone("removed snapshot path: \(destRoot)/\(rel)")
             } else if code.dropFirst().first != "d" {
-                let action = code.contains("+++++++++") ? "new snapshot file" : "updated snapshot file"
+                let action = destinationWasNew || code.contains("+++++++++") ? "new snapshot file" : "updated snapshot file"
                 progressDone("\(action): \(srcRoot)/\(rel) -> \(destRoot)/\(rel)")
             }
         }
@@ -2073,7 +2078,8 @@ public final class MacSyncApp {
         selectionPath: String,
         sourceRoot: String,
         destinationRoot: String,
-        direction: SyncHistoryTransferDirection
+        direction: SyncHistoryTransferDirection,
+        destinationWasNew: Bool = false
     ) -> Int {
         var transferCount = 0
         for line in changes.splitLines() where !line.isEmpty {
@@ -2100,7 +2106,7 @@ public final class MacSyncApp {
             // rsync itemises directories with a d in its second column. The
             // individual file entries are the useful history detail.
             guard code.dropFirst().first != "d" else { continue }
-            let outcome: SyncHistoryTransferOutcome = code.contains("+++++++++") ? .new : .updated
+            let outcome: SyncHistoryTransferOutcome = destinationWasNew || code.contains("+++++++++") ? .new : .updated
             recordHistoryTransfer(
                 direction: direction,
                 outcome: outcome,
@@ -2183,13 +2189,19 @@ public final class MacSyncApp {
                 fputs(result.combinedOutput, stderr)
                 throw ExitError(code: Int(result.status))
             }
-            printSyncedDirectoryChanges(srcRoot: src, destRoot: dest, changes: result.stdout)
+            printSyncedDirectoryChanges(
+                srcRoot: src,
+                destRoot: dest,
+                changes: result.stdout,
+                destinationWasNew: !destinationExisted
+            )
             let transferCount = recordItemizedTransfers(
                 result.stdout,
                 selectionPath: rel,
                 sourceRoot: src,
                 destinationRoot: dest,
-                direction: .upload
+                direction: .upload,
+                destinationWasNew: !destinationExisted
             )
             if transferCount == 0, !destinationExisted, treeFileCount(dest) > 0 {
                 // Some older macOS rsync builds complete the copy without
