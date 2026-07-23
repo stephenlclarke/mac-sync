@@ -2165,6 +2165,7 @@ public final class MacSyncApp {
             args.append("--exclude-from=\(config.excludesFile)")
         }
         if isDirectory(src) {
+            let destinationExisted = pathExists(dest)
             try ensureDirectory(dest)
             let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"])
             if result.status != 0 {
@@ -2172,13 +2173,27 @@ public final class MacSyncApp {
                 throw ExitError(code: Int(result.status))
             }
             printSyncedDirectoryChanges(srcRoot: src, destRoot: dest, changes: result.stdout)
-            if recordItemizedTransfers(
+            let transferCount = recordItemizedTransfers(
                 result.stdout,
                 selectionPath: rel,
                 sourceRoot: src,
                 destinationRoot: dest,
                 direction: .upload
-            ) == 0 {
+            )
+            if transferCount == 0, !destinationExisted, treeFileCount(dest) > 0 {
+                // Some older macOS rsync builds complete the copy without
+                // emitting file-level itemisation. Preserve a useful activity
+                // and history record for that successful first snapshot.
+                progressDone("new snapshot file: \(src) -> \(dest)")
+                recordHistoryTransfer(
+                    direction: .upload,
+                    outcome: .new,
+                    path: rel,
+                    source: src,
+                    destination: dest,
+                    detail: "Copied a new directory snapshot"
+                )
+            } else if transferCount == 0 {
                 recordHistoryTransfer(
                     direction: .upload,
                     outcome: .skipped,
