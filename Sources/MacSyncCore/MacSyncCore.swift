@@ -2041,11 +2041,21 @@ public final class MacSyncApp {
         }
     }
 
+    private func isItemizedRsyncChangeCode(_ code: String) -> Bool {
+        if code == "*deleting" {
+            return true
+        }
+        let characters = Array(code)
+        guard characters.count >= 2 else { return false }
+        return "<>ch.".contains(characters[0]) && "fdLDS".contains(characters[1])
+    }
+
     private func printSyncedDirectoryChanges(srcRoot: String, destRoot: String, changes: String) {
         for line in changes.splitLines() where !line.isEmpty {
             let parts = line.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             guard parts.count == 2 else { continue }
             let code = parts[0]
+            guard isItemizedRsyncChangeCode(code) else { continue }
             let rel = parts[1]
             guard !rel.isEmpty, rel != ".", rel != "./" else { continue }
             if code == "*deleting" {
@@ -2070,6 +2080,7 @@ public final class MacSyncApp {
             let parts = line.split(maxSplits: 1, whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             guard parts.count == 2 else { continue }
             let code = parts[0]
+            guard isItemizedRsyncChangeCode(code) else { continue }
             let relativePath = parts[1]
             guard !relativePath.isEmpty, relativePath != ".", relativePath != "./" else { continue }
 
