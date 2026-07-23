@@ -18,6 +18,10 @@ trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 
 fail() {
   printf 'status test failed: %s\n' "$*" >&2
+  if [[ -s "$STDOUT_FILE" ]]; then
+    printf 'captured command stdout:\n' >&2
+    sed 's/^/  /' "$STDOUT_FILE" >&2
+  fi
   exit 1
 }
 
