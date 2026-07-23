@@ -330,3 +330,34 @@ assert_stdout_contains "Current machine encrypted secrets snapshot can be decryp
 run_mac_sync restore
 assert_stdout_contains "Encrypted secrets snapshot found:"
 assert_stdout_contains "mac-sync secrets list --from target"
+
+# The one-repository layout keeps all trusted recipients in a shared registry,
+# rather than leaving a secret archive readable only by its source machine.
+TEST_DATA_REPO="${TMP_ROOT}/mac-sync-data"
+mkdir -p "$TEST_DATA_REPO/machines/target/config"
+git -C "$TEST_DATA_REPO" init -b main >/dev/null
+git -C "$TEST_DATA_REPO" config user.name "mac-sync test"
+git -C "$TEST_DATA_REPO" config user.email "mac-sync@example.invalid"
+
+run_single_repo_mac_sync() {
+  local command=("$SCRIPT_PATH" "$@")
+  if [[ -n "$SCRIPT_RUNNER" ]]; then
+    command=("$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@")
+  fi
+  HOME="$TEST_HOME" \
+  MAC_SYNC_MACHINES_REPO="$TEST_DATA_REPO" \
+  MAC_SYNC_MACHINE=target \
+  MAC_SYNC_DYNAMIC_REFS=0 \
+  MAC_SYNC_HOMEBREW=0 \
+  MAC_SYNC_GITHUB_REPOS=0 \
+  KEYCHAIN_FAKE_DIR="$FAKE_KEYCHAIN" \
+  PATH="${FAKE_BIN}:$PATH" \
+  SCRIPT_COLOUR=off \
+    "${command[@]}" >"$STDOUT_FILE" 2>"$STDERR_FILE"
+}
+
+run_single_repo_mac_sync secrets init
+assert_file_contains "$TEST_DATA_REPO/machines/_shared/config/age-recipients.txt" "age1fakepublicrecipient"
+assert_file_contains "$TEST_DATA_REPO/machines/target/config/secret-paths.txt" ".ssh"
+git -C "$TEST_DATA_REPO" show --format= --name-only HEAD >"${TMP_ROOT}/single-repo-commit-paths"
+assert_file_contains "${TMP_ROOT}/single-repo-commit-paths" "machines/_shared/config/age-recipients.txt"

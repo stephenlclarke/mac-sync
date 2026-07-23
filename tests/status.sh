@@ -35,6 +35,16 @@ assert_stdout_lacks() {
   fi
 }
 
+assert_file_contents() {
+  local file="$1"
+  local expected="$2"
+  local actual
+
+  [[ -f "$file" ]] || fail "missing file: $file"
+  actual="$(cat "$file")"
+  [[ "$actual" == "$expected" ]] || fail "unexpected contents in $file: $actual"
+}
+
 assert_stdout_before() {
   local first="$1"
   local second="$2"
@@ -101,20 +111,34 @@ mkdir -p "$TEST_HOME/.config/tool"
 printf 'tool setting\n' >"$TEST_HOME/.config/tool/settings"
 
 run_mac_sync sync
-assert_stdout_contains $'\342\234\224\357\270\216 sync file: '"$TEST_HOME/.bashrc -> $TEST_MACHINES_REPO/machines/target/home/.bashrc"
-assert_stdout_contains $'\342\234\224\357\270\216 sync file: '"$TEST_HOME/.config/tool/settings -> $TEST_MACHINES_REPO/machines/target/home/.config/tool/settings"
+assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.bashrc" "home bash"
+assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.config/tool/settings" "tool setting"
+assert_stdout_contains "new snapshot file:"
 assert_stdout_lacks "sync directory:"
 [[ -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.env" ]] \
   || fail "missing local status file"
+HISTORY_DIR="$TEST_HOME/Library/Application Support/mac-sync/status/history/target"
+[[ -d "$HISTORY_DIR" ]] || fail "missing sync history directory"
 
 run_mac_sync sync
 assert_stdout_lacks "sync file:"
 assert_stdout_lacks "sync directory:"
+grep -R -F '"outcome" : "skipped"' "$HISTORY_DIR" >/dev/null \
+  || fail "missing skipped file history"
 
 printf 'home bash updated\n' >"$TEST_HOME/.bashrc"
 run_mac_sync sync
-assert_stdout_contains $'\342\234\224\357\270\216 sync file: '"$TEST_HOME/.bashrc -> $TEST_MACHINES_REPO/machines/target/home/.bashrc"
+assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.bashrc" "home bash updated"
+assert_stdout_contains "updated snapshot file:"
 assert_stdout_lacks "sync directory:"
+[[ "$(find "$HISTORY_DIR" -type f -name '*.json' | wc -l | tr -d ' ')" -eq 3 ]] \
+  || fail "expected one history record for each completed sync"
+grep -R -F '"direction" : "upload"' "$HISTORY_DIR" >/dev/null \
+  || fail "missing upload history"
+grep -R -F '"outcome" : "new"' "$HISTORY_DIR" >/dev/null \
+  || fail "missing new file history"
+grep -R -F '"outcome" : "updated"' "$HISTORY_DIR" >/dev/null \
+  || fail "missing updated file history"
 
 printf 'local machines repo note\n' >"$TEST_MACHINES_REPO/README.md"
 

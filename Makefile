@@ -27,10 +27,12 @@ SWIFT_COVERAGE_TEST_ATTEMPTS ?= 3
 SWIFT_TEST_RUN_FLAGS ?= --no-parallel
 MAC_SYNC_BINARY ?= $(abspath .build/debug/mac-sync)
 MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
-SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines
+MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
+MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
+SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines user-configuration
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release app-debug app-built icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
@@ -44,10 +46,30 @@ resolve:
 build:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product mac-sync
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product mac-spinner
+	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product MacSync
 
 build-release:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-sync $(SWIFT_RELEASE_FLAGS)
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-spinner $(SWIFT_RELEASE_FLAGS)
+	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product MacSync $(SWIFT_RELEASE_FLAGS)
+
+app-debug: build
+	$(MAKE) app-built PACKAGE_BUILD_CONFIGURATION=debug
+
+icon:
+	./script/generate_app_icon.sh
+
+app-built:
+	@test -x "$(MAC_SYNC_APP_BINARY)" || { \
+		printf '%s is missing; build the MacSync app first\n' "$(MAC_SYNC_APP_BINARY)" >&2; \
+		exit 2; \
+	}
+	mkdir -p "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources"
+	cp "$(MAC_SYNC_APP_BINARY)" "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync"
+	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-sync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
+	cp "Sources/MacSyncApp/Resources/Info.plist" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
+	cp "Sources/MacSyncApp/Resources/MacSync.icns" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/MacSync.icns"
+	chmod +x "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
 
 run:
 	$(SWIFT) run $(SWIFT_RESOLVED_FLAGS) mac-sync --help
@@ -202,6 +224,7 @@ package-built:
 	mkdir -p "$(DIST_DIR)/mac-sync/bin" "$(DIST_DIR)/mac-sync/resources"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-sync" "$(DIST_DIR)/mac-sync/bin/mac-sync"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-spinner" "$(DIST_DIR)/mac-sync/bin/mac-spinner"
+	$(MAKE) app-built PACKAGE_BUILD_CONFIGURATION="$(PACKAGE_BUILD_CONFIGURATION)"
 	$(PYTHON) Tools/release/write-build-info.py \
 		--output "$(DIST_DIR)/mac-sync/resources/build-info.json" \
 		--version "$(MAC_SYNC_VERSION)" \

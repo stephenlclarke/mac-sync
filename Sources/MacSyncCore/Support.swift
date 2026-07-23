@@ -1,5 +1,101 @@
 import Foundation
 
+/// A completed local publish or restore operation. The CLI stores these
+/// records in the local status directory; they deliberately never contain
+/// decrypted secret contents.
+public enum SyncHistoryAction: String, Codable, Hashable, Sendable {
+    case sync
+    case restore
+}
+
+public enum SyncHistoryResult: String, Codable, Hashable, Sendable {
+    case success
+    case failed
+}
+
+public enum SyncHistoryTransferDirection: String, Codable, Hashable, Sendable {
+    case upload
+    case download
+}
+
+public enum SyncHistoryTransferOutcome: String, Codable, Hashable, Sendable {
+    case new
+    case updated
+    case removed
+    case skipped
+}
+
+public struct SyncHistoryEntry: Codable, Hashable, Identifiable, Sendable {
+    public let id: String
+    public let direction: SyncHistoryTransferDirection
+    public let outcome: SyncHistoryTransferOutcome
+    public let path: String
+    public let source: String
+    public let destination: String
+    public let detail: String?
+
+    public init(
+        id: String = UUID().uuidString,
+        direction: SyncHistoryTransferDirection,
+        outcome: SyncHistoryTransferOutcome,
+        path: String,
+        source: String,
+        destination: String,
+        detail: String? = nil
+    ) {
+        self.id = id
+        self.direction = direction
+        self.outcome = outcome
+        self.path = path
+        self.source = source
+        self.destination = destination
+        self.detail = detail
+    }
+}
+
+public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
+    public let id: String
+    public let action: SyncHistoryAction
+    public let sourceMachine: String?
+    public let result: SyncHistoryResult
+    public let startedAt: String
+    public let finishedAt: String
+    public let durationSeconds: Int
+    public let warningCount: Int
+    public let errorCount: Int
+    public let entries: [SyncHistoryEntry]
+    public let warnings: [String]
+    public let errors: [String]
+
+    public init(
+        id: String = UUID().uuidString,
+        action: SyncHistoryAction,
+        sourceMachine: String? = nil,
+        result: SyncHistoryResult,
+        startedAt: String,
+        finishedAt: String,
+        durationSeconds: Int,
+        warningCount: Int,
+        errorCount: Int,
+        entries: [SyncHistoryEntry],
+        warnings: [String],
+        errors: [String]
+    ) {
+        self.id = id
+        self.action = action
+        self.sourceMachine = sourceMachine
+        self.result = result
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.durationSeconds = durationSeconds
+        self.warningCount = warningCount
+        self.errorCount = errorCount
+        self.entries = entries
+        self.warnings = warnings
+        self.errors = errors
+    }
+}
+
 public enum ShellQuoter {
     public static func quote(_ value: String) -> String {
         if value.isEmpty || value.range(of: #"[^A-Za-z0-9_./:@%+=,-]"#, options: .regularExpression) != nil {
@@ -103,10 +199,90 @@ public enum MacSyncPaths {
     }
 }
 
+public enum MacSyncUserConfiguration {
+    private static let managedKeys = [
+        "MAC_SYNC_DATA_REPOSITORY",
+    ]
+
+    public static func configurationFilePath(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        return environment["MAC_SYNC_APP_CONFIG"] ?? "\(home)/Library/Application Support/mac-sync/config.env"
+    }
+
+    public static func resolvedEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        let filePath = configurationFilePath(environment: environment)
+        let stored = values(in: filePath)
+        var resolved = stored
+        if let dataRepository = stored["MAC_SYNC_DATA_REPOSITORY"] {
+            resolved["MAC_SYNC_MACHINES_REPO"] = dataRepository
+        }
+        return resolved.merging(environment) { _, directValue in directValue }
+    }
+
+    public static func saveDataRepository(
+        _ dataRepository: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) throws {
+        guard !dataRepository.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !dataRepository.contains("\n"),
+              !dataRepository.contains("\r")
+        else {
+            throw MacSyncUserConfigurationError.invalidRepositoryLocation
+        }
+
+        let filePath = configurationFilePath(environment: environment)
+        let output = [
+            "# Managed by Mac Sync. Data repository only; credentials remain in Git/Keychain.",
+            "MAC_SYNC_DATA_REPOSITORY=\(dataRepository)",
+            "",
+        ].joined(separator: "\n")
+        let url = URL(fileURLWithPath: filePath)
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try output.write(to: url, atomically: true, encoding: .utf8)
+        try fileManager.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: filePath)
+    }
+
+    private static func values(in path: String) -> [String: String] {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+            return [:]
+        }
+        return text.split(separator: "\n").reduce(into: [:]) { values, line in
+            guard let separator = line.firstIndex(of: "=") else { return }
+            let key = String(line[..<separator])
+            let valueStart: Substring.Index = line.index(after: separator)
+            let value = String(line[valueStart...])
+            guard managedKeys.contains(key), !value.isEmpty, !value.contains("\r") else { return }
+            values[key] = value
+        }
+    }
+}
+
+public enum MacSyncUserConfigurationError: LocalizedError {
+    case invalidRepositoryLocation
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidRepositoryLocation:
+            "Repository locations must not be empty or contain new lines."
+        }
+    }
+}
+
 public struct CommandResult {
     public let status: Int32
     public let stdout: String
     public let stderr: String
+
+    public init(status: Int32, stdout: String, stderr: String) {
+        self.status = status
+        self.stdout = stdout
+        self.stderr = stderr
+    }
 
     public var combinedOutput: String {
         stdout + stderr
@@ -125,7 +301,7 @@ public struct ProcessRunner {
         _ arguments: [String] = [],
         workingDirectory: String? = nil,
         extraEnvironment: [String: String] = [:],
-        capture: Bool = true,
+        capture: Bool = true
     ) -> CommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -170,7 +346,7 @@ public struct ProcessRunner {
             return CommandResult(
                 status: process.terminationStatus,
                 stdout: String(decoding: captured.stdout, as: UTF8.self),
-                stderr: String(decoding: captured.stderr, as: UTF8.self),
+                stderr: String(decoding: captured.stderr, as: UTF8.self)
             )
         }
         return CommandResult(status: process.terminationStatus, stdout: "", stderr: "")
@@ -180,14 +356,14 @@ public struct ProcessRunner {
         _ script: String,
         workingDirectory: String? = nil,
         extraEnvironment: [String: String] = [:],
-        capture: Bool = true,
+        capture: Bool = true
     ) -> CommandResult {
         run(
             "/bin/bash",
             ["-c", script],
             workingDirectory: workingDirectory,
             extraEnvironment: extraEnvironment,
-            capture: capture,
+            capture: capture
         )
     }
 

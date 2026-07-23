@@ -148,11 +148,21 @@ assert_file_contents "$TEST_HOME/github/alpha/.git-cloned-url" "https://github.c
 assert_file_contents "$TEST_HOME/github/group/nested/.git-cloned-url" "https://github.com/example/nested.git"
 [[ ! -f "$TEST_HOME/github/existing/.git-cloned-url" ]] || fail "existing repo was cloned over"
 [[ ! -e "$TEST_HOME/github/not-github" ]] || fail "non-GitHub repo was restored"
+RESTORE_HISTORY_DIR="$TEST_HOME/Library/Application Support/mac-sync/status/history/target"
+[[ -d "$RESTORE_HISTORY_DIR" ]] || fail "missing restore history directory"
+grep -R -F '"action" : "restore"' "$RESTORE_HISTORY_DIR" >/dev/null \
+  || fail "missing restore history record"
+grep -R -F '"direction" : "download"' "$RESTORE_HISTORY_DIR" >/dev/null \
+  || fail "missing download history"
+grep -R -F '"outcome" : "new"' "$RESTORE_HISTORY_DIR" >/dev/null \
+  || fail "missing new restored file history"
 
 printf 'local-newer\n' >"$TEST_HOME/.bashrc"
 touch -t 202501010000 "$TEST_HOME/.bashrc"
 run_mac_sync restore --from source
 assert_file_contents "$TEST_HOME/.bashrc" "local-newer"
+grep -R -F '"outcome" : "skipped"' "$RESTORE_HISTORY_DIR" >/dev/null \
+  || fail "missing skipped restore file history"
 
 run_mac_sync restore --from source --force
 assert_file_contents "$TEST_HOME/.bashrc" "repo-bash"
@@ -186,6 +196,16 @@ run_mac_sync_with_input 1 restore --select
 grep -F "Select a machine by number or name:" "${TMP_ROOT}/stdout" >/dev/null \
   || fail "missing interactive machine selection prompt"
 assert_file_contents "$TEST_HOME/.bashrc" "repo-bash"
+
+rm -rf "$TEST_HOME/.config" "$TEST_HOME/github/alpha"
+rm -f "$TEST_HOME/.dynamicrc"
+run_mac_sync restore --from source --path .bashrc --force
+assert_file_contents "$TEST_HOME/.bashrc" "repo-bash"
+[[ ! -e "$TEST_HOME/.config/tool/settings" ]] || fail "selected restore copied an unselected configured path"
+[[ ! -e "$TEST_HOME/.dynamicrc" ]] || fail "selected restore copied an unselected dynamic path"
+[[ ! -e "$TEST_HOME/github/alpha" ]] || fail "selected restore cloned a GitHub repository"
+grep -F "selected restore complete" "${TMP_ROOT}/stdout" >/dev/null \
+  || fail "missing selected restore completion message"
 
 printf '../../outside\n' >"$TEST_MACHINES_REPO/machines/source/dynamic-sync-paths.txt"
 if run_mac_sync restore --from source; then

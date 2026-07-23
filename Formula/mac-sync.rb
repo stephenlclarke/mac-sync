@@ -8,20 +8,27 @@ class MacSync < Formula
 
   depends_on "age"
   depends_on arch: :arm64
+  depends_on "git"
   depends_on "gnu-tar"
+  depends_on "rsync"
   depends_on macos: :ventura
 
   def install
-    payload = if (buildpath/"mac-sync/bin").directory?
-      buildpath/"mac-sync/bin"
-    elsif (buildpath/"bin").directory?
-      buildpath/"bin"
+    package_root = if (buildpath/"mac-sync").directory?
+      buildpath/"mac-sync"
     else
       buildpath
     end
 
+    payload = if (package_root/"bin").directory?
+      package_root/"bin"
+    else
+      package_root
+    end
+
     bin.install payload/"mac-sync"
     bin.install payload/"mac-spinner"
+    prefix.install package_root/"MacSync.app"
   end
 
   def caveats
@@ -29,11 +36,24 @@ class MacSync < Formula
       This formula installs the main lane prebuilt package asset:
         mac-sync-main-release-arm64.tar.gz
 
-      mac-sync expects the sync configuration repo and machine snapshot repo to
-      be available locally. Run:
+      The Mac Sync app is installed into this formula's prefix. Launch it with:
+        open "$(brew --prefix mac-sync)/MacSync.app"
+
+      Homebrew also installs Mac Sync's required command-line dependencies:
+      age, GNU tar, Git, and rsync. Apple-provided macOS tools cover Keychain
+      access and the remaining POSIX utilities.
+
+      On first launch, Mac Sync guides you to choose an existing mac-sync-data
+      checkout or create one. It saves only that path for the CLI/service; Git
+      credentials remain in SSH or Keychain. The legacy dot-files checkout is
+      not used by this version.
+      The CLI remains available as:
         mac-sync --help
 
-      Manage scheduled sync with:
+      For a custom app-managed schedule, use Settings → Automatic sync.
+      Stop the Homebrew service first so only one automatic sync job runs.
+
+      The Homebrew service remains an hourly alternative:
         brew services start mac-sync
         brew services restart mac-sync
         brew services stop mac-sync
@@ -44,6 +64,7 @@ class MacSync < Formula
     run [opt_bin/"mac-sync", "run"]
     run_type :interval
     interval 3600
+    environment_variables PATH: std_service_path_env
     working_dir var
     log_path var/"log/mac-sync.log"
     error_log_path var/"log/mac-sync.log"
@@ -52,5 +73,16 @@ class MacSync < Formula
   test do
     assert_match "USAGE:", shell_output("#{bin}/mac-sync --help")
     assert_match "brew smoke", shell_output("#{bin}/mac-spinner --message 'brew smoke' --pending")
+    assert_predicate Formula["age"].opt_bin/"age", :executable?
+    assert_predicate Formula["age"].opt_bin/"age-keygen", :executable?
+    assert_predicate Formula["git"].opt_bin/"git", :executable?
+    assert_predicate Formula["gnu-tar"].opt_bin/"gtar", :executable?
+    assert_predicate Formula["rsync"].opt_bin/"rsync", :executable?
+    assert_equal(
+      "#{HOMEBREW_PREFIX}/bin:#{HOMEBREW_PREFIX}/sbin:/usr/bin:/bin:/usr/sbin:/sbin",
+      service.to_hash.fetch(:environment_variables).fetch(:PATH),
+    )
+    assert_predicate prefix/"MacSync.app/Contents/MacOS/MacSync", :executable?
+    assert_predicate prefix/"MacSync.app/Contents/Resources/MacSync.icns", :exist?
   end
 end

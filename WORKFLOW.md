@@ -2,14 +2,19 @@
 
 This workflow describes how to download, configure, install, sync, restore, and update `mac-sync` on a Mac.
 
-`mac-sync` is implemented as a SwiftPM package and installed as a Homebrew-managed binary. The CLI does not install or remove itself; Homebrew owns the installed executables and the launchd service.
+mac-sync is implemented as a SwiftPM package with a CLI and a native SwiftUI
+macOS app. Homebrew owns the installed executables and app bundle. Automatic
+sync can be controlled either by the app's per-user launchd agent or by the
+optional Homebrew service. The app does not create a second sync
+implementation: it runs the packaged mac-sync CLI and reads the same local
+status and machine snapshot records.
 
-`mac-sync` uses two repositories:
+`mac-sync` uses one private data repository:
 
-- `~/github/mac-sync`: command, backup/restore configuration, tests, and documentation
-- `~/github/dot-files`: per-machine snapshots under `machines/<machine-name>/`
-  including dotfiles, Homebrew state, VS Code extension state, encrypted secrets,
-  and GitHub clone inventory
+- `~/github/mac-sync-data`: per-machine snapshots and configuration under
+  `machines/<machine-name>/`, including dotfiles, Homebrew state, VS Code
+  extension state, encrypted secrets, GitHub clone inventory, and the selected
+  sync paths. The legacy `dot-files` repository is not used by this version.
 
 ## End-to-End Flow
 
@@ -18,12 +23,11 @@ This workflow describes how to download, configure, install, sync, restore, and 
 ```mermaid
 flowchart TD
   A["Start on a Mac"] --> B["Install with Homebrew<br/>brew tap stephenlclarke/tap<br/>brew install mac-sync"]
-  B --> C["Clone config repo<br/>git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync"]
-  B --> D["Clone snapshot repo<br/>git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files"]
-  C --> E["Review sync paths<br/>mac-sync manifest configured"]
-  D --> E
-  E --> F["Start Homebrew service<br/>brew services start mac-sync"]
-  F --> G{"Existing machine snapshot?<br/>find ~/github/dot-files/machines -maxdepth 1 -type d"}
+  B --> C["Open Mac Sync<br/>first-run setup"]
+  C --> D["Choose mac-sync-data checkout<br/>or create it in an empty folder"]
+  D --> E["Validate Git/GitHub access<br/>and review sync paths"]
+  E --> F["Choose automatic schedule in Settings<br/>or start Homebrew service"]
+  F --> G{"Existing machine snapshot?<br/>find ~/github/mac-sync-data/machines -maxdepth 1 -type d"}
   G -- "No" --> H["Run initial sync<br/>mac-sync sync"]
   G -- "Yes" --> I["Preview restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
   I --> J["Restore selected machine snapshot<br/>mac-sync restore --select"]
@@ -44,37 +48,57 @@ released Swift binary and runtime dependencies from Homebrew:
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
+open "$(brew --prefix mac-sync)/MacSync.app"
 ```
 
-Clone both repositories for configuration and snapshot storage:
+The formula installs the required non-system runtime commands: `age`, GNU tar
+(`gtar`), Git, and rsync. Finder-launched Mac Sync adds Homebrew's standard paths
+before invoking its bundled CLI, and both scheduling options declare the same
+PATH. Its setup, sync, restore, and encrypted-secret flows therefore find the
+installed tools in either mode. Keychain access and the other POSIX utilities
+are provided by the supported macOS versions.
 
-```sh
-mkdir -p ~/github
-git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync
-git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
+VS Code is optional. Install it with `brew install --cask visual-studio-code`
+when you want Mac Sync to capture or apply VS Code extension snapshots.
+
+Open Mac Sync after Homebrew installation. Its first-run assistant detects an
+existing data checkout, lets you choose an alternate local folder, and clones
+only when you select **Clone mac-sync-data Repository**. A new empty data
+repository is valid; the first sync creates and pushes its initial snapshot.
+It defaults to:
+
+```text
+~/github/mac-sync-data
 ```
 
-Use a different location only when you also set the matching environment
-variables:
+The app writes that location, but no credentials, to
+`~/Library/Application Support/mac-sync/config.env`; the GUI, CLI, app-managed
+schedule, and Homebrew service share it. Existing SSH and Keychain-backed Git
+credentials are used for remote access. For scripted setup, environment
+variables still take precedence:
 
 ```sh
-MAC_SYNC_REPO=/path/to/mac-sync
-MAC_SYNC_MACHINES_REPO=/path/to/dot-files
+MAC_SYNC_MACHINES_REPO=/path/to/mac-sync-data \
+mac-sync status
 ```
 
 ## Configure
 
 Review the tracked configuration before the first sync. The regular path list
-lives in the `mac-sync` repo:
+lives with the current machine in `mac-sync-data`:
 
 ```sh
 mac-sync manifest configured
 ```
 
-- `config/sync-paths.txt`: regular dotfiles and directories to copy
-- `config/excludes.txt`: `rsync` exclude patterns used during dotfile sync
-- `config/secret-paths.txt`: sensitive paths encrypted into the secrets archive
-- `config/age-recipients.txt`: public `age` recipients trusted to decrypt secrets
+- `machines/<machine>/config/sync-paths.txt`: regular dotfiles and directories
+  to copy
+- `machines/<machine>/config/excludes.txt`: `rsync` exclude patterns used
+  during dotfile sync
+- `machines/<machine>/config/secret-paths.txt`: sensitive paths encrypted into
+  the secrets archive
+- `machines/_shared/config/age-recipients.txt`: public `age` recipients trusted
+  to decrypt every machine's secrets
 
 The default machine name is derived from the macOS host name. Set
 `MAC_SYNC_MACHINE` when running manual commands if you want a stable or
@@ -91,17 +115,18 @@ for path traversal before they are read or written.
 The machine snapshot will be written under:
 
 ```text
-~/github/dot-files/machines/<machine-name>/
+~/github/mac-sync-data/machines/<machine-name>/
 ```
 
 ## Install
 
-Homebrew owns installation and service management:
+Homebrew owns installation. Use the app's **Settings → Automatic sync** for a
+per-user schedule, or use the Homebrew service as an hourly terminal-managed
+alternative. Do not run both schedules at once:
 
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
-brew services start mac-sync
 ```
 
 Use Homebrew for updates, restarts, and removal:
@@ -113,12 +138,25 @@ brew services stop mac-sync
 brew uninstall mac-sync
 ```
 
-For local development only, build and run the Swift package directly from the checkout:
+The app appears in the menu bar as Mac Sync. On first launch, it guides you
+through choosing or cloning the single data repository and can test GitHub
+access without prompting for or storing credentials. Use it to inspect the
+local snapshot, browse peer-machine files, revise the configured file and
+folder selection, start or stop sync, and preview a restore before applying it.
+Sync Selection is initialised from the current machine's `config/sync-paths.txt`;
+saving the selection updates that same tracked file.
+
+When restoring from another Mac, choose **Restore specific paths only** in the
+app to copy just the selected snapshot roots. This deliberately skips the
+package, editor, repository, and secrets restore hints, which remain part of a
+normal full restore.
+
+For local development, build and launch the native app from the checkout:
 
 ```sh
 cd ~/github/mac-sync
-make build-release
-.build/release/mac-sync --help
+./script/build_and_run.sh
+dist/mac-sync/MacSync.app/Contents/Resources/mac-sync --help
 ```
 
 ## Initial Sync
@@ -131,16 +169,15 @@ mac-sync sync
 
 During sync, `mac-sync`:
 
-1. Pulls the local `mac-sync` repo when it is clean.
-2. Pulls the `dot-files` snapshot repo when the current machine archive is
+1. Pulls the `mac-sync-data` repository when the current machine archive is
    clean, preserving unrelated local edits in that checkout.
-3. Copies configured paths from `$HOME` into the machine snapshot.
-4. Discovers safe referenced dotfiles and persists dynamic paths.
-5. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
-6. Captures VS Code extensions when the `code` CLI is available.
-7. Captures GitHub repos below `~/github` that have GitHub remotes.
-8. Updates an encrypted secrets snapshot when recipients and tools exist.
-9. Commits and pushes `machines/<machine-name>` in the `dot-files` repo.
+2. Copies configured paths from `$HOME` into the machine snapshot.
+3. Discovers safe referenced dotfiles and persists dynamic paths.
+4. Captures Homebrew taps, formulae, casks, and a generated `Brewfile`.
+5. Captures VS Code extensions when the `code` CLI is available.
+6. Captures GitHub repos below `~/github` that have GitHub remotes.
+7. Updates an encrypted secrets snapshot when recipients and tools exist.
+8. Commits and pushes `machines/<machine-name>` in the data repository.
 
 Homebrew and VS Code inventories are collected before their snapshot files are
 written. If either inventory command fails, sync stops and preserves the last
@@ -155,24 +192,22 @@ sequenceDiagram
   participant User
   participant CLI as mac-sync
   participant Home as "$HOME"
-  participant Code as "mac-sync repo"
-  participant Snap as "dot-files repo"
+  participant Data as "mac-sync-data repo"
   participant GitHub
 
   User->>CLI: mac-sync sync
-  CLI->>Code: git -C ~/github/mac-sync pull --ff-only
-  CLI->>Snap: git -C ~/github/dot-files pull --ff-only
-  CLI->>Code: read config/sync-paths.txt
+  CLI->>Data: git -C ~/github/mac-sync-data pull --ff-only
+  CLI->>Data: read machines/machine-name/config/sync-paths.txt
   CLI->>Home: discover dynamic referenced paths
-  CLI->>Snap: rsync into machines/machine-name/home
-  CLI->>Snap: brew list and write homebrew snapshot
-  CLI->>Snap: code --list-extensions and write editor snapshot
+  CLI->>Data: rsync into machines/machine-name/home
+  CLI->>Data: brew list and write homebrew snapshot
+  CLI->>Data: code --list-extensions and write editor snapshot
   CLI->>Home: inspect git repos under ~/github
-  CLI->>Snap: write github-repositories/repositories.txt
-  CLI->>Snap: age -R config/age-recipients.txt when enabled
-  CLI->>Snap: git add machines/machine-name
-  CLI->>Snap: git commit -m chore(machine): sync machine state
-  Snap->>GitHub: git push -u origin main
+  CLI->>Data: write github-repositories/repositories.txt
+  CLI->>Data: age -R machines/_shared/config/age-recipients.txt when enabled
+  CLI->>Data: git add machines/machine-name
+  CLI->>Data: git commit -m chore(machine): sync machine state
+  Data->>GitHub: git push -u origin main
 ```
 
 <!-- markdownlint-enable MD013 -->
@@ -186,36 +221,54 @@ mac-sync status
 The status output shows the `mac-sync` version SHA, local repo, machines repo,
 last sync result, storage totals, warnings, errors, remote repo, and commit.
 
-## Hourly Sync
+## Automatic Sync
 
-Homebrew services own the launchd job:
+In the Mac Sync app, open **Settings → Automatic sync** and choose **Days and
+time** to select any days of the week and the local time to run. The app
+installs a per-user `launchd` job and uses the same local repository
+configuration as the CLI. It also supports preset intervals from every 30
+minutes to daily and custom intervals from 15 minutes to 31 days.
+
+If you choose the app-managed schedule, stop the optional Homebrew hourly
+service first so only one job runs:
+
+```sh
+brew services stop mac-sync
+```
+
+For scripted or terminal-only installations, the existing Homebrew service
+remains an hourly alternative:
 
 ```sh
 brew services start mac-sync
 brew services restart mac-sync
-brew services stop mac-sync
 brew services info mac-sync
 ```
 
-The service runs `mac-sync run`, which is the automation entrypoint for `sync`.
+Both schedules run `mac-sync run`, the automation entrypoint for `sync`.
 Local sync status is written outside git:
 
 ```text
 ~/Library/Application Support/mac-sync/status/<machine-name>.env
 ```
 
+Each completed real publish or restore also writes a local JSON history record
+under `~/Library/Application Support/mac-sync/status/history/<machine-name>/`.
+The SwiftUI app presents these records as uploads, downloads, new or updated
+files, and skipped items. Preview runs and decrypted secret contents are never
+recorded there.
+
 ## Restore
 
 Use restore when setting up a new Mac or copying a snapshot from another Mac.
 
-Install the Homebrew package and clone both repos first:
+Install the Homebrew package and clone the data repository first:
 
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
 mkdir -p ~/github
-git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync
-git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
+git clone https://github.com/stephenlclarke/mac-sync-data ~/github/mac-sync-data
 ```
 
 List available machine snapshots:
@@ -225,7 +278,7 @@ mac-sync restore --list-machines
 ```
 
 If this Mac's hostname has no matching snapshot, `mac-sync restore` offers the
-available machines from the `dot-files` repo. If the hostname does match a
+available machines from the `mac-sync-data` repo. If the hostname does match a
 snapshot, `mac-sync restore` defaults to that snapshot; use `--select` to choose
 another source interactively.
 
@@ -259,7 +312,7 @@ skipping targets that already exist.
 flowchart TD
   A["Choose source machine<br/>mac-sync restore --list-machines"] --> B["Dry-run restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
   B --> C{"Looks correct?"}
-  C -- "No" --> D["Adjust config or source machine<br/>vim ~/github/mac-sync/config/sync-paths.txt"]
+  C -- "No" --> D["Adjust config or source machine<br/>edit machines/<machine>/config/sync-paths.txt"]
   D --> B
   C -- "Yes" --> E["Run restore<br/>mac-sync restore --select"]
   E --> F{"Package/editor differences?"}
@@ -292,7 +345,10 @@ mac-sync secrets init
 ```
 
 That command stores the private identity in Apple Keychain and writes only the
-public recipient to `config/age-recipients.txt` in the `mac-sync` repo.
+public recipient to `machines/_shared/config/age-recipients.txt` in
+`mac-sync-data`. New snapshots are encrypted for every recipient in that shared
+registry; after adding a Mac, run `mac-sync sync` once on each source Mac to
+re-encrypt its archive for the new recipient.
 
 Update the encrypted snapshot manually:
 
@@ -305,6 +361,11 @@ Inspect a source machine's encrypted archive:
 ```sh
 mac-sync secrets list --from old-mbp
 ```
+
+The Mac app provides the same safe inspection from a machine's detail view:
+**View Encrypted Secrets** uses the current Mac's Keychain identity to list
+archive file and folder names. It never displays decrypted secret values or
+writes files.
 
 Restore encrypted secrets:
 
@@ -323,9 +384,10 @@ mac-sync secrets restore --from old-mbp --force
 
 For a replacement Mac, the usual order is:
 
-1. Clone `mac-sync` and `dot-files`.
+1. Clone `mac-sync-data`.
 2. Install the Homebrew package.
-3. Start or restart the Homebrew service when this Mac is ready for scheduled syncs.
+3. Choose an app-managed schedule or start the Homebrew service when this Mac
+   is ready for scheduled syncs.
 4. Run `mac-sync restore --list-machines` and pick the old Mac snapshot.
 5. Run `MAC_SYNC_DRY_RUN=1 mac-sync restore --from <old-machine>`.
 6. Run `mac-sync restore --from <old-machine>`.
@@ -344,8 +406,8 @@ For a replacement Mac, the usual order is:
 
 ```mermaid
 flowchart LR
-  Old["Old Mac snapshot<br/>mac-sync sync"] --> Dot["dot-files repo<br/>git clone ... ~/github/dot-files"]
-  Dot --> New["New Mac restore<br/>mac-sync restore --from old-mbp"]
+  Old["Old Mac snapshot<br/>mac-sync sync"] --> Data["mac-sync-data repo<br/>git clone ... ~/github/mac-sync-data"]
+  Data --> New["New Mac restore<br/>mac-sync restore --from old-mbp"]
   New --> Repos["Missing GitHub repos<br/>git clone into ~/github"]
   New --> Brew["Optional package restore<br/>mac-sync packages install ..."]
   New --> Editor["Optional editor restore<br/>mac-sync editor install ..."]
@@ -354,7 +416,7 @@ flowchart LR
   Brew --> Sync["New Mac sync<br/>mac-sync sync"]
   Editor --> Sync["New Mac sync<br/>mac-sync sync"]
   Secrets --> Sync
-  Sync --> Dot
+  Sync --> Data
 ```
 
 <!-- markdownlint-enable MD013 -->

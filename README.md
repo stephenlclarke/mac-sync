@@ -14,18 +14,19 @@
 
 `mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
 packages, VS Code extensions, encrypted secrets, and local GitHub clones in
-git, split by machine name. This repo owns the command and backup/restore
-configuration; machine snapshots live in the separate
-`stephenlclarke/dot-files` repo.
+git, split by machine name. The installed application uses one private data
+repository, `stephenlclarke/mac-sync-data`; the legacy `dot-files` repository
+is never read or changed by this version.
 
 Snapshots are written to:
 
 ```text
-~/github/dot-files/machines/<machine-name>/
+~/github/mac-sync-data/machines/<machine-name>/
 ```
 
-The command is implemented as a SwiftPM package and distributed as a
-Homebrew-managed Swift binary. Local source builds are for development and
+The project provides both a Swift command-line engine and a native SwiftUI Mac
+app with xyzzy.tools branding. Homebrew installs the CLI, the menu-bar app, and
+the bundled application icon. Local source builds are for development and
 release packaging only.
 
 See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
@@ -38,31 +39,108 @@ Install with Homebrew:
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
+open "$(brew --prefix mac-sync)/MacSync.app"
 ```
 
-Clone the config repo and machine snapshot repo at their default paths:
+The formula installs every non-system command required for syncing and encrypted
+secrets: `age` (including `age-keygen`), GNU `tar` (`gtar`), Git, and a current
+`rsync`. Finder launches receive those Homebrew paths automatically, and the
+Homebrew service and the app-managed schedule declare the same `PATH`, so both
+can find the installed tools.
+Apple provides Keychain,
+`gzip`, and the remaining POSIX commands on the supported macOS releases.
+
+VS Code is an optional integration: install it separately with
+`brew install --cask visual-studio-code` only if you want to sync and restore
+its extension list.
+
+On its first launch, Mac Sync finds an existing data checkout or guides you to
+choose one. Select **Clone mac-sync-data Repository** only when you want the
+app to clone the private data repository into a chosen empty folder. A new,
+empty data repository is supported: the first sync creates and pushes the
+initial snapshot. The default location is:
+
+```text
+~/github/mac-sync-data
+```
+
+The setup assistant stores this location in
+`~/Library/Application Support/mac-sync/config.env`. That file contains paths
+only—GitHub credentials continue to be managed by your existing SSH setup or
+Git credential helper/Keychain. The Homebrew CLI and both scheduling options
+read the same locations.
+
+Use **Settings → Automatic sync** in Mac Sync to run at a chosen time on any
+combination of days, choose a preset interval, or enter a custom interval from
+15 minutes to 31 days. The app installs a per-user `launchd` agent using the
+same local configuration as the CLI. If you use the app-managed schedule, stop
+the optional Homebrew service first so there is only one automatic sync job:
 
 ```sh
-git clone https://github.com/stephenlclarke/mac-sync ~/github/mac-sync
-git clone https://github.com/stephenlclarke/dot-files ~/github/dot-files
+brew services stop mac-sync
 ```
 
-Use Homebrew to manage the scheduled service:
+The Homebrew service remains available as an hourly alternative for scripted
+setups:
 
 ```sh
 brew services start mac-sync
 brew services restart mac-sync
-brew services stop mac-sync
 ```
 
-For local development, build and run the Swift package directly:
+For local development, build and launch the native app:
 
 ```sh
-make build
-.build/debug/mac-sync --help
+./script/build_and_run.sh
 ```
 
-## Usage
+## Mac App
+
+Mac Sync is a regular macOS app with a status item in the system menu bar. It
+uses the existing CLI and the same configuration and snapshot repositories, so
+there is no separate sync implementation or additional state store.
+
+- **Overview** shows the last completed sync, live activity, warnings, errors,
+  the snapshot footprint for this Mac, and the available peer snapshots.
+- **This Mac** lists the configured snapshot roots and every regular file and
+  folder currently stored for the local machine. The configurable outline and
+  archive browser behave like purpose-built file managers: expand or collapse
+  folders, select one or more items, copy paths, reveal archived copies in
+  Finder, and use the contextual actions to preview or inspect files. Both
+  retain the exact selected roots in `sync-paths.txt`. A saved root can be
+  removed from both the archive and Sync Selection after confirmation; the
+  original source file is not deleted. Encrypted secrets are shown
+  separately: a trusted recipient can use **View Encrypted Secrets** to list
+  archive file and folder names. The app never displays secret values.
+- **Other Macs** offers the same archive browser and lets you choose exact
+  files or folders, preview their restore, then restore only those paths to
+  this Mac. When a peer has encrypted secrets, trusted recipients can inspect
+  its archive entries before deciding whether to restore them in Terminal. A
+  real restore keeps newer local files unless the explicit replace option is
+  selected.
+- **Sync Selection** starts from
+  `machines/<this-Mac>/config/sync-paths.txt`. Select files and folders from
+  the Mac, drag or paste files from Finder, expand or collapse parent folders,
+  reveal and copy selected roots, remove several at once, save it, then sync
+  it. Folders are copied
+  subject to that Mac's `config/excludes.txt` rules.
+- **Sync History** keeps a local, per-run ledger of completed publishes and
+  restores. It shows file-level uploads and downloads, whether an item was new,
+  updated, removed, or skipped, and the source and destination paths. Preview
+  runs are deliberately not added to the history.
+- **Automatic sync** in Settings installs a per-user `launchd` schedule. Choose
+  a time and any days of the week, a preset interval, or a custom interval; Mac
+  Sync keeps the schedule local and never stores credentials in the launch
+  agent.
+
+The menu-bar item gives quick access to the dashboard, current status, sync,
+stop, refresh, and repository setup actions. The app's settings view shows the
+active repository and status paths, lets you re-run local setup, and includes a
+non-interactive GitHub read/write check. It never stores a GitHub token: the
+check uses the Mac's existing Git authentication and redacts credentials from
+its output.
+
+## CLI Usage
 
 ```sh
 mac-sync sync
@@ -88,7 +166,7 @@ Commands:
 
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: service mode; same behavior as `sync`
-- `restore`: copy a machine snapshot from `dot-files` back into `$HOME` and
+- `restore`: copy a machine snapshot from `mac-sync-data` back into `$HOME` and
   re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `packages`: manage Homebrew snapshots, diffs, and installs
@@ -107,6 +185,7 @@ Paths that are already unchanged stay quiet.
 ```sh
 make ci
 make package-release
+./script/build_and_run.sh --verify
 ```
 
 CI runs Swift unit tests and the shell regression suite against coverage-instrumented
@@ -132,7 +211,12 @@ repo. By default it is written under:
 ~/Library/Application Support/mac-sync/status/
 ```
 
-Use `brew services info mac-sync` for the Homebrew service status.
+Completed real syncs and restores also write one JSON record per run under
+`history/<machine-name>/` in that same directory. These records contain transfer
+metadata and local paths only; they never contain decrypted secret contents.
+
+Use `brew services info mac-sync` for the optional Homebrew service status.
+The app shows its own automatic-sync schedule in **Settings → Automatic sync**.
 
 ## Restore
 
@@ -143,7 +227,7 @@ mac-sync restore
 ```
 
 When the current hostname has no snapshot, restore lists available snapshots
-from `~/github/dot-files/machines/` and prompts for the source machine. Use
+from `~/github/mac-sync-data/machines/` and prompts for the source machine. Use
 `--select` to force that prompt even when the current hostname exists:
 
 ```sh
@@ -168,9 +252,10 @@ Restore from another machine:
 mac-sync restore --from old-mbp
 ```
 
-Restore pulls both repos first when their worktrees are clean, then copies the
-curated paths from `config/sync-paths.txt` plus the selected machine's persisted
-dynamic paths from `~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt`.
+Restore pulls the data repository when its worktree is clean, then copies the
+curated paths from the selected machine's
+`machines/<machine-name>/config/sync-paths.txt` plus its persisted dynamic paths
+from `~/github/mac-sync-data/machines/<machine-name>/dynamic-sync-paths.txt`.
 It also compares the selected machine's Homebrew snapshot with the local
 Homebrew and VS Code extension state and re-clones missing GitHub repositories
 from the selected machine's saved clone list into `~/github`.
@@ -188,6 +273,18 @@ Preview a restore without changing local files:
 ```sh
 MAC_SYNC_DRY_RUN=1 mac-sync restore --from old-mbp
 ```
+
+In the Mac app, select **Restore specific paths only** when bringing a peer
+snapshot to this Mac and choose the snapshot roots to copy. The CLI equivalent
+accepts one or more `--path` options:
+
+```sh
+mac-sync restore --from old-mbp --path .zshrc --path .config/tool
+```
+
+A selected-path restore intentionally skips Homebrew, VS Code, repository, and
+encrypted-secret restore steps; use the normal restore flow when those machine
+state hints are required.
 
 When Homebrew packages differ, restore prints the manual commands needed to
 install missing taps, formulae, and casks or upgrade outdated packages from the
@@ -227,16 +324,16 @@ mac-sync help secrets
 
 That command creates an `age` identity if needed, stores the private identity in
 Apple Keychain under `mac-sync age identity`, and adds only the public recipient
-to:
+to the shared registry:
 
 ```text
-config/age-recipients.txt
+machines/_shared/config/age-recipients.txt
 ```
 
 The encrypted secret paths are listed in:
 
 ```text
-config/secret-paths.txt
+machines/<machine-name>/config/secret-paths.txt
 ```
 
 By default, that file includes:
@@ -249,8 +346,8 @@ By default, that file includes:
 Once at least one recipient is configured, hourly sync writes:
 
 ```text
-~/github/dot-files/machines/<machine-name>/secrets/secrets.tar.gz.age
-~/github/dot-files/machines/<machine-name>/secrets/included-paths.txt
+~/github/mac-sync-data/machines/<machine-name>/secrets/secrets.tar.gz.age
+~/github/mac-sync-data/machines/<machine-name>/secrets/included-paths.txt
 ```
 
 You can also update only the encrypted secret snapshot:
@@ -264,6 +361,10 @@ Inspect an encrypted snapshot:
 ```sh
 mac-sync secrets list --from old-mbp
 ```
+
+In the Mac app, choose a machine and select **View Encrypted Secrets** to list
+the same encrypted archive's file and folder names with this Mac's Keychain
+identity. That view deliberately never displays secret values or writes files.
 
 Restore encrypted secrets:
 
@@ -285,9 +386,10 @@ mac-sync secrets test
 ```
 
 Each trusted Mac should run `mac-sync secrets init`, which adds that Mac's public
-recipient to the repo. Future encrypted snapshots are encrypted to every
-recipient in `config/age-recipients.txt`, so any matching Keychain identity can
-decrypt them.
+recipient to the shared registry. Future encrypted snapshots are encrypted to
+every registered recipient, so any matching Keychain identity can decrypt them.
+After adding a new Mac, run `mac-sync sync` once on each source Mac to re-encrypt
+its current archive for the new recipient.
 
 Before replacing an existing encrypted archive, `mac-sync` decrypts and compares
 it with the new snapshot. If that verification fails, sync stops and preserves
@@ -328,10 +430,10 @@ Code extensions to the selected machine snapshot.
 
 ## Configuration
 
-The configured backup paths are listed in:
+The configured backup paths for the current Mac are listed in:
 
 ```text
-config/sync-paths.txt
+machines/<machine-name>/config/sync-paths.txt
 ```
 
 Paths are relative to `$HOME` unless they start with `/`. Inspect the active
@@ -351,7 +453,7 @@ directories in the sync set without hand-editing the manifest every time a
 startup file changes. The generated per-machine dynamic list is persisted to:
 
 ```text
-~/github/dot-files/machines/<machine-name>/dynamic-sync-paths.txt
+~/github/mac-sync-data/machines/<machine-name>/dynamic-sync-paths.txt
 ```
 
 On later runs, paths that were previously dynamic but are no longer discovered
@@ -362,7 +464,7 @@ Homebrew package state is captured during sync when `brew` is available. The
 generated per-machine lists are persisted to:
 
 ```text
-~/github/dot-files/machines/<machine-name>/homebrew/
+~/github/mac-sync-data/machines/<machine-name>/homebrew/
 ```
 
 That directory contains sorted `taps.txt`, `formulae.txt`, and `casks.txt`
@@ -372,7 +474,7 @@ VS Code extension state is captured during sync when `code` is available. The
 generated per-machine manifest is persisted to:
 
 ```text
-~/github/dot-files/machines/<machine-name>/editor/vscode-extensions.txt
+~/github/mac-sync-data/machines/<machine-name>/editor/vscode-extensions.txt
 ```
 
 If a Homebrew or VS Code inventory command fails, sync stops without replacing
@@ -383,29 +485,30 @@ Git repositories under `~/github`, including nested paths such as
 one GitHub remote. The generated per-machine clone list is persisted to:
 
 ```text
-~/github/dot-files/machines/<machine-name>/github-repositories/repositories.txt
+~/github/mac-sync-data/machines/<machine-name>/github-repositories/repositories.txt
 ```
 
 Each row stores the path relative to `~/github` and a credential-free GitHub
 clone URL. Non-GitHub remotes, submodules, and non-repo directories are ignored.
 
-Before pushing a machine snapshot, `mac-sync` checks whether the machines repo
+Before pushing a machine snapshot, `mac-sync` checks whether the data repository
 is behind its upstream branch and rebases only when needed. Unrelated local
-edits elsewhere in the `dot-files` checkout are preserved, so hourly backups can
-continue while files outside `machines/<machine-name>` are being edited.
+edits are preserved, so hourly backups can continue while other machines' data
+is being reviewed.
 
 Rsync excludes are listed in:
 
 ```text
-config/excludes.txt
+machines/<machine-name>/config/excludes.txt
 ```
 
 Environment overrides:
 
-- `MAC_SYNC_REPO`: mac-sync command/config repo path, defaulting to
-  `~/github/mac-sync`
-- `MAC_SYNC_MACHINES_REPO`: machine snapshot repo path, defaulting to
-  `~/github/dot-files`
+- `MAC_SYNC_MACHINES_REPO`: mac-sync data repository path, defaulting to
+  `~/github/mac-sync-data`
+- `MAC_SYNC_APP_CONFIG`: local app/service repository-location file, defaulting
+  to `~/Library/Application Support/mac-sync/config.env`. Explicit environment
+  variables take precedence over values in this file.
 - `MAC_SYNC_MACHINE`: machine directory name, defaulting to the macOS host name
 - `MAC_SYNC_STATUS_DIR`: local status directory, defaulting to
   `~/Library/Application Support/mac-sync/status`
@@ -421,9 +524,9 @@ Environment overrides:
   cloning
 - `MAC_SYNC_SECRETS=0`: disable encrypted secret snapshotting and restore hints
 - `MAC_SYNC_MANIFEST_SOURCE`: choose `config`, `auto`, or `dot-files`.
-  The default `config` uses `config/sync-paths.txt`. The `dot-files`
-  option is retained only for older dot-files checkouts that still expose
-  `make print-mac-sync-paths`.
+  The default `config` uses the current machine's
+  `machines/<machine>/config/sync-paths.txt`. The `dot-files` option is a
+  legacy compatibility mode only.
 - `MAC_SYNC_KEYCHAIN_SERVICE`: Keychain service for the `age` identity,
   defaulting to `mac-sync age identity`
 - `MAC_SYNC_KEYCHAIN_ACCOUNT`: Keychain account for the `age` identity,
@@ -434,8 +537,9 @@ Environment overrides:
 
 The regular dotfile sync list is explicit by design. Do not add raw secret
 material such as SSH private keys, cloud credentials, token files, shell
-history, or decrypted secret directories to `config/sync-paths.txt`.
-The machine snapshot repo should also ignore common credential-bearing paths
+history, or decrypted secret directories to
+`machines/<machine-name>/config/sync-paths.txt`.
+The private data repository should also ignore common credential-bearing paths
 under `machines/`, but the path manifest is still the real safety boundary.
 
 Machine names and configured or persisted paths are validated before use.

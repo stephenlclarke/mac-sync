@@ -100,6 +100,10 @@ jobs:
           tar -xzf "${RUNNER_TEMP}/${ASSET}" -C "$package_root"
           "$package_root/mac-sync/bin/mac-sync" --help >/dev/null
           "$package_root/mac-sync/bin/mac-spinner" --message package-smoke --pending >/dev/null
+          test -x "$package_root/mac-sync/MacSync.app/Contents/MacOS/MacSync"
+          test -x "$package_root/mac-sync/MacSync.app/Contents/Resources/mac-sync"
+          test -f "$package_root/mac-sync/MacSync.app/Contents/Resources/MacSync.icns"
+          plutil -lint "$package_root/mac-sync/MacSync.app/Contents/Info.plist"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
