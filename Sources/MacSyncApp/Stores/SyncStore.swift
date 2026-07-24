@@ -113,6 +113,7 @@ final class SyncStore: ObservableObject {
                 return
             }
             try repository.seedMachineConfigurationIfNeeded()
+            try repository.clearStaleLocalStatusWhenSnapshotIsMissing()
             reload()
             isSetupSheetPresented = false
             errorMessage = nil

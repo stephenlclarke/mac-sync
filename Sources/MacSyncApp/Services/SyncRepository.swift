@@ -123,6 +123,32 @@ struct SyncRepository {
         }
     }
 
+    /// A newly-cloned data repository has configuration only until its first
+    /// sync. Do not show status or history that belonged to an earlier, now
+    /// removed checkout for this same Mac.
+    @discardableResult
+    func clearStaleLocalStatusWhenSnapshotIsMissing() throws -> Bool {
+        let configuration = configuration()
+        guard !hasCurrentMachineSnapshot(configuration: configuration) else {
+            return false
+        }
+
+        let prefix = "\(configuration.statusDirectory)/\(configuration.machineName)"
+        let paths = [
+            "\(prefix).env",
+            "\(prefix).warnings.log",
+            "\(prefix).errors.log",
+            "\(prefix).local-changes.log",
+            "\(configuration.statusDirectory)/history/\(configuration.machineName)",
+        ]
+        var removedStatus = false
+        for path in paths where fileManager.fileExists(atPath: path) {
+            try fileManager.removeItem(atPath: path)
+            removedStatus = true
+        }
+        return removedStatus
+    }
+
     func pathForUserSelection(_ url: URL) -> String {
         let absolutePath = url.standardizedFileURL.path
         let home = configuration().homeDirectory
@@ -427,6 +453,19 @@ struct SyncRepository {
         return files.sorted {
             $0.displayPath.localizedStandardCompare($1.displayPath) == .orderedAscending
         }
+    }
+
+    private func hasCurrentMachineSnapshot(configuration: SyncConfiguration) -> Bool {
+        let root = URL(fileURLWithPath: configuration.dataRepository)
+            .appendingPathComponent("machines")
+            .appendingPathComponent(configuration.machineName)
+        let payloads = [
+            root.appendingPathComponent("MACHINE.md"),
+            root.appendingPathComponent("home"),
+            root.appendingPathComponent("absolute"),
+            root.appendingPathComponent("secrets/secrets.tar.gz.age"),
+        ]
+        return payloads.contains { fileManager.fileExists(atPath: $0.path) }
     }
 
     private func machineMetadata(_ path: String) -> [String: String] {
