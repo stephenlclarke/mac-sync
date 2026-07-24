@@ -50,7 +50,7 @@ Prepare a release only from a clean, published `main` commit:
 make ci
 git fetch --all --prune --no-tags
 git status --short --branch
-git tag 0.1.0
+git tag --no-sign 0.1.0
 git push origin refs/tags/0.1.0
 gh workflow run prebuilt-binaries.yml --ref main -f ref=0.1.0
 ```
