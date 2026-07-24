@@ -55,24 +55,22 @@ verify_asset() {
 }
 
 create_release() {
-  local prerelease_flag=()
-  local latest_flag=()
+  local release_args=(
+    release create "$tag"
+    --repo "$GH_REPO"
+    --verify-tag
+    --target "$commit"
+    --title "$title"
+    --notes-file "$notes"
+  )
   if [[ "$mode" != "stable" ]]; then
-    prerelease_flag=(--prerelease)
+    release_args+=(--prerelease)
   fi
   if [[ "$latest" == "true" ]]; then
-    latest_flag=(--latest)
+    release_args+=(--latest)
   fi
-  gh release create "$tag" \
-    --repo "$GH_REPO" \
-    --verify-tag \
-    --target "$commit" \
-    --title "$title" \
-    --notes-file "$notes" \
-    "${prerelease_flag[@]}" \
-    "${latest_flag[@]}" \
-    "$archive" \
-    "$checksum"
+  release_args+=("$archive" "$checksum")
+  gh "${release_args[@]}"
 }
 
 case "$mode" in
