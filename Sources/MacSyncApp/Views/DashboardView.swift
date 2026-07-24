@@ -21,6 +21,10 @@ struct DashboardView: View {
                     manualTriageCard
                 }
 
+                if shouldShowActivityCard {
+                    activityCard
+                }
+
                 HStack(alignment: .top, spacing: 14) {
                     MetricCard(
                         title: "This Mac",
@@ -86,7 +90,6 @@ struct DashboardView: View {
                     }
                 }
 
-                activityCard
             }
             .padding(24)
             .frame(maxWidth: 1000, alignment: .leading)
@@ -133,19 +136,19 @@ struct DashboardView: View {
 
     private var activityCard: some View {
         GroupBox("Latest warnings and errors") {
-            if store.overview.status.warnings.isEmpty, store.overview.status.errors.isEmpty {
+            if visibleStatusWarnings.isEmpty, visibleStatusErrors.isEmpty {
                 Text("No recorded warnings or errors from the last sync.")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(store.overview.status.errors, id: \.self) { message in
+                    ForEach(visibleStatusErrors, id: \.self) { message in
                         Label(message, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
                             .textSelection(.enabled)
                     }
-                    ForEach(store.overview.status.warnings, id: \.self) { message in
+                    ForEach(visibleStatusWarnings, id: \.self) { message in
                         if isCurrentMachineLocalChangesWarning(message) {
                             localChangesWarning
                         } else {
@@ -277,6 +280,24 @@ struct DashboardView: View {
 
     private func isCurrentMachineLocalChangesWarning(_ message: String) -> Bool {
         message.contains("current machine snapshot has local changes")
+    }
+
+    private var visibleStatusErrors: [String] {
+        store.overview.status.errors.filter { !hasOpenManualTriageIssue(for: $0) }
+    }
+
+    private var visibleStatusWarnings: [String] {
+        store.overview.status.warnings.filter { !hasOpenManualTriageIssue(for: $0) }
+    }
+
+    private var shouldShowActivityCard: Bool {
+        store.openIssueCount == 0 || !visibleStatusErrors.isEmpty || !visibleStatusWarnings.isEmpty
+    }
+
+    private func hasOpenManualTriageIssue(for message: String) -> Bool {
+        store.syncIssues.contains {
+            $0.requiresManualIntervention && $0.message == message
+        }
     }
 
     private var statusDetail: String {

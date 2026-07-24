@@ -3,6 +3,7 @@
 [![CI](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml)
 [![Homebrew](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml)
+[![Releases](https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=coverage)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
 [![Bugs](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=bugs)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
@@ -14,9 +15,10 @@
 
 `mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
 packages, VS Code extensions, encrypted secrets, and local GitHub clones in
-git, split by machine name. The installed application uses one private data
-repository, `stephenlclarke/mac-sync-data`; the legacy `dot-files` repository
-is never read or changed by this version.
+git, split by machine name. The installed application and default CLI flow use
+one private data repository, `stephenlclarke/mac-sync-data`, and do not read or
+change the legacy `dot-files` repository. Explicit legacy CLI overrides remain
+available for migration and compatibility work.
 
 Snapshots are written to:
 
@@ -36,7 +38,8 @@ the bundled application icon. Local source builds are for development and
 release packaging only.
 
 See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
-restore runbook.
+restore runbook. Maintainers should use [RELEASES.md](RELEASES.md) for the
+stable and current publication contract.
 
 ## Install
 
@@ -47,6 +50,17 @@ brew tap stephenlclarke/tap
 brew install mac-sync
 open "$(brew --prefix mac-sync)/MacSync.app"
 ```
+
+The opt-in Current build tracks the newest fully validated `main` commit:
+
+```sh
+brew uninstall mac-sync
+brew install mac-sync-current
+open "$(brew --prefix mac-sync-current)/MacSync.app"
+```
+
+The stable and current formulae conflict because both install `mac-sync` and
+`mac-spinner`. Uninstall one before switching to the other.
 
 The formula installs every non-system command required for syncing and encrypted
 secrets: `age` (including `age-keygen`), GNU `tar` (`gtar`), Git, and a current
@@ -64,7 +78,14 @@ On its first launch, Mac Sync finds an existing data checkout or guides you to
 choose one. Select **Clone mac-sync-data Repository** only when you want the
 app to clone the private data repository into a chosen empty folder. A new,
 empty data repository is supported: the first sync creates and pushes the
-initial snapshot. The default location is:
+initial snapshot. While cloning, setup shows the active destination, an
+indeterminate progress bar, and an elapsed timer.
+
+If the selected location contains a non-Git legacy folder, setup offers **Back
+Up Legacy Folder and Clone…**. It moves the existing folder to a neighbouring
+`.before-mac-sync` backup, clones into the original location, and restores the
+original folder if the clone fails. Nothing in the legacy folder is deleted.
+The default location is:
 
 ```text
 ~/github/mac-sync-data
@@ -110,7 +131,8 @@ there is no separate sync implementation or additional state store.
   the snapshot footprint for this Mac, and the available peer snapshots. A
   skipped pre-operation pull shows the recorded and current local Git changes
   in this Mac's snapshot, or marks a historical warning as resolved once the
-  snapshot is clean again.
+  snapshot is clean again. An open warning or error appears in the Manual
+  Triage card instead of being repeated under Latest warnings and errors.
 - **This Mac** lists the configured snapshot roots and every regular file and
   folder currently stored for the local machine. The configurable outline and
   archive browser behave like purpose-built file managers: expand or collapse
@@ -204,10 +226,14 @@ make package-release
 ```
 
 CI runs Swift unit tests and the shell regression suite against coverage-instrumented
-binaries, then enforces at least 80% line coverage across `MacSyncCore.swift` and
+binaries, then enforces at least 85% line coverage across `MacSyncCore.swift` and
 `Support.swift`. It also runs CLI smoke checks, CodeQL, SonarCloud analysis,
-sanitizer jobs, Homebrew formula checks, and branch prebuilt publishing for the
-Homebrew tap. The generated Sonar-compatible report is `coverage.xml`.
+sanitizer jobs, Homebrew formula checks, and release publication to the Homebrew
+tap. Successful exact-commit CI and CodeQL runs gate both the rolling
+Current build and immutable semantic releases. The generated Sonar-compatible
+report is `coverage.xml`.
+SonarCloud scans all maintained source for static-analysis findings and applies
+coverage only to the two instrumented core files.
 
 ## Status
 
@@ -364,7 +390,7 @@ By default, that file includes:
 .secrets
 ```
 
-Once at least one recipient is configured, hourly sync writes:
+Once at least one recipient is configured, a normal sync writes:
 
 ```text
 ~/github/mac-sync-data/machines/<machine-name>/secrets/secrets.tar.gz.age
@@ -518,8 +544,8 @@ clone URL. Non-GitHub remotes, submodules, and non-repo directories are ignored.
 
 Before pushing a machine snapshot, `mac-sync` checks whether the data repository
 is behind its upstream branch and rebases only when needed. Unrelated local
-edits are preserved, so hourly backups can continue while other machines' data
-is being reviewed.
+edits are preserved, so scheduled backups can continue while other machines'
+data is being reviewed.
 
 Rsync excludes are listed in:
 
@@ -531,6 +557,8 @@ Environment overrides:
 
 - `MAC_SYNC_MACHINES_REPO`: mac-sync data repository path, defaulting to
   `~/github/mac-sync-data`
+- `MAC_SYNC_REPO`: legacy-only separate command/config repository override. The
+  installed app removes this override and uses `MAC_SYNC_MACHINES_REPO`.
 - `MAC_SYNC_APP_CONFIG`: local app/service repository-location file, defaulting
   to `~/Library/Application Support/mac-sync/config.env`. Explicit environment
   variables take precedence over values in this file.
@@ -578,5 +606,5 @@ private `age` identity must stay in Apple Keychain or another secret manager.
 
 ## License
 
-This repository is licensed under the GNU Affero General Public License v3.0
-(AGPL-3.0). See `LICENSE`, `LICENSE.md`, and `NOTICE.md`.
+This repository is licensed under the GNU Affero General Public License v3.0 or
+later (AGPL-3.0-or-later). See `LICENSE`, `LICENSE.md`, and `NOTICE.md`.

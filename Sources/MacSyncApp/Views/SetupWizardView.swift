@@ -66,13 +66,15 @@ struct SetupWizardView: View {
                             .disabled(model.isWorking || model.hasAllRepositories)
                         }
 
-                        if model.isWorking {
+                        if model.isWorking, model.activeProgress == nil {
                             ProgressView()
                                 .controlSize(.small)
                         }
                     }
 
-                    if let message = model.messages.last {
+                    if let progress = model.activeProgress {
+                        SetupProgressRow(progress: progress)
+                    } else if let message = model.messages.last {
                         Label(message, systemImage: message.hasPrefix("Unable") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                             .font(.caption)
                             .foregroundStyle(message.hasPrefix("Unable") ? .orange : .secondary)
@@ -170,6 +172,47 @@ struct SetupWizardView: View {
         if panel.runModal() == .OK, let url = panel.url {
             model.setPath(url.standardizedFileURL.path, for: .syncData)
         }
+    }
+}
+
+private struct SetupProgress: Equatable {
+    let title: String
+    let detail: String
+    let startedAt: Date
+}
+
+private struct SetupProgressRow: View {
+    let progress: SetupProgress
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(progress.title)
+                        .font(.caption.weight(.semibold))
+                    Text(progress.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                TimelineView(.periodic(from: progress.startedAt, by: 1)) { context in
+                    Text(elapsedTime(at: context.date))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 44, alignment: .trailing)
+            }
+            ProgressView()
+                .progressViewStyle(.linear)
+        }
+        .padding(.top, 2)
+    }
+
+    private func elapsedTime(at date: Date) -> String {
+        let elapsed = max(0, Int(date.timeIntervalSince(progress.startedAt)))
+        return String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 }
 
@@ -319,6 +362,7 @@ final class SetupWizardModel: ObservableObject {
     @Published private(set) var isWorking = false
     @Published private(set) var isCheckingGitHubAccess = false
     @Published private(set) var errorMessage: String?
+    @Published fileprivate var activeProgress: SetupProgress?
 
     private let environment: [String: String]
 
@@ -360,13 +404,19 @@ final class SetupWizardModel: ObservableObject {
     }
 
     func cloneMissingRepositories() {
-        runClone { service, locations in
+        runClone(
+            title: "Cloning mac-sync-data",
+            detail: "Downloading the private snapshot repository into \(locations.dataRepository)"
+        ) { service, locations in
             service.cloneMissing(locations)
         }
     }
 
     func backUpAndClone(_ plan: RepositoryRecoveryPlan) {
-        runClone { service, locations in
+        runClone(
+            title: "Backing up and cloning mac-sync-data",
+            detail: "Moving the legacy folder aside, then cloning a fresh repository"
+        ) { service, locations in
             service.backUpAndClone(plan, locations: locations)
         }
     }
@@ -395,16 +445,20 @@ final class SetupWizardModel: ObservableObject {
         locations = RepositoryLocations(dataRepository: path.trimmingCharacters(in: .whitespacesAndNewlines))
         messages = []
         gitHubReports = []
+        activeProgress = nil
         if refresh {
             runInspection(showProgress: false)
         }
     }
 
     private func runClone(
+        title: String,
+        detail: String,
         _ operation: @escaping @Sendable (RepositorySetupService, RepositoryLocations) -> RepositoryCloneResult
     ) {
         guard !isWorking else { return }
         isWorking = true
+        activeProgress = SetupProgress(title: title, detail: detail, startedAt: Date())
         let locations = locations
         let environment = environment
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -415,6 +469,7 @@ final class SetupWizardModel: ObservableObject {
                 self?.gitHubReports = service.initialGitHubReports(for: result.inspections)
                 self?.messages = result.messages
                 self?.isWorking = false
+                self?.activeProgress = nil
             }
         }
     }
@@ -422,6 +477,7 @@ final class SetupWizardModel: ObservableObject {
     private func runInspection(showProgress: Bool) {
         guard !isWorking else { return }
         isWorking = showProgress
+        activeProgress = nil
         let locations = locations
         let environment = environment
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

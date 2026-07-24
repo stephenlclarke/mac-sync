@@ -43,6 +43,12 @@ make package-release
 ```
 
 `make ci` runs lint checks, Swift unit tests, the shell regression suite, CLI
-smoke tests, and an 80% minimum line-coverage check for the Swift core. Coverage
-is written to `coverage.lcov` and `coverage.xml`; CI passes `coverage.xml` to
-SonarCloud.
+smoke tests, and an 85% minimum line-coverage check for `MacSyncCore.swift` and
+`Support.swift`. Coverage is written to `coverage.lcov` and `coverage.xml`; CI
+passes `coverage.xml` to SonarCloud. SonarCloud scans all maintained source for
+static-analysis findings and applies coverage only to those two instrumented
+core files.
+
+Only maintainers publish releases. The exact stable/current contract, validation
+gates, Homebrew update sequence, retention policy, and rollback commands are in
+[RELEASES.md](RELEASES.md).

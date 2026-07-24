@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--branch", required=True)
     parser.add_argument("--lane", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--build", required=True)
     parser.add_argument("--build-type", required=True)
     return parser.parse_args()
 
@@ -40,6 +41,7 @@ def main() -> int:
         "branch": args.branch,
         "lane": args.lane,
         "commit": args.commit,
+        "build": args.build,
         "buildType": args.build_type,
     }
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

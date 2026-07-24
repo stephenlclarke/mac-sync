@@ -164,12 +164,13 @@ enum SnapshotContentsTree {
     static func ancestorPaths(for path: String) -> [String] {
         let isHomePath = path.hasPrefix("~/")
         let isAbsolutePath = path.hasPrefix("/")
-        let pathWithoutRoot: Substring = if isHomePath {
-            path.dropFirst(2)
+        let pathWithoutRoot: Substring
+        if isHomePath {
+            pathWithoutRoot = path.dropFirst(2)
         } else if isAbsolutePath {
-            path.dropFirst()
+            pathWithoutRoot = path.dropFirst()
         } else {
-            Substring(path)
+            pathWithoutRoot = Substring(path)
         }
         let components = pathWithoutRoot.split(separator: "/").map(String.init)
 
@@ -328,7 +329,7 @@ enum LocalRepositoryKind: String, CaseIterable, Identifiable, Sendable {
     }
 
     var title: String {
-        "mac-sync data"
+        "mac-sync data repository"
     }
 
     var shortTitle: String {

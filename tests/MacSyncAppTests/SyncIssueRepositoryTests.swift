@@ -16,14 +16,18 @@ final class SyncIssueRepositoryTests: XCTestCase {
                 action: .sync,
                 sourceMachine: nil,
                 result: .failed,
-                startedAt: "2026-07-23 10:00:00 BST",
-                finishedAt: "2026-07-23 10:00:02 BST",
-                durationSeconds: 2,
-                warningCount: 1,
-                errorCount: 1,
+                timing: SyncHistoryTiming(
+                    startedAt: "2026-07-23 10:00:00 BST",
+                    finishedAt: "2026-07-23 10:00:02 BST",
+                    durationSeconds: 2
+                ),
                 entries: [],
-                warnings: ["WARN: remote needs attention"],
-                errors: ["ERROR: git push failed"]
+                diagnostics: SyncHistoryDiagnostics(
+                    warningCount: 1,
+                    errorCount: 1,
+                    warnings: ["WARN: remote needs attention"],
+                    errors: ["ERROR: git push failed"]
+                )
             ),
         ]
         let overview = makeOverview(fixture: fixture, history: history)
@@ -58,14 +62,18 @@ final class SyncIssueRepositoryTests: XCTestCase {
                 action: .sync,
                 sourceMachine: nil,
                 result: .success,
-                startedAt: "2026-07-23 09:00:00 BST",
-                finishedAt: "2026-07-23 09:00:03 BST",
-                durationSeconds: 3,
-                warningCount: 1,
-                errorCount: 0,
+                timing: SyncHistoryTiming(
+                    startedAt: "2026-07-23 09:00:00 BST",
+                    finishedAt: "2026-07-23 09:00:03 BST",
+                    durationSeconds: 3
+                ),
                 entries: [],
-                warnings: [localChangesWarning],
-                errors: []
+                diagnostics: SyncHistoryDiagnostics(
+                    warningCount: 1,
+                    errorCount: 0,
+                    warnings: [localChangesWarning],
+                    errors: []
+                )
             ),
         ]
         let overview = makeOverview(

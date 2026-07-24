@@ -1,187 +1,390 @@
-name: Prebuilt Binaries
+name: Releases
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
-      - release
-      - "release-*"
   workflow_dispatch:
+    inputs:
+      ref:
+        description: main for Current build, or an existing semantic tag for a stable release
+        required: true
+        default: main
+        type: string
 
 permissions:
+  actions: read
   contents: write
+  security-events: read
 
 concurrency:
-  group: prebuilt-binaries-${{ github.ref_name }}
-  cancel-in-progress: true
+  group: mac-sync-release-publication
+  cancel-in-progress: false
 
 jobs:
-  package:
-    name: Package ${{ github.ref_name }}
-    if: github.repository == 'stephenlclarke/mac-sync'
+  resolve:
+    name: Resolve release
+    if: >
+      github.repository == 'stephenlclarke/mac-sync' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      mode: ${{ steps.release.outputs.mode }}
+      publish: ${{ steps.release.outputs.publish }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Resolve requested ref
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUESTED_REF: ${{ inputs.ref }}
+          WORKFLOW_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          publish=true
+
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            if [[ "$WORKFLOW_BRANCH" != "main" ]]; then
+              printf 'Ignoring CI completion for branch %s\n' "$WORKFLOW_BRANCH"
+              printf 'publish=false\n' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            mode=current
+            tag=current
+            commit="$WORKFLOW_COMMIT"
+          elif [[ "$REQUESTED_REF" == "main" ]]; then
+            mode=current
+            tag=current
+            commit="$(gh api "repos/${GH_REPO}/git/ref/heads/main" --jq '.object.sha')"
+          else
+            tag="${REQUESTED_REF#refs/tags/}"
+            if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf 'Stable release ref must be a semantic tag: %s\n' "$REQUESTED_REF" >&2
+              exit 1
+            fi
+            mode=stable
+            object="$(
+              gh api "repos/${GH_REPO}/git/ref/tags/${tag}" \
+                --jq '[.object.type, .object.sha] | @tsv'
+            )"
+            object_type="${object%%$'\t'*}"
+            object_sha="${object#*$'\t'}"
+            if [[ "$object_type" == "tag" ]]; then
+              commit="$(gh api "repos/${GH_REPO}/git/tags/${object_sha}" --jq '.object.sha')"
+            elif [[ "$object_type" == "commit" ]]; then
+              commit="$object_sha"
+            else
+              printf 'Unsupported Git object type for %s: %s\n' "$tag" "$object_type" >&2
+              exit 1
+            fi
+          fi
+
+          main_commit="$(gh api "repos/${GH_REPO}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$mode" == "current" && "$commit" != "$main_commit" ]]; then
+            printf 'Skipping superseded main commit %s; current head is %s\n' "$commit" "$main_commit"
+            publish=false
+          fi
+
+          if [[ "$mode" == "current" ]]; then
+            current_commit="$(
+              gh api "repos/${GH_REPO}/git/ref/tags/current" --jq '.object.sha' 2>/dev/null || true
+            )"
+            if [[ "$current_commit" == "$commit" ]] &&
+               gh release view current --repo "$GH_REPO" >/dev/null 2>&1; then
+              printf 'Current build already publishes %s\n' "$commit"
+              publish=false
+            fi
+          fi
+
+          {
+            printf 'commit=%s\n' "$commit"
+            printf 'mode=%s\n' "$mode"
+            printf 'publish=%s\n' "$publish"
+            printf 'tag=%s\n' "$tag"
+          } >> "$GITHUB_OUTPUT"
+
+  package-and-publish:
+    name: Publish ${{ needs.resolve.outputs.tag }}
+    needs:
+      - resolve
+    if: needs.resolve.outputs.publish == 'true'
     runs-on: macos-26
+    timeout-minutes: 75
     steps:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
         with:
           path: mac-sync
           fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.commit }}
           token: ${{ github.token }}
 
-      - name: Select package lane
-        id: lane
+      - name: Verify source and publish target
+        env:
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          push_url="$(git remote get-url --push origin)"
+          if [[ ! "$push_url" =~ ^(https://github\.com/|git@github\.com:)stephenlclarke/mac-sync(\.git)?$ ]]; then
+            printf 'Unexpected release push target: %s\n' "$push_url" >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_MODE" == "stable" ]]; then
+            git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+            test "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")" = "$RELEASE_COMMIT"
+          fi
+
+      - name: Wait for exact-commit CI
+        id: ci
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          url="$(Tools/release/wait-for-workflow.sh ci.yml "$RELEASE_COMMIT")"
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for exact-commit CodeQL
+        id: codeql
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          url="$(Tools/release/wait-for-workflow.sh codeql.yml "$RELEASE_COMMIT")"
+          printf 'url=%s\n' "$url" >> "$GITHUB_OUTPUT"
+
+      - name: Select release metadata
+        id: metadata
+        env:
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          asset_slug="${GITHUB_REF_NAME//\//-}"
-          formula_slug="$(
-            printf '%s' "$asset_slug" \
-              | tr '[:upper:]' '[:lower:]' \
-              | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
-          )"
-          case "${GITHUB_REF_NAME}" in
-            main)
-              target="package-release"
-              asset="mac-sync-main-release-arm64.tar.gz"
-              release_name="Homebrew main lane prebuilt"
-              config="release"
-              lane="main"
-              formula="mac-sync.rb"
-              formula_class="MacSync"
-              formula_name="mac-sync"
-              label="main lane"
-              ;;
-            release|release-*)
-              target="package-release"
-              asset="mac-sync-${asset_slug}-release-arm64.tar.gz"
-              release_name="Homebrew ${GITHUB_REF_NAME} branch prebuilt"
-              config="release"
-              lane="release"
-              formula="mac-sync-${formula_slug}.rb"
-              formula_class="$(python3 -c 'import re, sys; print("MacSync" + "".join(part.capitalize() for part in re.split(r"[^a-zA-Z0-9]+", sys.argv[1]) if part))' "$formula_slug")"
-              formula_name="mac-sync-${formula_slug}"
-              label="${GITHUB_REF_NAME} branch"
-              ;;
-            *)
-              printf 'Unsupported branch for prebuilt packaging: %s\n' "${GITHUB_REF_NAME}" >&2
-              exit 1
-              ;;
-          esac
+          short_commit="${RELEASE_COMMIT:0:12}"
+          if [[ "$RELEASE_MODE" == "stable" ]]; then
+            asset="mac-sync-release-arm64.tar.gz"
+            formula="mac-sync.rb"
+            formula_class="MacSync"
+            formula_name="mac-sync"
+            formula_version="$RELEASE_TAG"
+            conflicts_with="mac-sync-current"
+            label="stable ${RELEASE_TAG}"
+            title="Mac Sync ${RELEASE_TAG}"
+            app_version="$RELEASE_TAG"
+          else
+            asset="mac-sync-current-${short_commit}-arm64.tar.gz"
+            formula="mac-sync-current.rb"
+            formula_class="MacSyncCurrent"
+            formula_name="mac-sync-current"
+            formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
+            conflicts_with="mac-sync"
+            label="current"
+            title="Current build"
+            app_version="0.1.0"
+          fi
           {
-            printf 'target=%s\n' "$target"
+            printf 'app_version=%s\n' "$app_version"
             printf 'asset=%s\n' "$asset"
-            printf 'release_name=%s\n' "$release_name"
-            printf 'config=%s\n' "$config"
-            printf 'lane=%s\n' "$lane"
+            printf 'conflicts_with=%s\n' "$conflicts_with"
             printf 'formula=%s\n' "$formula"
             printf 'formula_class=%s\n' "$formula_class"
             printf 'formula_name=%s\n' "$formula_name"
+            printf 'formula_version=%s\n' "$formula_version"
             printf 'label=%s\n' "$label"
-            printf 'asset_slug=%s\n' "$asset_slug"
-            printf 'tag=homebrew-%s\n' "$asset_slug"
-            printf 'version=%s-release-%s\n' "$asset_slug" "${GITHUB_SHA:0:12}"
+            printf 'title=%s\n' "$title"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build package
-        run: make "${{ steps.lane.outputs.target }}" MAC_SYNC_ARCHIVE="${RUNNER_TEMP}/${{ steps.lane.outputs.asset }}"
-        working-directory: mac-sync
+      - name: Build release package
         env:
-          MAC_SYNC_BRANCH: ${{ github.ref_name }}
-          MAC_SYNC_COMMIT: ${{ github.sha }}
-          MAC_SYNC_LANE: ${{ steps.lane.outputs.lane }}
-
-      - name: Test packaged executables
-        env:
-          ASSET: ${{ steps.lane.outputs.asset }}
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          APP_VERSION: ${{ steps.metadata.outputs.app_version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         shell: bash
+        working-directory: mac-sync
         run: |
           set -euo pipefail
-          package_root="$(mktemp -d)"
-          tar -xzf "${RUNNER_TEMP}/${ASSET}" -C "$package_root"
-          "$package_root/mac-sync/bin/mac-sync" --help >/dev/null
-          "$package_root/mac-sync/bin/mac-spinner" --message package-smoke --pending >/dev/null
-          test -x "$package_root/mac-sync/MacSync.app/Contents/MacOS/MacSync"
-          test -x "$package_root/mac-sync/MacSync.app/Contents/Resources/mac-sync"
-          test -f "$package_root/mac-sync/MacSync.app/Contents/Resources/MacSync.icns"
-          plutil -lint "$package_root/mac-sync/MacSync.app/Contents/Info.plist"
+          make package-release \
+            MAC_SYNC_ARCHIVE="${RUNNER_TEMP}/${ASSET}" \
+            MAC_SYNC_BRANCH="${RELEASE_TAG}" \
+            MAC_SYNC_BUILD="${GITHUB_RUN_NUMBER}" \
+            MAC_SYNC_COMMIT="${RELEASE_COMMIT}" \
+            MAC_SYNC_LANE="${RELEASE_MODE}" \
+            MAC_SYNC_VERSION="${APP_VERSION}"
+
+      - name: Validate release package
+        env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          APP_VERSION: ${{ steps.metadata.outputs.app_version }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          Tools/release/validate-package.sh \
+            "${RUNNER_TEMP}/${ASSET}" \
+            "$APP_VERSION" \
+            "$GITHUB_RUN_NUMBER" \
+            "$RELEASE_MODE" \
+            "$RELEASE_COMMIT"
+
+      - name: Write release notes
+        id: notes
+        env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          CI_URL: ${{ steps.ci.outputs.url }}
+          CODEQL_URL: ${{ steps.codeql.outputs.url }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          notes="${RUNNER_TEMP}/release-notes.md"
+          # shellcheck disable=SC2016
+          checksum="$(awk '{print $1}' "${RUNNER_TEMP}/${ASSET}.sha256")"
+          # shellcheck disable=SC2016
+          {
+            printf '# %s\n\n' "$RELEASE_TITLE"
+            if [[ "$RELEASE_MODE" == "stable" ]]; then
+              printf 'This is the immutable Mac Sync %s release.\n\n' "$RELEASE_TAG"
+            else
+              printf 'This prerelease tracks the newest fully validated commit on `main`.\n\n'
+            fi
+            printf '## Quality snapshot\n\n'
+            printf -- '- Commit: [`%s`](https://github.com/%s/commit/%s)\n' \
+              "$RELEASE_COMMIT" "$GITHUB_REPOSITORY" "$RELEASE_COMMIT"
+            printf -- '- [CI passed](%s), including the 85%% coverage gate and Sonar quality gate.\n' "$CI_URL"
+            printf -- '- [CodeQL passed](%s) for the same commit.\n' "$CODEQL_URL"
+            printf -- '- The packaged CLI, spinner, app bundle, plist metadata, provenance, and checksum passed release validation.\n\n'
+            printf '## Install\n\n'
+            if [[ "$RELEASE_MODE" == "stable" ]]; then
+              printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync\n```\n\n'
+            else
+              printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync-current\n```\n\n'
+            fi
+            printf 'Stable and current formulae conflict because both install the same executables.\n\n'
+            printf '## Assets\n\n'
+            printf -- '- `%s`\n' "$ASSET"
+            printf -- '- `%s.sha256`\n' "$ASSET"
+            printf -- '- SHA-256: `%s`\n\n' "$checksum"
+            printf '## Included changes\n\n'
+            git log --no-merges --pretty='format:- %s (`%h`)' -12
+            printf '\n'
+          } > "$notes"
+          printf 'path=%s\n' "$notes" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.lane.outputs.asset }}
+          name: ${{ steps.metadata.outputs.asset }}
           path: |
-            ${{ runner.temp }}/${{ steps.lane.outputs.asset }}
-            ${{ runner.temp }}/${{ steps.lane.outputs.asset }}.sha256
+            ${{ runner.temp }}/${{ steps.metadata.outputs.asset }}
+            ${{ runner.temp }}/${{ steps.metadata.outputs.asset }}.sha256
 
-      - name: Publish branch release assets
+      - name: Publish stable release
+        if: needs.resolve.outputs.mode == 'stable'
         env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          ASSET: ${{ steps.lane.outputs.asset }}
-          RELEASE_NAME: ${{ steps.lane.outputs.release_name }}
-          RELEASE_TAG: ${{ steps.lane.outputs.tag }}
+          NOTES: ${{ steps.notes.outputs.path }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
         shell: bash
         working-directory: mac-sync
         run: |
           set -euo pipefail
-          notes="$(mktemp)"
-          {
-            printf '%s\n\n' "${RELEASE_NAME}"
-            printf 'Branch: %s\n' "${GITHUB_REF_NAME}"
-            printf 'Commit: %s\n' "${GITHUB_SHA}"
-            printf 'Build configuration: %s\n' "${{ steps.lane.outputs.config }}"
-          } > "$notes"
-
-          git tag --force "$RELEASE_TAG" "$GITHUB_SHA"
-          git push --force origin "refs/tags/${RELEASE_TAG}"
-
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
-              --title "${RELEASE_NAME}" \
-              --notes-file "$notes" \
-              --prerelease
-          else
-            gh release edit "$RELEASE_TAG" \
-              --target "$GITHUB_SHA" \
-              --title "${RELEASE_NAME}" \
-              --notes-file "$notes" \
-              --prerelease
-          fi
-
-          gh release upload "$RELEASE_TAG" \
+          Tools/release/publish-github-release.sh \
+            stable \
+            "$RELEASE_TAG" \
+            "$RELEASE_COMMIT" \
+            "$RELEASE_TITLE" \
+            "$NOTES" \
             "${RUNNER_TEMP}/${ASSET}" \
             "${RUNNER_TEMP}/${ASSET}.sha256" \
-            --clobber
+            true
 
-      - name: Check Homebrew tap token
-        id: tap-token
+      - name: Stage Current build assets
+        if: needs.resolve.outputs.mode == 'current'
+        env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.path }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          Tools/release/publish-github-release.sh \
+            current-stage \
+            "$RELEASE_TAG" \
+            "$RELEASE_COMMIT" \
+            "$RELEASE_TITLE" \
+            "$NOTES" \
+            "${RUNNER_TEMP}/${ASSET}" \
+            "${RUNNER_TEMP}/${ASSET}.sha256" \
+            false
+
+      - name: Require Homebrew tap token
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
-            printf '::error title=Homebrew tap publish blocked::HOMEBREW_TAP_TOKEN is required to update stephenlclarke/homebrew-tap.\n'
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            printf 'HOMEBREW_TAP_TOKEN is required to update stephenlclarke/homebrew-tap.\n' >&2
             exit 1
           fi
-          printf 'available=true\n' >> "$GITHUB_OUTPUT"
 
       - name: Checkout Homebrew tap
-        if: steps.tap-token.outputs.available == 'true'
         uses: actions/checkout@v7
         with:
           repository: stephenlclarke/homebrew-tap
           path: homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-      - name: Update Homebrew tap formula
-        if: steps.tap-token.outputs.available == 'true'
+      - name: Render Homebrew formula
         env:
-          ASSET: ${{ steps.lane.outputs.asset }}
-          FORMULA: ${{ steps.lane.outputs.formula }}
-          LABEL: ${{ steps.lane.outputs.label }}
-          RELEASE_TAG: ${{ steps.lane.outputs.tag }}
-          VERSION: ${{ steps.lane.outputs.version }}
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          CONFLICTS_WITH: ${{ steps.metadata.outputs.conflicts_with }}
+          FORMULA: ${{ steps.metadata.outputs.formula }}
+          FORMULA_CLASS: ${{ steps.metadata.outputs.formula_class }}
+          FORMULA_VERSION: ${{ steps.metadata.outputs.formula_version }}
+          LABEL: ${{ steps.metadata.outputs.label }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -189,40 +392,103 @@ jobs:
           sha256="$(awk '{print $1}' "${RUNNER_TEMP}/${ASSET}.sha256")"
           python3 mac-sync/Tools/release/update-homebrew-formula.py \
             --formula "homebrew-tap/Formula/${FORMULA}" \
-            --template "mac-sync/Formula/mac-sync.rb" \
-            --formula-class "${{ steps.lane.outputs.formula_class }}" \
+            --template "mac-sync/Tools/release/mac-sync.rb.in" \
+            --formula-class "$FORMULA_CLASS" \
+            --formula-name "${{ steps.metadata.outputs.formula_name }}" \
             --url "$url" \
-            --version "$VERSION" \
+            --version "$FORMULA_VERSION" \
             --asset "$ASSET" \
             --label "$LABEL" \
-            --sha256 "$sha256"
-          git -C homebrew-tap diff -- Formula
+            --sha256 "$sha256" \
+            --conflicts-with "$CONFLICTS_WITH"
+          ruby -c "homebrew-tap/Formula/${FORMULA}"
+          brew style "homebrew-tap/Formula/${FORMULA}"
 
-      - name: Commit Homebrew tap update
-        if: steps.tap-token.outputs.available == 'true'
+      - name: Commit Homebrew formula
+        env:
+          FORMULA: ${{ steps.metadata.outputs.formula }}
+          LABEL: ${{ steps.metadata.outputs.label }}
         shell: bash
         working-directory: homebrew-tap
         run: |
           set -euo pipefail
-          if git diff --quiet -- Formula; then
-            printf 'Homebrew tap formula already points at %s\n' "${{ steps.lane.outputs.asset }}"
+          push_url="$(git remote get-url --push origin)"
+          if [[ ! "$push_url" =~ ^(https://github\.com/|git@github\.com:)stephenlclarke/homebrew-tap(\.git)?$ ]]; then
+            printf 'Unexpected Homebrew tap push target: %s\n' "$push_url" >&2
+            exit 1
+          fi
+          if git diff --quiet -- "Formula/${FORMULA}"; then
+            printf '%s already points at the requested asset.\n' "$FORMULA"
             exit 0
           fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "Formula/${{ steps.lane.outputs.formula }}"
-          git commit -m "chore(homebrew): update ${{ github.ref_name }} mac-sync formula"
+          git add "Formula/${FORMULA}"
+          git commit -m "chore(mac-sync): update ${LABEL} formula"
           git push
 
-      - name: Verify Homebrew tap installation
-        if: steps.tap-token.outputs.available == 'true'
+      - name: Verify Homebrew installation
         env:
+          FORMULA_NAME: ${{ steps.metadata.outputs.formula_name }}
           HOMEBREW_NO_AUTO_UPDATE: "1"
         shell: bash
         run: |
           set -euo pipefail
           brew untap stephenlclarke/tap >/dev/null 2>&1 || true
           brew tap stephenlclarke/tap
-          brew install --formula stephenlclarke/tap/${{ steps.lane.outputs.formula_name }}
-          brew test stephenlclarke/tap/${{ steps.lane.outputs.formula_name }}
+          brew install --formula "stephenlclarke/tap/${FORMULA_NAME}"
+          brew test "stephenlclarke/tap/${FORMULA_NAME}"
+
+      - name: Finalize Current build
+        if: needs.resolve.outputs.mode == 'current'
+        env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.path }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          Tools/release/publish-github-release.sh \
+            current-finalize \
+            "$RELEASE_TAG" \
+            "$RELEASE_COMMIT" \
+            "$RELEASE_TITLE" \
+            "$NOTES" \
+            "${RUNNER_TEMP}/${ASSET}" \
+            "${RUNNER_TEMP}/${ASSET}.sha256" \
+            false
+
+      - name: Prune superseded release assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          Tools/release/prune-release-assets.sh
+
+      - name: Verify published release
+        env:
+          ASSET: ${{ steps.metadata.outputs.asset }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          published_commit="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')"
+          test "$published_commit" = "$RELEASE_COMMIT"
+          published_digest="$(
+            gh release view "$RELEASE_TAG" \
+              --json assets \
+              --jq ".assets[] | select(.name == \"${ASSET}\") | .digest"
+          )"
+          local_digest="$(shasum -a 256 "${RUNNER_TEMP}/${ASSET}" | awk '{print $1}')"
+          test "$published_digest" = "sha256:${local_digest}"

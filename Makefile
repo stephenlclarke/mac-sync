@@ -7,13 +7,14 @@ SWIFT_RESOLVED_FLAGS ?= --disable-automatic-resolution
 SWIFT_RELEASE_FLAGS ?= -Xswiftc -Osize
 PYTHON ?= python3
 MARKDOWNLINT ?= markdownlint
-COVERAGE_MIN ?= 80
+COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
-MAC_SYNC_ARCHIVE ?= mac-sync-main-release-arm64.tar.gz
+MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
 MAC_SYNC_VERSION ?= 0.1.0
+MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
-MAC_SYNC_LANE ?= $(shell $(PYTHON) -c 'branch = "$(MAC_SYNC_BRANCH)"; print("main" if branch == "main" else "release" if branch == "release" or branch.startswith("release-") else "detached" if branch in ("", "HEAD") else "development")')
+MAC_SYNC_LANE ?= $(shell $(PYTHON) -c 'branch = "$(MAC_SYNC_BRANCH)"; print("current" if branch == "main" else "detached" if branch in ("", "HEAD") else "development")')
 MAC_SYNC_COMMIT ?= $(shell git rev-parse HEAD)
 SONAR_QUALITYGATE_WAIT ?= false
 SONAR_SCAN_ATTEMPTS ?= 3
@@ -29,8 +30,8 @@ MAC_SYNC_BINARY ?= $(abspath .build/debug/mac-sync)
 MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
 MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
-SHELL_TESTS := spinner help manifest status restore homebrew editor github-repositories secrets concurrent-machines user-configuration
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
+SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
 .PHONY: all workflow ci clean run build build-release app-debug app-built icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
@@ -68,6 +69,8 @@ app-built:
 	cp "$(MAC_SYNC_APP_BINARY)" "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-sync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
 	cp "Sources/MacSyncApp/Resources/Info.plist" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(MAC_SYNC_VERSION)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(MAC_SYNC_BUILD)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	cp "Sources/MacSyncApp/Resources/MacSync.icns" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/MacSync.icns"
 	chmod +x "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
 
@@ -232,12 +235,16 @@ package-built:
 		--branch "$(MAC_SYNC_BRANCH)" \
 		--lane "$(MAC_SYNC_LANE)" \
 		--commit "$(MAC_SYNC_COMMIT)" \
+		--build "$(MAC_SYNC_BUILD)" \
 		--build-type "$(PACKAGE_BUILD_CONFIGURATION)"
 	tar -czf "$(MAC_SYNC_ARCHIVE)" -C "$(DIST_DIR)" mac-sync
-	shasum -a 256 "$(MAC_SYNC_ARCHIVE)" > "$(MAC_SYNC_ARCHIVE).sha256"
+	archive_name="$$(basename "$(MAC_SYNC_ARCHIVE)")"; \
+	archive_dir="$$(dirname "$(MAC_SYNC_ARCHIVE)")"; \
+	(cd "$$archive_dir" && shasum -a 256 "$$archive_name" > "$$archive_name.sha256")
 
 coverage-tools-test:
 	$(PYTHON) -m py_compile Tools/coverage/*.py Tools/release/*.py
+	$(PYTHON) -m unittest discover -s Tools/release -p 'test_*.py'
 
 check: lint
 

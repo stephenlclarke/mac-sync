@@ -2,12 +2,29 @@ import AppKit
 import SwiftUI
 
 final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
-    private static let aboutCredits = """
+    private static let aboutCreditsText = """
     Licensed under the GNU Affero General Public License v3.0 or later
     (AGPL-3.0-or-later).
 
     This program is provided without warranty.
     """
+
+    private static var aboutCredits: NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        paragraphStyle.lineSpacing = 2
+        paragraphStyle.paragraphSpacing = 6
+
+        return NSAttributedString(
+            string: aboutCreditsText,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraphStyle,
+            ]
+        )
+    }
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -17,7 +34,7 @@ final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func showAboutPanel() {
         NSApp.orderFrontStandardAboutPanel(options: [
-            .credits: NSAttributedString(string: Self.aboutCredits),
+            .credits: Self.aboutCredits,
         ])
     }
 }

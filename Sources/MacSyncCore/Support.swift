@@ -53,6 +53,37 @@ public struct SyncHistoryEntry: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+public struct SyncHistoryTiming: Codable, Hashable, Sendable {
+    public let startedAt: String
+    public let finishedAt: String
+    public let durationSeconds: Int
+
+    public init(startedAt: String, finishedAt: String, durationSeconds: Int) {
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.durationSeconds = durationSeconds
+    }
+}
+
+public struct SyncHistoryDiagnostics: Codable, Hashable, Sendable {
+    public let warningCount: Int
+    public let errorCount: Int
+    public let warnings: [String]
+    public let errors: [String]
+
+    public init(
+        warningCount: Int,
+        errorCount: Int,
+        warnings: [String],
+        errors: [String]
+    ) {
+        self.warningCount = warningCount
+        self.errorCount = errorCount
+        self.warnings = warnings
+        self.errors = errors
+    }
+}
+
 public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let action: SyncHistoryAction
@@ -72,27 +103,22 @@ public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
         action: SyncHistoryAction,
         sourceMachine: String? = nil,
         result: SyncHistoryResult,
-        startedAt: String,
-        finishedAt: String,
-        durationSeconds: Int,
-        warningCount: Int,
-        errorCount: Int,
+        timing: SyncHistoryTiming,
         entries: [SyncHistoryEntry],
-        warnings: [String],
-        errors: [String]
+        diagnostics: SyncHistoryDiagnostics
     ) {
         self.id = id
         self.action = action
         self.sourceMachine = sourceMachine
         self.result = result
-        self.startedAt = startedAt
-        self.finishedAt = finishedAt
-        self.durationSeconds = durationSeconds
-        self.warningCount = warningCount
-        self.errorCount = errorCount
+        startedAt = timing.startedAt
+        finishedAt = timing.finishedAt
+        durationSeconds = timing.durationSeconds
+        warningCount = diagnostics.warningCount
+        errorCount = diagnostics.errorCount
         self.entries = entries
-        self.warnings = warnings
-        self.errors = errors
+        warnings = diagnostics.warnings
+        errors = diagnostics.errors
     }
 }
 

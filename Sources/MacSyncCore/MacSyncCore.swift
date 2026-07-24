@@ -2656,14 +2656,18 @@ public final class MacSyncApp {
             action: action,
             sourceMachine: historySourceMachine,
             result: result,
-            startedAt: historyStartedAt,
-            finishedAt: completedAt,
-            durationSeconds: duration,
-            warningCount: warningCount,
-            errorCount: errorCount,
+            timing: SyncHistoryTiming(
+                startedAt: historyStartedAt,
+                finishedAt: completedAt,
+                durationSeconds: duration
+            ),
             entries: historyEntries,
-            warnings: warningMessages,
-            errors: errorMessages
+            diagnostics: SyncHistoryDiagnostics(
+                warningCount: warningCount,
+                errorCount: errorCount,
+                warnings: warningMessages,
+                errors: errorMessages
+            )
         )
 
         defer {

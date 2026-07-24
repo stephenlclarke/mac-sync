@@ -6,7 +6,7 @@ struct SettingsView: View {
     @ObservedObject var store: SyncStore
     @State private var scheduleChoice = SyncScheduleChoice.hourly
     @State private var customIntervalMinutes = ""
-    @State private var calendarRules = [CalendarScheduleRule.default]
+    @State private var calendarRules = [CalendarScheduleRule.standard]
     @State private var scheduleValidationMessage: String?
 
     var body: some View {
@@ -80,9 +80,9 @@ struct SettingsView: View {
 
                 if scheduleChoice == .daysAndTime {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach($calendarRules) { $rule in
+                        ForEach($calendarRules) { ruleBinding in
                             HStack(spacing: 10) {
-                                Picker("Day", selection: $rule.weekday) {
+                                Picker("Day", selection: ruleBinding.weekday) {
                                     ForEach(SyncScheduleWeekday.displayOrder) { weekday in
                                         Text(weekday.shortTitle).tag(weekday)
                                     }
@@ -92,13 +92,13 @@ struct SettingsView: View {
 
                                 DatePicker(
                                     "Time",
-                                    selection: $rule.time,
+                                    selection: ruleBinding.time,
                                     displayedComponents: .hourAndMinute
                                 )
                                 .labelsHidden()
 
                                 Button {
-                                    calendarRules.removeAll { $0.id == rule.id }
+                                    calendarRules.removeAll { $0.id == ruleBinding.wrappedValue.id }
                                 } label: {
                                     Label("Remove time", systemImage: "minus.circle")
                                 }
@@ -109,7 +109,7 @@ struct SettingsView: View {
                         }
 
                         Button {
-                            calendarRules.append(CalendarScheduleRule.default)
+                            calendarRules.append(CalendarScheduleRule.standard)
                         } label: {
                             Label("Add day and time", systemImage: "plus")
                         }
@@ -227,7 +227,7 @@ private struct CalendarScheduleRule: Identifiable {
     var weekday: SyncScheduleWeekday
     var time: Date
 
-    static var `default`: CalendarScheduleRule {
+    static var standard: CalendarScheduleRule {
         CalendarScheduleRule(weekday: .monday, time: time(hour: 9, minute: 0))
     }
 

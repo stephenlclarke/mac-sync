@@ -14,7 +14,9 @@ status and machine snapshot records.
 - `~/github/mac-sync-data`: per-machine snapshots and configuration under
   `machines/<machine-name>/`, including dotfiles, Homebrew state, VS Code
   extension state, encrypted secrets, GitHub clone inventory, and the selected
-  sync paths. The legacy `dot-files` repository is not used by this version.
+  sync paths. The installed app and default CLI flow do not use the legacy
+  `dot-files` repository; explicit legacy CLI overrides remain available only
+  for migration and compatibility work.
 
 ## End-to-End Flow
 
@@ -24,16 +26,16 @@ status and machine snapshot records.
 flowchart TD
   A["Start on a Mac"] --> B["Install with Homebrew<br/>brew tap stephenlclarke/tap<br/>brew install mac-sync"]
   B --> C["Open Mac Sync<br/>first-run setup"]
-  C --> D["Choose mac-sync-data checkout<br/>or create it in an empty folder"]
+  C --> D["Choose mac-sync-data checkout<br/>or clone into an empty folder"]
   D --> E["Validate Git/GitHub access<br/>and review sync paths"]
   E --> F["Choose automatic schedule in Settings<br/>or start Homebrew service"]
-  F --> G{"Existing machine snapshot?<br/>find ~/github/mac-sync-data/machines -maxdepth 1 -type d"}
+  F --> G{"Existing machine snapshot?<br/>inspect the data repository's machines folder"}
   G -- "No" --> H["Run initial sync<br/>mac-sync sync"]
   G -- "Yes" --> I["Preview restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
   I --> J["Restore selected machine snapshot<br/>mac-sync restore --select"]
   J --> K["Apply packages/editor state if needed<br/>mac-sync packages install ...<br/>mac-sync editor install ..."]
   J --> L["Restore encrypted secrets if needed<br/>mac-sync secrets restore --from old-mbp"]
-  H --> M["Check hourly automation<br/>mac-sync status"]
+  H --> M["Check sync status<br/>mac-sync status"]
   K --> M
   L --> M
 ```
@@ -65,7 +67,17 @@ Open Mac Sync after Homebrew installation. Its first-run assistant detects an
 existing data checkout, lets you choose an alternate local folder, and clones
 only when you select **Clone mac-sync-data Repository**. A new empty data
 repository is valid; the first sync creates and pushes its initial snapshot.
-It defaults to:
+During a clone, the assistant shows the active destination, an indeterminate
+progress bar, and an elapsed timer.
+
+If the selected location contains a non-Git legacy folder, choose **Back Up
+Legacy Folder and Clone…**. After confirmation, Mac Sync moves the existing
+folder to the next available `.before-mac-sync` backup path and clones into the
+original location. If cloning fails, it restores the original folder when
+possible and otherwise reports the exact backup location. Nothing in the legacy
+folder is deleted.
+
+The data repository defaults to:
 
 ```text
 ~/github/mac-sync-data
@@ -146,7 +158,7 @@ folder selection, start or stop sync, and preview a restore before applying it.
 Sync Selection is initialised from the current machine's `config/sync-paths.txt`;
 saving the selection updates that same tracked file.
 
-When restoring from another Mac, choose **Restore specific paths only** in the
+When restoring from another Mac, choose **Copy specific paths only** in the
 app to copy just the selected snapshot roots. This deliberately skips the
 package, editor, repository, and secrets restore hints, which remain part of a
 normal full restore.
@@ -218,8 +230,9 @@ Check status after the first run:
 mac-sync status
 ```
 
-The status output shows the `mac-sync` version SHA, local repo, machines repo,
-last sync result, storage totals, warnings, errors, remote repo, and commit.
+The status output shows the `mac-sync` version SHA, data repository, last sync
+result, storage totals, warnings, errors, remote repo, and commit. Explicit
+legacy CLI mode reports its separate local and machines repositories.
 
 ## Automatic Sync
 
@@ -258,11 +271,20 @@ The SwiftUI app presents these records as uploads, downloads, new or updated
 files, and skipped items. Preview runs and decrypted secret contents are never
 recorded there.
 
+Warnings and errors from completed runs also feed the local **Manual Triage**
+queue under `status/issues/`. Scheduled and background syncs continue while
+items are open. The Overview shows an open item in the Manual Triage card and
+does not repeat the same message under Latest warnings and errors. Acknowledging
+an item clears its Dock badge count; resolving it keeps the decision in the
+local record. Triage records are never synced.
+
 ## Restore
 
 Use restore when setting up a new Mac or copying a snapshot from another Mac.
 
-Install the Homebrew package and clone the data repository first:
+Install the Homebrew package, then open Mac Sync and let the first-run assistant
+choose or clone the data repository. For a terminal-only setup, clone it
+manually:
 
 ```sh
 brew tap stephenlclarke/tap
@@ -384,8 +406,8 @@ mac-sync secrets restore --from old-mbp --force
 
 For a replacement Mac, the usual order is:
 
-1. Clone `mac-sync-data`.
-2. Install the Homebrew package.
+1. Install the Homebrew package.
+2. Open Mac Sync and use first-run setup to choose or clone `mac-sync-data`.
 3. Choose an app-managed schedule or start the Homebrew service when this Mac
    is ready for scheduled syncs.
 4. Run `mac-sync restore --list-machines` and pick the old Mac snapshot.
@@ -454,16 +476,30 @@ make package-release
 
 `make ci` runs Swift unit tests and every shell regression against
 coverage-instrumented executables, writes `coverage.lcov` and the
-Sonar-compatible `coverage.xml`, and enforces at least 80% line coverage across
-the Swift core. It also runs CLI smoke checks and repository lint checks.
+Sonar-compatible `coverage.xml`, and enforces at least 85% line coverage across
+`MacSyncCore.swift` and `Support.swift`. It also runs CLI smoke checks and
+repository lint checks. SonarCloud scans all maintained source for
+static-analysis findings and applies coverage only to those two instrumented
+core files.
 
-Pushes to `main`, `release`, and `release-*` build and smoke-test prebuilt assets.
-Publishing to `stephenlclarke/homebrew-tap` requires the repository secret
-`HOMEBREW_TAP_TOKEN`; the workflow fails when it is absent, updates the formula,
-then installs and tests that formula from the canonical tap. Formula changes can
-also be checked locally with:
+Every successful `main` CI run queues a Current build after CodeQL passes for
+the same commit. Current uses the movable `current` tag, a commit-addressed
+archive, and the opt-in `mac-sync-current` Homebrew formula. Stable releases use
+immutable semantic tags, a fixed archive name, and the default `mac-sync`
+formula. Publishing to `stephenlclarke/homebrew-tap` requires the repository
+secret `HOMEBREW_TAP_TOKEN`; the workflow fails when it is absent, updates the
+appropriate formula, then installs and tests it from the canonical tap.
+
+The app bundle in these Homebrew archives is not Developer ID signed or
+notarised. The release validator records that state and still verifies archive
+layout, executables, plist version/build values, provenance, and checksums.
+
+Only Current and the latest stable release retain binary assets. Older release
+records and tags remain available, but their assets are removed after each
+successful publication. See [RELEASES.md](RELEASES.md) for the release and
+rollback procedure. Formula fixtures can be rendered and checked locally with:
 
 ```sh
-ruby -c Formula/mac-sync.rb
-brew style Formula/mac-sync.rb
+make check
+python3 Tools/release/update-homebrew-formula.py --help
 ```

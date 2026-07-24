@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - release
-      - "release-*"
   pull_request:
     branches:
       - main
@@ -72,19 +70,6 @@ jobs:
         run: make ci
         working-directory: mac-sync
 
-      - name: Run release branch validation
-        if: >
-          github.event_name == 'push' &&
-          (github.ref == 'refs/heads/release' ||
-           startsWith(github.ref, 'refs/heads/release-'))
-        timeout-minutes: 30
-        shell: bash
-        working-directory: mac-sync
-        run: |
-          set -euo pipefail
-          ruby -c Formula/mac-sync.rb
-          make package-release MAC_SYNC_ARCHIVE=mac-sync-release-arm64.tar.gz
-
       - name: Check SonarQube token
         id: sonar-token
         if: >
@@ -99,6 +84,9 @@ jobs:
           set -euo pipefail
           if [[ -n "${SONAR_TOKEN:-}" ]]; then
             printf 'available=true\n' >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" && "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            printf 'SONAR_TOKEN is required for release-eligible main builds.\n' >&2
+            exit 1
           else
             printf 'available=false\n' >> "$GITHUB_OUTPUT"
             printf '::notice title=SonarQube skipped::SONAR_TOKEN is not configured; skipping SonarQube scan.\n'

@@ -224,11 +224,11 @@ final class SyncRepositoryTests: XCTestCase {
             action: .restore,
             sourceMachine: "peer",
             result: .success,
-            startedAt: "2026-07-23 10:00:00 BST",
-            finishedAt: "2026-07-23 10:00:02 BST",
-            durationSeconds: 2,
-            warningCount: 0,
-            errorCount: 0,
+            timing: SyncHistoryTiming(
+                startedAt: "2026-07-23 10:00:00 BST",
+                finishedAt: "2026-07-23 10:00:02 BST",
+                durationSeconds: 2
+            ),
             entries: [
                 SyncHistoryEntry(
                     id: "entry-1",
@@ -239,8 +239,12 @@ final class SyncRepositoryTests: XCTestCase {
                     destination: "/home/.zshrc"
                 ),
             ],
-            warnings: [],
-            errors: []
+            diagnostics: SyncHistoryDiagnostics(
+                warningCount: 0,
+                errorCount: 0,
+                warnings: [],
+                errors: []
+            )
         )
         let historyFile = fixture.status.appendingPathComponent("history/local/0000000000001-run-1.json")
         try fileManager.createDirectory(at: historyFile.deletingLastPathComponent(), withIntermediateDirectories: true)

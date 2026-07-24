@@ -989,7 +989,9 @@ private struct RestoreSheet: View {
             Button("Replace with \(machine.name) Snapshot", role: .destructive) {
                 copy(force: true)
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                showConflictDecision = false
+            }
         } message: {
             Text(conflictDecisionExplanation)
         }

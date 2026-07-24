@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - release
-      - "release-*"
   pull_request:
     branches:
       - main
@@ -30,22 +28,40 @@ jobs:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
 
-      - name: Validate Ruby syntax
+      - name: Render formula fixtures
         shell: bash
         run: |
           set -euo pipefail
-          ruby -c Formula/mac-sync.rb
+          mkdir -p Formula
+          python3 Tools/release/update-homebrew-formula.py \
+            --formula Formula/mac-sync.rb \
+            --template Tools/release/mac-sync.rb.in \
+            --formula-class MacSync \
+            --formula-name mac-sync \
+            --url https://example.invalid/mac-sync-release-arm64.tar.gz \
+            --version 0.1.0 \
+            --asset mac-sync-release-arm64.tar.gz \
+            --label stable \
+            --sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --conflicts-with mac-sync-current
+          python3 Tools/release/update-homebrew-formula.py \
+            --formula Formula/mac-sync-current.rb \
+            --template Tools/release/mac-sync.rb.in \
+            --formula-class MacSyncCurrent \
+            --formula-name mac-sync-current \
+            --url https://example.invalid/mac-sync-current-0123456789ab-arm64.tar.gz \
+            --version current.1.0123456789ab \
+            --asset mac-sync-current-0123456789ab-arm64.tar.gz \
+            --label current \
+            --sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            --conflicts-with mac-sync
 
-      - name: Validate Homebrew style
+      - name: Validate formulae
         shell: bash
         run: |
           set -euo pipefail
-          brew style Formula/mac-sync.rb
-
-      - name: Inspect formula
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew tap stephenlclarke/mac-sync "${GITHUB_WORKSPACE}"
-          brew trust --tap stephenlclarke/mac-sync
-          brew info --formula stephenlclarke/mac-sync/mac-sync
+          for formula in Formula/*.rb; do
+            ruby -c "$formula"
+            brew style "$formula"
+            brew info --formula "$formula"
+          done
