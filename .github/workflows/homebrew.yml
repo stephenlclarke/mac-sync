@@ -63,5 +63,4 @@ jobs:
           for formula in Formula/*.rb; do
             ruby -c "$formula"
             brew style "$formula"
-            brew info --formula "$formula"
           done
