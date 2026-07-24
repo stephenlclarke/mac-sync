@@ -98,7 +98,7 @@ case "$mode" in
       exit 1
     fi
     if ! git ls-remote --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
-      git tag "$tag" "$commit"
+      git tag --no-sign "$tag" "$commit"
       git push origin "refs/tags/${tag}"
     fi
     if release_exists; then
@@ -114,7 +114,7 @@ case "$mode" in
       printf 'mutable publication is restricted to the current tag\n' >&2
       exit 1
     fi
-    git tag --force "$tag" "$commit"
+    git tag --force --no-sign "$tag" "$commit"
     git push --force origin "refs/tags/${tag}"
     if release_exists; then
       gh release delete "$tag" --repo "$GH_REPO" --yes

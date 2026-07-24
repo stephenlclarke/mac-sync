@@ -27,6 +27,11 @@ def write_executable(path: Path, text: str) -> None:
 
 
 class PublishGitHubReleaseTests(unittest.TestCase):
+    def test_current_tag_operations_are_explicitly_unsigned(self) -> None:
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('git tag --no-sign "$tag" "$commit"', script)
+        self.assertIn('git tag --force --no-sign "$tag" "$commit"', script)
+
     def test_current_stage_handles_empty_latest_option_on_macos_bash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             workspace = Path(temporary_directory)
