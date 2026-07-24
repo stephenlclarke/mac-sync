@@ -81,6 +81,37 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertNil(overview.status.currentLocalChanges)
     }
 
+    func testClearsStaleStatusAndHistoryForAConfigOnlyFreshCheckout() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let repository = SyncRepository(environment: fixture.environment)
+        try fileManager.removeItem(at: fixture.data.appendingPathComponent("machines/local/home"))
+        try write(".zshrc\n", to: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt"))
+        try write("result=success\n", to: fixture.status.appendingPathComponent("local.env"))
+        try write("old warning\n", to: fixture.status.appendingPathComponent("local.warnings.log"))
+        try write("old error\n", to: fixture.status.appendingPathComponent("local.errors.log"))
+        try write(" M machines/local/home/.zshrc\n", to: fixture.status.appendingPathComponent("local.local-changes.log"))
+        try write("previous run\n", to: fixture.status.appendingPathComponent("history/local/old-run.json"))
+
+        XCTAssertTrue(try repository.clearStaleLocalStatusWhenSnapshotIsMissing())
+
+        XCTAssertEqual(repository.load().status, .empty)
+        XCTAssertTrue(repository.load().history.isEmpty)
+        XCTAssertFalse(fileManager.fileExists(atPath: fixture.status.appendingPathComponent("local.env").path))
+        XCTAssertFalse(fileManager.fileExists(atPath: fixture.status.appendingPathComponent("history/local").path))
+    }
+
+    func testPreservesStatusWhenTheCurrentSnapshotExists() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let repository = SyncRepository(environment: fixture.environment)
+        try write("current shell\n", to: fixture.data.appendingPathComponent("machines/local/home/.zshrc"))
+        try write("result=success\n", to: fixture.status.appendingPathComponent("local.env"))
+
+        XCTAssertFalse(try repository.clearStaleLocalStatusWhenSnapshotIsMissing())
+        XCTAssertEqual(repository.load().status.result, .success)
+    }
+
     func testSeparatesCurrentSnapshotChangesFromHistoricalWarning() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
