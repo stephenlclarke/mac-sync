@@ -100,8 +100,11 @@ read the same locations.
 Use **Settings → Automatic sync** in Mac Sync to run at one or more chosen
 times on specific days, choose a preset interval, or enter a custom interval from
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
-same local configuration as the CLI. If you use the app-managed schedule, stop
-the optional Homebrew service first so there is only one automatic sync job:
+same local configuration as the CLI. While the schedule is enabled, Mac Sync
+also opens when you sign in so its Dock and menu-bar controls remain available.
+Disabling automatic sync removes that launch-at-login registration. If you use
+the app-managed schedule, stop the optional Homebrew service first so there is
+only one automatic sync job:
 
 ```sh
 brew services stop mac-sync
@@ -167,11 +170,11 @@ there is no separate sync implementation or additional state store.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac
-  Sync keeps the schedule local and never stores credentials in the launch
-  agent.
+  Sync keeps the schedule local, opens the app at login while the schedule is
+  enabled, and never stores credentials in the launch agents.
 
 The menu-bar item gives quick access to the dashboard, current status, sync,
-stop, refresh, and repository setup actions. The app's settings view shows the
+stop, refresh, About, and repository setup actions. The app's settings view shows the
 active repository and status paths, lets you re-run local setup, and includes a
 non-interactive GitHub read/write check. It never stores a GitHub token: the
 check uses the Mac's existing Git authentication and redacts credentials from

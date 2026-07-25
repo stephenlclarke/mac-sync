@@ -142,7 +142,7 @@ struct SettingsView: View {
                     .disabled(store.syncScheduleStatus.state == .disabled)
                 }
 
-                Text("This creates a per-user Mac Sync launchd agent. If you have started the Homebrew mac-sync service, stop it first so there is only one automatic sync schedule.")
+                Text("This creates a per-user Mac Sync launchd agent and opens the app when you sign in while the schedule is enabled. If you have started the Homebrew mac-sync service, stop it first so there is only one automatic sync schedule.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

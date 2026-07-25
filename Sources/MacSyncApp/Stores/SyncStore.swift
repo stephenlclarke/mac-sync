@@ -60,14 +60,26 @@ final class SyncStore: ObservableObject {
         repositoryInspections = inspections
         gitHubReports = setupService.initialGitHubReports(for: inspections)
         isSetupComplete = inspections.allSatisfy(\.isReady)
-        syncScheduleStatus = SyncScheduleManager(
+        let scheduleManager = SyncScheduleManager(
             configuration: initialOverview.configuration,
             executableURL: MacSyncCommandLocator.scheduledExecutableURL(environment: appEnvironment),
+            applicationURL: MacSyncCommandLocator.scheduledApplicationURL(environment: appEnvironment),
             environment: appEnvironment
-        ).status()
+        )
+        let initialScheduleStatus = scheduleManager.status()
+        var scheduleMigrationError: String?
+        if initialScheduleStatus.schedule != nil {
+            do {
+                try scheduleManager.ensureApplicationLaunchAgent()
+            } catch {
+                scheduleMigrationError = error.localizedDescription
+            }
+        }
+        syncScheduleStatus = initialScheduleStatus
         issueRepository = initialIssueRepository
         syncIssues = initialIssueRepository.issues(for: initialOverview)
         requestedNavigation = nil
+        errorMessage = scheduleMigrationError
         updateDockBadge()
     }
 
@@ -458,6 +470,7 @@ final class SyncStore: ObservableObject {
         SyncScheduleManager(
             configuration: overview.configuration,
             executableURL: MacSyncCommandLocator.scheduledExecutableURL(environment: commandEnvironment),
+            applicationURL: MacSyncCommandLocator.scheduledApplicationURL(environment: commandEnvironment),
             environment: commandEnvironment
         )
     }

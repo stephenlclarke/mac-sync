@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+enum MacSyncAboutPanel {
     private static let aboutCreditsText = """
     Licensed under the GNU Affero General Public License v3.0 or later
     (AGPL-3.0-or-later).
@@ -26,16 +27,18 @@ final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    static func show() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .credits: aboutCredits,
+        ])
+    }
+}
+
+final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    @MainActor
-    func showAboutPanel() {
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .credits: Self.aboutCredits,
-        ])
     }
 }
 
@@ -58,7 +61,7 @@ struct MacSyncDesktopApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Mac Sync") {
-                    appDelegate.showAboutPanel()
+                    MacSyncAboutPanel.show()
                 }
             }
 

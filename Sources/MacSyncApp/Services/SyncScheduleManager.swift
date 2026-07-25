@@ -79,6 +79,7 @@ struct SyncScheduleStatus: Equatable {
 enum SyncScheduleError: LocalizedError, Equatable {
     case invalidSchedule
     case missingExecutable
+    case missingApplication
     case launchdUnavailable
 
     var errorDescription: String? {
@@ -87,6 +88,8 @@ enum SyncScheduleError: LocalizedError, Equatable {
             "Choose a valid automatic sync interval, or at least one day-and-time entry."
         case .missingExecutable:
             "The mac-sync command is unavailable. Reinstall the app before scheduling automatic sync."
+        case .missingApplication:
+            "The Mac Sync app is unavailable. Reinstall it before scheduling automatic sync."
         case .launchdUnavailable:
             "macOS could not install the automatic sync schedule. Try again after signing in to this Mac."
         }
@@ -109,11 +112,13 @@ struct SystemLaunchdCommandRunner: LaunchdCommandRunning {
 /// optional alternative and is deliberately not changed by this manager.
 struct SyncScheduleManager {
     static let label = "tools.xyzzy.mac-sync"
+    static let applicationLabel = "\(label).app"
     static let minimumIntervalMinutes = 15
     static let maximumIntervalMinutes = 31 * 24 * 60
 
     private let configuration: SyncConfiguration
     private let executableURL: URL?
+    private let applicationURL: URL?
     private let environment: [String: String]
     private let userID: uid_t
     private let fileManager: FileManager
@@ -122,13 +127,15 @@ struct SyncScheduleManager {
     init(
         configuration: SyncConfiguration,
         executableURL: URL?,
+        applicationURL: URL?,
         environment: [String: String],
         userID: uid_t = getuid(),
         fileManager: FileManager = .default,
-        runner: (any LaunchdCommandRunning)? = nil
+        runner: (any LaunchdCommandRunning)? = nil,
     ) {
         self.configuration = configuration
         self.executableURL = executableURL
+        self.applicationURL = applicationURL
         self.environment = environment
         self.userID = userID
         self.fileManager = fileManager
@@ -139,6 +146,12 @@ struct SyncScheduleManager {
         URL(fileURLWithPath: configuration.homeDirectory)
             .appendingPathComponent("Library/LaunchAgents")
             .appendingPathComponent("\(Self.label).plist")
+    }
+
+    var applicationAgentURL: URL {
+        URL(fileURLWithPath: configuration.homeDirectory)
+            .appendingPathComponent("Library/LaunchAgents")
+            .appendingPathComponent("\(Self.applicationLabel).plist")
     }
 
     func status() -> SyncScheduleStatus {
@@ -182,16 +195,19 @@ struct SyncScheduleManager {
         // bootout is deliberately best-effort: the agent may be configured on
         // disk but not yet loaded, which is normal for a first-time schedule.
         _ = runner.run(arguments: ["bootout", launchdDomain, agentURL.path])
+        _ = runner.run(arguments: ["bootout", launchdDomain, applicationAgentURL.path])
 
         guard let schedule else {
-            if fileManager.fileExists(atPath: agentURL.path) {
-                try fileManager.removeItem(at: agentURL)
-            }
+            try removeLaunchAgent(at: agentURL)
+            try removeLaunchAgent(at: applicationAgentURL)
             return status()
         }
 
         guard let executableURL else {
             throw SyncScheduleError.missingExecutable
+        }
+        guard let applicationURL else {
+            throw SyncScheduleError.missingApplication
         }
 
         let logsDirectory = URL(fileURLWithPath: configuration.homeDirectory)
@@ -208,12 +224,37 @@ struct SyncScheduleManager {
             options: 0
         )
         try data.write(to: agentURL, options: .atomic)
+        try writeApplicationLaunchAgent(applicationURL: applicationURL)
 
         guard runner.run(arguments: ["bootstrap", launchdDomain, agentURL.path]).status == 0 else {
-            try? fileManager.removeItem(at: agentURL)
+            try? removeLaunchAgent(at: agentURL)
+            try? removeLaunchAgent(at: applicationAgentURL)
+            throw SyncScheduleError.launchdUnavailable
+        }
+        guard runner.run(arguments: ["bootstrap", launchdDomain, applicationAgentURL.path]).status == 0 else {
+            _ = runner.run(arguments: ["bootout", launchdDomain, agentURL.path])
+            try? removeLaunchAgent(at: agentURL)
+            try? removeLaunchAgent(at: applicationAgentURL)
             throw SyncScheduleError.launchdUnavailable
         }
         return status()
+    }
+
+    /// Adds launch-at-login behavior for schedules created by versions that
+    /// installed only the background sync agent.
+    func ensureApplicationLaunchAgent() throws {
+        guard status().schedule != nil else { return }
+        guard !fileManager.fileExists(atPath: applicationAgentURL.path) else { return }
+        guard let applicationURL else {
+            throw SyncScheduleError.missingApplication
+        }
+
+        _ = runner.run(arguments: ["bootout", launchdDomain, applicationAgentURL.path])
+        try writeApplicationLaunchAgent(applicationURL: applicationURL)
+        guard runner.run(arguments: ["bootstrap", launchdDomain, applicationAgentURL.path]).status == 0 else {
+            try? removeLaunchAgent(at: applicationAgentURL)
+            throw SyncScheduleError.launchdUnavailable
+        }
     }
 
     static func description(for schedule: SyncSchedule) -> String {
@@ -374,5 +415,26 @@ struct SyncScheduleManager {
             "MAC_SYNC_STATUS_DIR": configuration.statusDirectory,
             "PATH": preparedEnvironment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
+    }
+
+    private func writeApplicationLaunchAgent(applicationURL: URL) throws {
+        let values: [String: Any] = [
+            "Label": Self.applicationLabel,
+            "ProgramArguments": ["/usr/bin/open", "-g", applicationURL.path],
+            "ProcessType": "Interactive",
+            "RunAtLoad": true,
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: values,
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: applicationAgentURL, options: .atomic)
+    }
+
+    private func removeLaunchAgent(at url: URL) throws {
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
     }
 }
