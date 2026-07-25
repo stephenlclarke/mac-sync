@@ -204,7 +204,7 @@ jobs:
             conflicts_with="mac-sync"
             label="current"
             title="Current build"
-            app_version="0.1.0"
+            app_version="1.0.0"
           fi
           {
             printf 'app_version=%s\n' "$app_version"
