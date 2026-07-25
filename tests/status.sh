@@ -111,6 +111,8 @@ git -C "$TEST_REPO" add config/sync-paths.txt config/excludes.txt
 git -C "$TEST_REPO" commit -m "test local repo" >/dev/null
 
 mkdir -p "$TEST_MACHINES_REPO/machines/target/home"
+mkdir -p "$TEST_MACHINES_REPO/machines/_shared/config"
+printf 'age1sharedrecipient\n' >"$TEST_MACHINES_REPO/machines/_shared/config/age-recipients.txt"
 printf 'stale repo bash\n' >"$TEST_MACHINES_REPO/machines/target/home/.bashrc"
 touch -t 202701010000 "$TEST_MACHINES_REPO/machines/target/home/.bashrc"
 printf 'home bash\n' >"$TEST_HOME/.bashrc"
@@ -123,6 +125,10 @@ assert_file_contents "$TEST_MACHINES_REPO/machines/target/home/.config/tool/sett
 assert_stdout_contains "new snapshot file:"
 assert_stdout_contains "updated snapshot file:"
 assert_stdout_lacks "sync directory:"
+[[ "$(git -C "$TEST_MACHINES_REPO" show HEAD:machines/_shared/config/age-recipients.txt)" = "age1sharedrecipient" ]] \
+  || fail "shared configuration was not committed with the machine snapshot"
+[[ -z "$(git -C "$TEST_MACHINES_REPO" status --porcelain -- machines/_shared)" ]] \
+  || fail "shared configuration remained dirty after sync"
 [[ -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.env" ]] \
   || fail "missing local status file"
 HISTORY_DIR="$TEST_HOME/Library/Application Support/mac-sync/status/history/target"

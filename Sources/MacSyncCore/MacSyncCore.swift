@@ -662,8 +662,24 @@ public final class MacSyncApp {
         runner.run("git", ["-C", repo ?? config.repoDir, "status", "--porcelain"]).stdout.trimmed.isEmpty
     }
 
-    private func repoPathClean(_ repo: String, _ pathspec: String) -> Bool {
-        runner.run("git", ["-C", repo, "status", "--porcelain", "--", pathspec]).stdout.trimmed.isEmpty
+    private func repoPathsClean(_ repo: String, _ pathspecs: [String]) -> Bool {
+        runner.run("git", ["-C", repo, "status", "--porcelain", "--"] + pathspecs).stdout.trimmed.isEmpty
+    }
+
+    private func managedSnapshotPaths() -> [String] {
+        let machinePath = "machines/\(config.machineName)"
+        let sharedPath = "machines/_shared"
+        let sharedFiles = runner.run(
+            "git",
+            [
+                "-C", config.machinesRepoDir,
+                "ls-files", "--cached", "--others", "--exclude-standard",
+                "--", sharedPath,
+            ]
+        )
+        return sharedFiles.stdout.trimmed.isEmpty
+            ? [machinePath]
+            : [machinePath, sharedPath]
     }
 
     private func repoCommitVersion(_ repo: String? = nil) -> String {
@@ -2446,11 +2462,11 @@ public final class MacSyncApp {
             warning("no origin remote configured for machines repo; skipping git pull")
             return
         }
-        let machinePath = "machines/\(config.machineName)"
-        guard repoPathClean(config.machinesRepoDir, machinePath) else {
+        let snapshotPaths = managedSnapshotPaths()
+        guard repoPathsClean(config.machinesRepoDir, snapshotPaths) else {
             currentMachineLocalChanges = repoLocalChanges(
                 repo: config.machinesRepoDir,
-                restrictingTo: machinePath
+                restrictingTo: snapshotPaths
             )
             warning("current machine snapshot has local changes; skipping pre-operation git pull")
             return
@@ -2515,16 +2531,28 @@ public final class MacSyncApp {
             progressPending("dry run enabled; skipping git commit and push")
             return
         }
-        guard runWithProgressCommand("checking machine snapshot changes", "git", ["-C", config.machinesRepoDir, "add", "machines/\(config.machineName)"]) else {
+        let snapshotPaths = managedSnapshotPaths()
+        guard runWithProgressCommand(
+            "checking machine snapshot changes",
+            "git",
+            ["-C", config.machinesRepoDir, "add", "--all", "--"] + snapshotPaths
+        ) else {
             printProgressCommandOutput()
             throw ExitError(code: 1)
         }
         var committed = false
-        if runner.run("git", ["-C", config.machinesRepoDir, "diff", "--cached", "--quiet", "--", "machines/\(config.machineName)"]).status == 0 {
+        if runner.run(
+            "git",
+            ["-C", config.machinesRepoDir, "diff", "--cached", "--quiet", "--"] + snapshotPaths
+        ).status == 0 {
             progressDone("no machine snapshot changes to commit")
         } else {
             let message = "chore(\(config.machineName)): sync machine state"
-            guard runWithProgressCommand("committing machine snapshot changes", "git", ["-C", config.machinesRepoDir, "commit", "-m", message, "--", "machines/\(config.machineName)"]) else {
+            guard runWithProgressCommand(
+                "committing machine snapshot changes",
+                "git",
+                ["-C", config.machinesRepoDir, "commit", "-m", message, "--"] + snapshotPaths
+            ) else {
                 printProgressCommandOutput()
                 throw ExitError(code: 1)
             }
@@ -2930,10 +2958,10 @@ public final class MacSyncApp {
         }
     }
 
-    private func repoLocalChanges(repo: String, restrictingTo path: String? = nil) -> [String] {
+    private func repoLocalChanges(repo: String, restrictingTo paths: [String]? = nil) -> [String] {
         var arguments = ["-C", repo, "status", "--short", "--untracked-files=all"]
-        if let path {
-            arguments += ["--", path]
+        if let paths {
+            arguments += ["--"] + paths
         }
         return runner.run("git", arguments).stdout.splitLines().filter { !$0.isEmpty }
     }

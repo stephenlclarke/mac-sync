@@ -125,11 +125,89 @@ final class SyncRepositoryTests: XCTestCase {
             to: fixture.status.appendingPathComponent("local.warnings.log")
         )
         try write("shell", to: fixture.data.appendingPathComponent("machines/local/home/.zshrc"))
+        try write(
+            "age1sharedrecipient",
+            to: fixture.data.appendingPathComponent("machines/_shared/config/age-recipients.txt")
+        )
 
         let overview = SyncRepository(environment: fixture.environment).load()
 
         XCTAssertEqual(overview.status.recordedLocalChanges, [])
-        XCTAssertEqual(overview.status.currentLocalChanges, ["?? machines/local/home/.zshrc"])
+        XCTAssertEqual(
+            overview.status.currentLocalChanges,
+            [
+                "?? machines/_shared/config/age-recipients.txt",
+                "?? machines/local/home/.zshrc",
+            ]
+        )
+    }
+
+    func testIgnoresStatusRecordedForDifferentDataRepository() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = ProcessRunner()
+        XCTAssertEqual(runner.run("git", ["-C", fixture.data.path, "init"]).status, 0)
+        XCTAssertEqual(
+            runner.run(
+                "git",
+                [
+                    "-C", fixture.data.path,
+                    "remote", "add", "origin",
+                    "https://github.com/stephenlclarke/mac-sync-data.git",
+                ]
+            ).status,
+            0
+        )
+        try write(
+            """
+            result=success
+            finished_at=2026-06-28 22:15:18 BST
+            warning_count=1
+            remote_repo=git@github.com:stephenlclarke/dot-files.git
+            """,
+            to: fixture.status.appendingPathComponent("local.env")
+        )
+        try write(
+            "WARN: local repo has local changes; skipping pre-operation git pull\n",
+            to: fixture.status.appendingPathComponent("local.warnings.log")
+        )
+
+        let overview = SyncRepository(environment: fixture.environment).load()
+
+        XCTAssertEqual(overview.status, .empty)
+    }
+
+    func testLoadsStatusWhenRepositoryRemoteUsesDifferentGitHubTransport() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = ProcessRunner()
+        XCTAssertEqual(runner.run("git", ["-C", fixture.data.path, "init"]).status, 0)
+        XCTAssertEqual(
+            runner.run(
+                "git",
+                [
+                    "-C", fixture.data.path,
+                    "remote", "add", "origin",
+                    "https://github.com/stephenlclarke/mac-sync-data.git",
+                ]
+            ).status,
+            0
+        )
+        try write(
+            """
+            result=success
+            remote_repo=git@github.com:stephenlclarke/mac-sync-data.git
+            """,
+            to: fixture.status.appendingPathComponent("local.env")
+        )
+
+        let overview = SyncRepository(environment: fixture.environment).load()
+
+        XCTAssertEqual(overview.status.result, .success)
+        XCTAssertEqual(
+            overview.status.remoteRepository,
+            "git@github.com:stephenlclarke/mac-sync-data.git"
+        )
     }
 
     func testSaveConfiguredPathsNormalizesAndPreservesOrder() throws {

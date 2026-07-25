@@ -253,6 +253,9 @@ struct SyncRepository {
         let prefix = "\(configuration.statusDirectory)/\(configuration.machineName)"
         let values = keyValueFile("\(prefix).env")
         guard !values.isEmpty else { return .empty }
+        guard statusBelongsToConfiguredRepository(values, configuration: configuration) else {
+            return .empty
+        }
 
         let result: SyncResult = switch values["result"] {
         case "success":
@@ -291,6 +294,34 @@ struct SyncRepository {
 
     private func isCurrentMachineLocalChangesWarning(_ message: String) -> Bool {
         message.contains("current machine snapshot has local changes")
+            || message.contains("local repo has local changes")
+    }
+
+    /// Status files predate the native app and can refer to a legacy data
+    /// repository. Keep them for recovery, but do not present their results
+    /// against a different configured checkout.
+    private func statusBelongsToConfiguredRepository(
+        _ values: [String: String],
+        configuration: SyncConfiguration
+    ) -> Bool {
+        guard let recordedRemote = values["remote_repo"], !recordedRemote.isEmpty else {
+            return true
+        }
+        let currentRemoteResult = ProcessRunner(environment: environment).run(
+            "git",
+            ["-C", configuration.dataRepository, "remote", "get-url", "origin"]
+        )
+        let currentRemote = currentRemoteResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard currentRemoteResult.status == 0, !currentRemote.isEmpty else {
+            return true
+        }
+
+        if let recorded = MacSyncPaths.normalizeGitHubRemoteURL(recordedRemote),
+           let current = MacSyncPaths.normalizeGitHubRemoteURL(currentRemote)
+        {
+            return recorded.caseInsensitiveCompare(current) == .orderedSame
+        }
+        return recordedRemote == currentRemote
     }
 
     /// Reads the present working-tree state for a historical pull warning. The
@@ -302,7 +333,7 @@ struct SyncRepository {
             [
                 "-C", configuration.dataRepository,
                 "status", "--short", "--untracked-files=all",
-                "--", "machines/\(configuration.machineName)",
+                "--", "machines/\(configuration.machineName)", "machines/_shared",
             ]
         )
         guard result.status == 0 else { return nil }

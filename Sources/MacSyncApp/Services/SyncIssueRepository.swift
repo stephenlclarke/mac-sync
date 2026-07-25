@@ -202,6 +202,7 @@ struct SyncIssueRepository {
 
     private func isLocalChangesWarning(_ message: String) -> Bool {
         message.contains("current machine snapshot has local changes")
+            || message.contains("local repo has local changes")
     }
 
     private func localChangesDetail(for message: String, overview: SyncOverview) -> String? {

@@ -89,6 +89,23 @@ final class SyncIssueRepositoryTests: XCTestCase {
         XCTAssertTrue(SyncIssueRepository(configuration: overview.configuration).issues(for: overview).isEmpty)
     }
 
+    func testResolvedLegacyLocalRepositoryWarningDoesNotCreateManualTriageItem() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let warning = "WARN: local repo has local changes; skipping pre-operation git pull"
+        let overview = makeOverview(
+            fixture: fixture,
+            status: makeStatus(
+                warnings: [warning],
+                finishedAt: "2026-06-28 22:15:18 BST",
+                currentLocalChanges: []
+            ),
+            history: []
+        )
+
+        XCTAssertTrue(SyncIssueRepository(configuration: overview.configuration).issues(for: overview).isEmpty)
+    }
+
     private func makeOverview(
         fixture: Fixture,
         status: SyncStatus? = nil,
