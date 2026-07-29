@@ -21,9 +21,23 @@ quality gate. Release packaging then checks the checksum, archive paths,
 executables, CLI smoke tests, app plist version/build values, icon, and
 `build-info.json` provenance.
 
-The Homebrew archive is not Developer ID signed or notarised. The workflow
-reports that boundary explicitly and does not present the archive as a
-notarised direct-download application.
+The workflow signs an archive with Developer ID when the repository secrets
+`MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12` (a base64-encoded `.p12`) and
+`MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD` are configured. If either secret
+is absent, it publishes the archive unsigned and reports that fact in the
+release notes. The workflow validates the certificate authority when signing is
+enabled.
+
+Developer ID signing does not notarise an app. Notarisation is not currently
+part of the release workflow, so no archive is presented as a notarised
+direct-download application.
+
+To enable signing, export the Developer ID Application certificate and private
+key from Keychain Access as a password-protected `.p12`. Store its base64 value
+as the `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12` repository secret and its export
+password as `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD`. The workflow imports
+the certificate into an ephemeral runner Keychain and never writes either value
+to the repository or release asset.
 
 ## Current Build
 

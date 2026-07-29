@@ -16,6 +16,10 @@ MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
 MAC_SYNC_LANE ?= $(shell $(PYTHON) -c 'branch = "$(MAC_SYNC_BRANCH)"; print("current" if branch == "main" else "detached" if branch in ("", "HEAD") else "development")')
 MAC_SYNC_COMMIT ?= $(shell git rev-parse HEAD)
+MAC_SYNC_CODESIGN ?= codesign
+MAC_SYNC_CODESIGN_IDENTITY ?=
+MAC_SYNC_CODESIGN_TEAM_ID ?=
+MAC_SYNC_REQUIRE_DEVELOPER_ID ?= 0
 SONAR_QUALITYGATE_WAIT ?= false
 SONAR_SCAN_ATTEMPTS ?= 3
 SWIFT_RUNTIME_RESOURCE_PATH ?= $(shell $(SWIFT) -print-target-info 2>/dev/null | $(PYTHON) -c 'import json, sys; print(json.load(sys.stdin).get("paths", {}).get("runtimeResourcePath", ""))' 2>/dev/null || true)
@@ -33,7 +37,7 @@ MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release app-debug app-built icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
@@ -73,6 +77,59 @@ app-built:
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(MAC_SYNC_BUILD)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	cp "Sources/MacSyncApp/Resources/MacSync.icns" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/MacSync.icns"
 	chmod +x "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
+	$(MAKE) sign-app \
+		MAC_SYNC_APP_BUNDLE="$(MAC_SYNC_APP_BUNDLE)" \
+		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \
+		MAC_SYNC_CODESIGN_IDENTITY="$(MAC_SYNC_CODESIGN_IDENTITY)" \
+		MAC_SYNC_REQUIRE_DEVELOPER_ID="$(MAC_SYNC_REQUIRE_DEVELOPER_ID)"
+
+signing-identities:
+	@identities="$$(security find-identity -v -p codesigning 2>/dev/null | grep 'Developer ID Application:' || true)"; \
+	if [[ -z "$$identities" ]]; then \
+		printf 'No Developer ID Application certificate is available in the active keychains.\n'; \
+		printf 'Create or download one in Xcode using your Apple Developer account, then run this target again.\n'; \
+	else \
+		printf '%s\n' "$$identities"; \
+	fi
+
+sign-app:
+	@test -d "$(MAC_SYNC_APP_BUNDLE)" || { \
+		printf '%s is missing; build the app before signing it\n' "$(MAC_SYNC_APP_BUNDLE)" >&2; \
+		exit 2; \
+	}
+	@identity="$(MAC_SYNC_CODESIGN_IDENTITY)"; \
+	if [[ -z "$$identity" ]]; then \
+		if [[ "$(MAC_SYNC_REQUIRE_DEVELOPER_ID)" == "1" ]]; then \
+			printf 'A Developer ID Application signing identity is required; set MAC_SYNC_CODESIGN_IDENTITY.\n' >&2; \
+			exit 2; \
+		fi; \
+		printf 'MacSync.app is not Developer ID signed; set MAC_SYNC_CODESIGN_IDENTITY to sign a distribution build.\n'; \
+		exit 0; \
+	fi; \
+	if [[ "$$identity" == "-" ]]; then \
+		printf 'Ad hoc signing is not accepted for a Developer ID distribution build.\n' >&2; \
+		exit 2; \
+	fi; \
+	"$(MAC_SYNC_CODESIGN)" --force --sign "$$identity" --options runtime --timestamp "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync"; \
+	"$(MAC_SYNC_CODESIGN)" --force --sign "$$identity" --options runtime --timestamp "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"; \
+	"$(MAC_SYNC_CODESIGN)" --force --sign "$$identity" --options runtime --timestamp "$(MAC_SYNC_APP_BUNDLE)"
+
+verify-signing:
+	@test -d "$(MAC_SYNC_APP_BUNDLE)" || { \
+		printf '%s is missing; build the app before verifying its signature\n' "$(MAC_SYNC_APP_BUNDLE)" >&2; \
+		exit 2; \
+	}
+	@"$(MAC_SYNC_CODESIGN)" --verify --strict --verbose=2 "$(MAC_SYNC_APP_BUNDLE)"
+	@details="$$("$(MAC_SYNC_CODESIGN)" -dvvv "$(MAC_SYNC_APP_BUNDLE)" 2>&1)"; \
+	printf '%s\n' "$$details"; \
+	if [[ "$(MAC_SYNC_REQUIRE_DEVELOPER_ID)" == "1" ]] && ! grep -Fq 'Authority=Developer ID Application:' <<<"$$details"; then \
+		printf 'MacSync.app is not signed with a Developer ID Application certificate.\n' >&2; \
+		exit 1; \
+	fi; \
+	if [[ -n "$(MAC_SYNC_CODESIGN_TEAM_ID)" ]] && ! grep -Fxq "TeamIdentifier=$(MAC_SYNC_CODESIGN_TEAM_ID)" <<<"$$details"; then \
+		printf 'MacSync.app was not signed by the expected Apple Developer team.\n' >&2; \
+		exit 1; \
+	fi
 
 run:
 	$(SWIFT) run $(SWIFT_RESOLVED_FLAGS) mac-sync --help
@@ -222,12 +279,31 @@ package-debug: PACKAGE_BUILD_CONFIGURATION = debug
 package-debug: build
 	$(MAKE) package-built PACKAGE_BUILD_CONFIGURATION="$(PACKAGE_BUILD_CONFIGURATION)"
 
+package-signed:
+	@test -n "$(MAC_SYNC_CODESIGN_IDENTITY)" || { \
+		printf 'Set MAC_SYNC_CODESIGN_IDENTITY to a Developer ID Application certificate before packaging.\n' >&2; \
+		exit 2; \
+	}
+	$(MAKE) package-release \
+		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \
+		MAC_SYNC_CODESIGN_IDENTITY="$(MAC_SYNC_CODESIGN_IDENTITY)" \
+		MAC_SYNC_CODESIGN_TEAM_ID="$(MAC_SYNC_CODESIGN_TEAM_ID)" \
+		MAC_SYNC_REQUIRE_DEVELOPER_ID=1
+	$(MAKE) verify-signing \
+		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \
+		MAC_SYNC_CODESIGN_TEAM_ID="$(MAC_SYNC_CODESIGN_TEAM_ID)" \
+		MAC_SYNC_REQUIRE_DEVELOPER_ID=1
+
 package-built:
 	rm -rf "$(DIST_DIR)"
 	mkdir -p "$(DIST_DIR)/mac-sync/bin" "$(DIST_DIR)/mac-sync/resources"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-sync" "$(DIST_DIR)/mac-sync/bin/mac-sync"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-spinner" "$(DIST_DIR)/mac-sync/bin/mac-spinner"
-	$(MAKE) app-built PACKAGE_BUILD_CONFIGURATION="$(PACKAGE_BUILD_CONFIGURATION)"
+	$(MAKE) app-built \
+		PACKAGE_BUILD_CONFIGURATION="$(PACKAGE_BUILD_CONFIGURATION)" \
+		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \
+		MAC_SYNC_CODESIGN_IDENTITY="$(MAC_SYNC_CODESIGN_IDENTITY)" \
+		MAC_SYNC_REQUIRE_DEVELOPER_ID="$(MAC_SYNC_REQUIRE_DEVELOPER_ID)"
 	$(PYTHON) Tools/release/write-build-info.py \
 		--output "$(DIST_DIR)/mac-sync/resources/build-info.json" \
 		--version "$(MAC_SYNC_VERSION)" \

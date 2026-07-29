@@ -218,6 +218,17 @@ jobs:
             printf 'title=%s\n' "$title"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Configure Developer ID signing
+        id: signing
+        env:
+          MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12 }}
+          MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        shell: bash
+        working-directory: mac-sync
+        run: |
+          set -euo pipefail
+          bash Tools/release/prepare-developer-id-signing.sh "$GITHUB_OUTPUT"
+
       - name: Build release package
         env:
           ASSET: ${{ steps.metadata.outputs.asset }}
@@ -234,7 +245,9 @@ jobs:
             MAC_SYNC_BRANCH="${RELEASE_TAG}" \
             MAC_SYNC_BUILD="${GITHUB_RUN_NUMBER}" \
             MAC_SYNC_COMMIT="${RELEASE_COMMIT}" \
+            MAC_SYNC_CODESIGN_IDENTITY="${{ steps.signing.outputs.identity }}" \
             MAC_SYNC_LANE="${RELEASE_MODE}" \
+            MAC_SYNC_REQUIRE_DEVELOPER_ID="${{ steps.signing.outputs.require_developer_id }}" \
             MAC_SYNC_VERSION="${APP_VERSION}"
 
       - name: Validate release package
@@ -243,6 +256,7 @@ jobs:
           APP_VERSION: ${{ steps.metadata.outputs.app_version }}
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
+          MAC_SYNC_REQUIRE_DEVELOPER_ID: ${{ steps.signing.outputs.require_developer_id }}
         shell: bash
         working-directory: mac-sync
         run: |
@@ -264,6 +278,7 @@ jobs:
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
           RELEASE_TITLE: ${{ steps.metadata.outputs.title }}
+          SIGNING_STATUS: ${{ steps.signing.outputs.status }}
         shell: bash
         working-directory: mac-sync
         run: |
@@ -285,6 +300,11 @@ jobs:
             printf -- '- [CI passed](%s), including the 85%% coverage gate and Sonar quality gate.\n' "$CI_URL"
             printf -- '- [CodeQL passed](%s) for the same commit.\n' "$CODEQL_URL"
             printf -- '- The packaged CLI, spinner, app bundle, plist metadata, provenance, and checksum passed release validation.\n\n'
+            if [[ "$SIGNING_STATUS" == "developer-id-signed" ]]; then
+              printf -- '- The app bundle is Developer ID signed. It is not notarised.\n\n'
+            else
+              printf -- '- The app bundle is not Developer ID signed because no release certificate is configured.\n\n'
+            fi
             printf '## Install\n\n'
             if [[ "$RELEASE_MODE" == "stable" ]]; then
               printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync\n```\n\n'

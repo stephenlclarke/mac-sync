@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -93,6 +94,20 @@ struct ContentView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
+
+                if #available(macOS 14.0, *) {
+                    SettingsLink {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .help("Open Mac Sync Settings")
+                    .accessibilityLabel("Open Mac Sync Settings")
+                } else {
+                    Button(action: openSettings) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .help("Open Mac Sync Settings")
+                    .accessibilityLabel("Open Mac Sync Settings")
+                }
             }
         }
         .alert("Mac Sync", isPresented: Binding(
@@ -150,6 +165,11 @@ struct ContentView: View {
         guard let requested = store.requestedNavigation else { return }
         selection = requested
         store.consumeNavigationRequest()
+    }
+
+    private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
 

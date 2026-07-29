@@ -238,6 +238,41 @@ report is `coverage.xml`.
 SonarCloud scans all maintained source for static-analysis findings and applies
 coverage only to the two instrumented core files.
 
+### Developer ID signing
+
+The source bundle ID is `tools.xyzzy.mac-sync`. A Developer ID Application
+certificate is required for a signed, direct-distribution build; provisioning
+profiles are not used for this kind of macOS signing.
+
+Sign in to Xcode with the Apple Developer account for `stephenlclarke@mac.com`,
+create or download a **Developer ID Application** certificate, and confirm that
+it and its private key are in the login Keychain:
+
+```sh
+make signing-identities
+```
+
+Then build a signed archive. Substitute the identity shown by the command and,
+optionally, the Apple Team ID shown in the certificate name:
+
+```sh
+make package-signed \
+  MAC_SYNC_CODESIGN_IDENTITY='Developer ID Application: Stephen Clarke (TEAMID)' \
+  MAC_SYNC_CODESIGN_TEAM_ID='TEAMID'
+```
+
+`make package-release` remains usable for local development without a
+certificate. It never falls back to ad hoc signing when a Developer ID build is
+explicitly requested. The release workflow signs archives when the repository
+secrets `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12` (base64-encoded `.p12`) and
+`MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD` are configured. Certificate
+material, passwords, Team IDs, and Apple credentials are not stored in this
+repository.
+
+Developer ID signing and Apple notarisation are separate steps. The current
+workflow signs when configured but does not submit archives to the notarisation
+service.
+
 ## Status
 
 Show the current `mac-sync` version SHA, local repo paths, local status files,
