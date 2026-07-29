@@ -132,6 +132,68 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual("mac-sync development build", MacSyncUserInterface.versionDescription(applicationURL: nil))
     }
 
+    func testUserInterfaceVersionHandlesMissingBuildNumber() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let application = root.appendingPathComponent("MacSync.app")
+        try makeMacSyncApplication(at: application, version: "2.3.4", build: "")
+
+        XCTAssertEqual("mac-sync 2.3.4", MacSyncUserInterface.versionDescription(applicationURL: application))
+    }
+
+    func testUserInterfaceOpenLaunchesResolvedApplication() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let application = root.appendingPathComponent("MacSync.app")
+        try makeMacSyncApplication(at: application)
+        var launchedApplication: URL?
+
+        try MacSyncUserInterface.open(applicationURL: application) { resolvedApplication in
+            launchedApplication = resolvedApplication
+            return 0
+        }
+
+        XCTAssertEqual(application, launchedApplication)
+    }
+
+    func testUserInterfaceOpenUsesLaunchServicesForACompleteApplicationBundle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let application = root.appendingPathComponent("MacSync.app")
+        try makeMacSyncApplication(at: application)
+
+        try MacSyncUserInterface.open(environment: ["MAC_SYNC_APPLICATION": application.path])
+    }
+
+    func testUserInterfaceOpenReportsUnavailableAndFailedLaunches() throws {
+        XCTAssertThrowsError(
+            try MacSyncUserInterface.open(applicationURL: nil) { _ in 0 }
+        ) { error in
+            XCTAssertEqual(error.localizedDescription, "Mac Sync UI is not installed.")
+        }
+
+        let application = URL(fileURLWithPath: "/tmp/MacSync.app")
+        XCTAssertThrowsError(
+            try MacSyncUserInterface.open(applicationURL: application) { _ in 7 }
+        ) { error in
+            XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: open exited with status 7")
+        }
+        XCTAssertThrowsError(
+            try MacSyncUserInterface.open(applicationURL: application) { _ in
+                throw NSError(domain: "MacSyncTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "launcher unavailable"])
+            }
+        ) { error in
+            XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: launcher unavailable")
+        }
+        XCTAssertThrowsError(
+            try MacSyncUserInterface.open(applicationURL: application) { _ in
+                throw MacSyncUserInterfaceError.launchFailed("existing launch error")
+            }
+        ) { error in
+            XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: existing launch error")
+        }
+    }
+
     func testUICommandStartsInjectedLauncherWithoutRequiringMachineConfiguration() {
         var didLaunch = false
         let app = MacSyncApp(
@@ -203,11 +265,12 @@ final class MacSyncCoreTests: XCTestCase {
             at: executable.deletingLastPathComponent(),
             withIntermediateDirectories: true,
         )
-        FileManager.default.createFile(atPath: executable.path, contents: Data())
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
 
         let info = [
             "CFBundleIdentifier": "tools.xyzzy.mac-sync",
+            "CFBundleExecutable": "MacSync",
             "CFBundleShortVersionString": version,
             "CFBundleVersion": build,
         ]

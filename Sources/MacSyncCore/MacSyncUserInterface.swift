@@ -69,21 +69,39 @@ public enum MacSyncUserInterface {
     }
 
     public static func open(environment: [String: String] = ProcessInfo.processInfo.environment) throws {
-        guard let applicationURL = applicationURL(environment: environment) else {
+        try open(
+            applicationURL: applicationURL(environment: environment),
+            launcher: launch,
+        )
+    }
+
+    static func open(
+        applicationURL: URL?,
+        launcher: (URL) throws -> Int32,
+    ) throws {
+        guard let applicationURL else {
             throw MacSyncUserInterfaceError.notInstalled
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = [applicationURL.path]
+        let terminationStatus: Int32
         do {
-            try process.run()
+            terminationStatus = try launcher(applicationURL)
+        } catch let error as MacSyncUserInterfaceError {
+            throw error
         } catch {
             throw MacSyncUserInterfaceError.launchFailed(error.localizedDescription)
         }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw MacSyncUserInterfaceError.launchFailed("open exited with status \(process.terminationStatus)")
+        guard terminationStatus == 0 else {
+            throw MacSyncUserInterfaceError.launchFailed("open exited with status \(terminationStatus)")
         }
+    }
+
+    private static func launch(_ applicationURL: URL) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [applicationURL.path]
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 }
