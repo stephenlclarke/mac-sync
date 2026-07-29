@@ -104,6 +104,58 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual(262_144, result.stderr.utf8.count)
     }
 
+    func testUserInterfaceLocatorPrefersTheFirstCompleteApplicationBundle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let current = root.appendingPathComponent("MacSyncCurrent.app")
+        let stable = root.appendingPathComponent("MacSync.app")
+        let incomplete = root.appendingPathComponent("Incomplete.app")
+        try makeMacSyncApplication(at: current)
+        try makeMacSyncApplication(at: stable)
+        try FileManager.default.createDirectory(at: incomplete, withIntermediateDirectories: true)
+
+        let resolved = MacSyncUserInterface.applicationURL(
+            candidates: [incomplete.path, current.path, stable.path],
+            fileManager: .default,
+        )
+
+        XCTAssertEqual(current.path, resolved?.path)
+    }
+
+    func testUserInterfaceVersionReadsApplicationMetadata() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let application = root.appendingPathComponent("MacSync.app")
+        try makeMacSyncApplication(at: application, version: "2.3.4", build: "56")
+
+        XCTAssertEqual("mac-sync 2.3.4 (56)", MacSyncUserInterface.versionDescription(applicationURL: application))
+        XCTAssertEqual("mac-sync development build", MacSyncUserInterface.versionDescription(applicationURL: nil))
+    }
+
+    func testUICommandStartsInjectedLauncherWithoutRequiringMachineConfiguration() {
+        var didLaunch = false
+        let app = MacSyncApp(
+            arguments: ["mac-sync", "ui"],
+            environment: ["MAC_SYNC_MACHINE": ".."],
+            userInterfaceLauncher: { _ in didLaunch = true },
+        )
+
+        XCTAssertEqual(0, app.run())
+        XCTAssertTrue(didLaunch)
+    }
+
+    func testUICommandRejectsOptionsBeforeLaunching() {
+        var didLaunch = false
+        let app = MacSyncApp(
+            arguments: ["mac-sync", "ui", "--unexpected"],
+            environment: ["MAC_SYNC_MACHINE": "target"],
+            userInterfaceLauncher: { _ in didLaunch = true },
+        )
+
+        XCTAssertEqual(2, app.run())
+        XCTAssertFalse(didLaunch)
+    }
+
     func testUserConfigurationPersistsDataRepositoryWithoutCredentials() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -143,5 +195,23 @@ final class MacSyncCoreTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? MacSyncUserConfigurationError, .invalidRepositoryLocation)
         }
+    }
+
+    private func makeMacSyncApplication(at application: URL, version: String = "1.0.0", build: String = "1") throws {
+        let executable = application.appendingPathComponent("Contents/MacOS/MacSync")
+        try FileManager.default.createDirectory(
+            at: executable.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+        )
+        FileManager.default.createFile(atPath: executable.path, contents: Data())
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+        let info = [
+            "CFBundleIdentifier": "tools.xyzzy.mac-sync",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": build,
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: application.appendingPathComponent("Contents/Info.plist"))
     }
 }

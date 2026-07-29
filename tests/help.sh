@@ -10,6 +10,7 @@ TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mac-sync-help.XXXXXX")"
 readonly TMP_ROOT
 readonly TEST_HOME="${TMP_ROOT}/home"
 readonly TEST_REPO="${TMP_ROOT}/repo"
+readonly TEST_APPLICATION="${TMP_ROOT}/MacSync.app"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
 readonly STDERR_FILE="${TMP_ROOT}/stderr"
 
@@ -36,12 +37,14 @@ run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_APPLICATION="$TEST_APPLICATION" \
     MAC_SYNC_MACHINE="${MAC_SYNC_TEST_MACHINE:-target}" \
     SCRIPT_COLOUR=off \
       "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   else
     HOME="$TEST_HOME" \
     MAC_SYNC_REPO="$TEST_REPO" \
+    MAC_SYNC_APPLICATION="$TEST_APPLICATION" \
     MAC_SYNC_MACHINE="${MAC_SYNC_TEST_MACHINE:-target}" \
     SCRIPT_COLOUR=off \
       "$SCRIPT_PATH" "$@" >"$STDOUT_FILE" 2>"$STDERR_FILE"
@@ -54,7 +57,23 @@ run_mac_sync_expect_failure() {
   fi
 }
 
-mkdir -p "$TEST_HOME" "$TEST_REPO"
+mkdir -p "$TEST_HOME" "$TEST_REPO" "$TEST_APPLICATION/Contents/MacOS"
+: >"$TEST_APPLICATION/Contents/MacOS/MacSync"
+chmod +x "$TEST_APPLICATION/Contents/MacOS/MacSync"
+cat >"$TEST_APPLICATION/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>tools.xyzzy.mac-sync</string>
+  <key>CFBundleShortVersionString</key>
+  <string>2.3.4</string>
+  <key>CFBundleVersion</key>
+  <string>56</string>
+</dict>
+</plist>
+EOF
 
 run_mac_sync help restore
 assert_stdout_contains "$USAGE_HEADER"
@@ -105,6 +124,24 @@ assert_stdout_contains "mac-sync manifest configured"
 run_mac_sync manifest help
 assert_stdout_contains "$USAGE_HEADER"
 assert_stdout_contains "mac-sync manifest <command>"
+
+run_mac_sync help ui
+assert_stdout_contains "$USAGE_HEADER"
+assert_stdout_contains "mac-sync ui"
+assert_stdout_contains "Opens the installed Mac Sync desktop app."
+
+run_mac_sync version
+assert_stdout_contains "mac-sync 2.3.4 (56)"
+
+run_mac_sync --version
+assert_stdout_contains "mac-sync 2.3.4 (56)"
+
+MAC_SYNC_TEST_MACHINE=.. run_mac_sync version
+assert_stdout_contains "mac-sync 2.3.4 (56)"
+
+run_mac_sync help version
+assert_stdout_contains "$USAGE_HEADER"
+assert_stdout_contains "mac-sync version"
 
 run_mac_sync_expect_failure help nope
 assert_stderr_contains "ERROR: unknown help topic: nope"

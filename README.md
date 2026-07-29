@@ -48,7 +48,7 @@ Install with Homebrew:
 ```sh
 brew tap stephenlclarke/tap
 brew install mac-sync
-open "$(brew --prefix mac-sync)/MacSync.app"
+mac-sync ui
 ```
 
 The opt-in Current build tracks the newest fully validated `main` commit:
@@ -56,7 +56,7 @@ The opt-in Current build tracks the newest fully validated `main` commit:
 ```sh
 brew uninstall mac-sync
 brew install mac-sync-current
-open "$(brew --prefix mac-sync-current)/MacSync.app"
+mac-sync ui
 ```
 
 Stable and Current use separate Homebrew prefixes. Uninstall one before
@@ -196,6 +196,8 @@ mac-sync editor install --from old-mbp
 mac-sync secrets list --from old-mbp
 mac-sync secrets restore --from old-mbp
 mac-sync manifest list
+mac-sync ui
+mac-sync version
 mac-sync help restore
 mac-sync help secrets
 mac-sync list
@@ -214,6 +216,8 @@ Commands:
 - `manifest`: show configured and dynamically discovered backup paths
 - `list`: show every configured source path and repo destination
 - `status`: show repo, git, local status, and last-sync state
+- `ui`: open the installed Mac Sync desktop app, reusing the existing app instance when it is already running
+- `version` or `--version`: show the installed Mac Sync app version and build number
 - `help [topic]`: show general help or command-specific help
 
 During `sync`, in-progress work is shown with a compact three-dot figure-eight Braille

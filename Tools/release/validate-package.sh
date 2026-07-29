@@ -56,6 +56,7 @@ actual_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifie
 [[ "$actual_version" == "$expected_version" ]]
 [[ "$actual_build" == "$expected_build" ]]
 [[ "$actual_bundle_identifier" == "tools.xyzzy.mac-sync" ]]
+[[ "$(MAC_SYNC_APPLICATION="$app" "$payload/bin/mac-sync" version)" == "mac-sync $expected_version ($expected_build)" ]]
 
 python3 - "$payload/resources/build-info.json" "$expected_version" "$expected_build" "$expected_lane" "$expected_commit" <<'PY'
 import json

@@ -55,7 +55,7 @@ class UpdateHomebrewFormulaTests(unittest.TestCase):
             self.assertIn("class MacSyncCurrent < Formula", rendered)
             self.assertIn('version "current.123.0123456789ab"', rendered)
             self.assertNotIn("conflicts_with", rendered)
-            self.assertIn('open "#{opt_prefix}/MacSync.app"', rendered)
+            self.assertIn("mac-sync ui", rendered)
             self.assertIn("brew services start mac-sync-current", rendered)
             self.assertIn("brew services restart mac-sync-current", rendered)
             self.assertIn("brew services stop mac-sync-current", rendered)

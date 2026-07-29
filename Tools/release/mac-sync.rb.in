@@ -36,8 +36,8 @@ class MacSync < Formula
       This formula installs the release prebuilt package asset:
         mac-sync-release-arm64.tar.gz
 
-      The Mac Sync app is installed into this formula's prefix. Launch it with:
-        open "#{opt_prefix}/MacSync.app"
+      Launch the installed Mac Sync app with:
+        mac-sync ui
 
       Homebrew also installs Mac Sync's required command-line dependencies:
       age, GNU tar, Git, and rsync. Apple-provided macOS tools cover Keychain

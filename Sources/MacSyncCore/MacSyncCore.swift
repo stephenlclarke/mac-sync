@@ -162,6 +162,7 @@ private extension String {
 public final class MacSyncApp {
     private let environment: [String: String]
     private let invocationArguments: [String]
+    private let userInterfaceLauncher: ([String: String]) throws -> Void
     private var runner: ProcessRunner
     private let config: Config
     private let fm = FileManager.default
@@ -192,19 +193,27 @@ public final class MacSyncApp {
         self.init(arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
     }
 
-    public init(arguments: [String], environment: [String: String]) {
+    public init(
+        arguments: [String],
+        environment: [String: String],
+        userInterfaceLauncher: @escaping ([String: String]) throws -> Void = MacSyncUserInterface.open,
+    ) {
         self.environment = environment
         invocationArguments = arguments
+        self.userInterfaceLauncher = userInterfaceLauncher
         runner = ProcessRunner(environment: environment)
         config = Config(environment: environment, originalArgs: arguments, runner: runner)
     }
 
     public func run() -> Int {
         do {
-            guard MacSyncPaths.safeMachineName(config.machineName) else {
+            let arguments = Array(invocationArguments.dropFirst())
+            if !["ui", "version", "--version", "-V"].contains(arguments.first),
+               !MacSyncPaths.safeMachineName(config.machineName)
+            {
                 try fail("invalid machine name: \(config.machineName)", code: 2)
             }
-            try main(Array(invocationArguments.dropFirst()))
+            try main(arguments)
             return 0
         } catch let error as ExitError {
             return error.code
@@ -237,6 +246,10 @@ public final class MacSyncApp {
             try cmdList()
         case "status":
             cmdStatus()
+        case "ui":
+            try cmdUI(args)
+        case "version", "--version", "-V":
+            try cmdVersion(args)
         case "help", "-h", "--help":
             try cmdHelp(args)
         default:
@@ -263,6 +276,8 @@ public final class MacSyncApp {
               list        Show configured source paths and repo destinations
               paths       Alias for list
               status      Show repo, git, local status, and last-sync state
+              ui          Open the installed Mac Sync desktop app
+              version     Show the Mac Sync app version and build number
               help [topic]
                           Show this help text or command-specific help
               -h, --help  Show this help text
@@ -297,6 +312,8 @@ public final class MacSyncApp {
               mac-sync packages diff --from old-mbp
               mac-sync editor install --from old-mbp
               mac-sync secrets list --from old-mbp
+              mac-sync ui
+              mac-sync version
               mac-sync help restore
               mac-sync help secrets
               MAC_SYNC_MACHINE=work-mbp mac-sync status
@@ -341,6 +358,33 @@ public final class MacSyncApp {
               \(config.scriptName) restore --from old-mbp
               \(config.scriptName) restore --from old-mbp --force
               MAC_SYNC_DRY_RUN=1 \(config.scriptName) restore --from old-mbp
+            """
+        )
+    }
+
+    private func usageUI() {
+        print(
+            """
+            USAGE:
+              \(config.scriptName) ui
+
+            BEHAVIOR:
+              Opens the installed Mac Sync desktop app. macOS reuses its existing
+              app instance when it is already running. The Current Homebrew build
+              is preferred when both Current and stable app bundles are present.
+            """
+        )
+    }
+
+    private func usageVersion() {
+        print(
+            """
+            USAGE:
+              \(config.scriptName) version
+              \(config.scriptName) --version
+
+            BEHAVIOR:
+              Prints the installed Mac Sync app version and build number.
             """
         )
     }
@@ -472,10 +516,49 @@ public final class MacSyncApp {
             usageEditor()
         case "manifest":
             usageManifest()
+        case "ui":
+            usageUI()
+        case "version":
+            usageVersion()
         case "help", "-h", "--help":
             usage()
         default:
             try fail("unknown help topic: \(args.first!)", code: 2, usage: true)
+        }
+    }
+
+    private func cmdUI(_ arguments: [String]) throws {
+        switch arguments {
+        case []:
+            break
+        case ["-h"], ["--help"]:
+            usageUI()
+            return
+        default:
+            try fail("ui does not accept options", code: 2)
+        }
+
+        do {
+            try userInterfaceLauncher(environment)
+            info("Opened Mac Sync UI.")
+        } catch MacSyncUserInterfaceError.notInstalled {
+            try fail(
+                "Mac Sync UI is not installed. Install mac-sync-current with Homebrew, then run mac-sync ui.",
+                code: 2,
+            )
+        } catch {
+            try fail("Mac Sync UI could not be opened: \(error.localizedDescription)", code: 1)
+        }
+    }
+
+    private func cmdVersion(_ arguments: [String]) throws {
+        switch arguments {
+        case []:
+            info(MacSyncUserInterface.versionDescription(environment: environment))
+        case ["-h"], ["--help"]:
+            usageVersion()
+        default:
+            try fail("version does not accept options", code: 2)
         }
     }
 
