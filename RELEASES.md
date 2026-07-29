@@ -34,10 +34,11 @@ direct-download application.
 
 To enable signing, export the Developer ID Application certificate and private
 key from Keychain Access as a password-protected `.p12`. Store its base64 value
-as the `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12` repository secret and its export
-password as `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD`. The workflow imports
-the certificate into an ephemeral runner Keychain and never writes either value
-to the repository or release asset.
+as the `MAC_SYNC_DEVELOPER_ID_APPLICATION_P12` repository secret and its export
+password as `MAC_SYNC_DEVELOPER_ID_APPLICATION_P12_PASSWORD`. The workflow
+imports the certificate into an ephemeral runner Keychain and never writes
+either value to the repository or release asset. The prior `...CERTIFICATE...`
+secret names remain supported for migration.
 
 ## Current Build
 
