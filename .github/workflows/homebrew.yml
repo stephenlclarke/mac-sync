@@ -42,8 +42,7 @@ jobs:
             --version 0.1.0 \
             --asset mac-sync-release-arm64.tar.gz \
             --label stable \
-            --sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            --conflicts-with mac-sync-current
+            --sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           python3 Tools/release/update-homebrew-formula.py \
             --formula Formula/mac-sync-current.rb \
             --template Tools/release/mac-sync.rb.in \
@@ -53,8 +52,7 @@ jobs:
             --version current.1.0123456789ab \
             --asset mac-sync-current-0123456789ab-arm64.tar.gz \
             --label current \
-            --sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
-            --conflicts-with mac-sync
+            --sha256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
       - name: Validate formulae
         shell: bash

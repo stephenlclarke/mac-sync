@@ -191,7 +191,6 @@ jobs:
             formula_class="MacSync"
             formula_name="mac-sync"
             formula_version="$RELEASE_TAG"
-            conflicts_with="mac-sync-current"
             label="stable ${RELEASE_TAG}"
             title="Mac Sync ${RELEASE_TAG}"
             app_version="$RELEASE_TAG"
@@ -201,7 +200,6 @@ jobs:
             formula_class="MacSyncCurrent"
             formula_name="mac-sync-current"
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
-            conflicts_with="mac-sync"
             label="current"
             title="Current build"
             app_version="1.0.0"
@@ -209,7 +207,6 @@ jobs:
           {
             printf 'app_version=%s\n' "$app_version"
             printf 'asset=%s\n' "$asset"
-            printf 'conflicts_with=%s\n' "$conflicts_with"
             printf 'formula=%s\n' "$formula"
             printf 'formula_class=%s\n' "$formula_class"
             printf 'formula_name=%s\n' "$formula_name"
@@ -311,7 +308,7 @@ jobs:
             else
               printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync-current\n```\n\n'
             fi
-            printf 'Stable and current formulae conflict because both install the same executables.\n\n'
+            printf 'Stable and Current use separate Homebrew prefixes. Uninstall the other formula before switching so only one Mac Sync app and CLI remain active.\n\n'
             printf '## Assets\n\n'
             printf -- '- `%s`\n' "$ASSET"
             printf -- '- `%s.sha256`\n' "$ASSET"
@@ -399,7 +396,6 @@ jobs:
       - name: Render Homebrew formula
         env:
           ASSET: ${{ steps.metadata.outputs.asset }}
-          CONFLICTS_WITH: ${{ steps.metadata.outputs.conflicts_with }}
           FORMULA: ${{ steps.metadata.outputs.formula }}
           FORMULA_CLASS: ${{ steps.metadata.outputs.formula_class }}
           FORMULA_VERSION: ${{ steps.metadata.outputs.formula_version }}
@@ -419,8 +415,7 @@ jobs:
             --version "$FORMULA_VERSION" \
             --asset "$ASSET" \
             --label "$LABEL" \
-            --sha256 "$sha256" \
-            --conflicts-with "$CONFLICTS_WITH"
+            --sha256 "$sha256"
           ruby -c "homebrew-tap/Formula/${FORMULA}"
           brew style "homebrew-tap/Formula/${FORMULA}"
 

@@ -59,8 +59,8 @@ brew install mac-sync-current
 open "$(brew --prefix mac-sync-current)/MacSync.app"
 ```
 
-The stable and current formulae conflict because both install `mac-sync` and
-`mac-spinner`. Uninstall one before switching to the other.
+Stable and Current use separate Homebrew prefixes. Uninstall one before
+switching to the other so only one Mac Sync app and CLI remain active.
 
 The formula installs every non-system command required for syncing and encrypted
 secrets: `age` (including `age-keygen`), GNU `tar` (`gtar`), Git, and a current

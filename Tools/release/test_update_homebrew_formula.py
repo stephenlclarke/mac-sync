@@ -46,8 +46,6 @@ class UpdateHomebrewFormulaTests(unittest.TestCase):
                     "current",
                     "--sha256",
                     "a" * 64,
-                    "--conflicts-with",
-                    "mac-sync",
                 ],
                 cwd=workspace,
                 check=True,
@@ -56,7 +54,7 @@ class UpdateHomebrewFormulaTests(unittest.TestCase):
             rendered = output.read_text(encoding="utf-8")
             self.assertIn("class MacSyncCurrent < Formula", rendered)
             self.assertIn('version "current.123.0123456789ab"', rendered)
-            self.assertIn('conflicts_with "mac-sync"', rendered)
+            self.assertNotIn("conflicts_with", rendered)
             self.assertIn('open "#{opt_prefix}/MacSync.app"', rendered)
             self.assertIn("brew services start mac-sync-current", rendered)
             self.assertIn("brew services restart mac-sync-current", rendered)
@@ -86,8 +84,6 @@ class UpdateHomebrewFormulaTests(unittest.TestCase):
                     "stable",
                     "--sha256",
                     "b" * 64,
-                    "--conflicts-with",
-                    "mac-sync-current",
                 ],
                 cwd=workspace,
                 capture_output=True,

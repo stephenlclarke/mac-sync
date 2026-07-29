@@ -29,7 +29,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asset", required=True)
     parser.add_argument("--label", required=True)
     parser.add_argument("--sha256", required=True)
-    parser.add_argument("--conflicts-with", required=True)
     return parser.parse_args()
 
 
@@ -58,19 +57,12 @@ def main() -> None:
             raise SystemExit(f"invalid formula class: {args.formula_class}")
         text = replace_once(r"^class \w+ < Formula$", f"class {args.formula_class} < Formula", text)
 
-    if re.fullmatch(r"[a-z0-9][a-z0-9@+_.-]*", args.conflicts_with) is None:
-        raise SystemExit(f"invalid conflicting formula: {args.conflicts_with}")
     if re.fullmatch(r"[a-z0-9][a-z0-9@+_.-]*", args.formula_name) is None:
         raise SystemExit(f"invalid formula name: {args.formula_name}")
 
     text = replace_once(r'^  url ".+"$', f'  url "{args.url}"', text)
     text = replace_once(r"^  sha256 .+$", f'  sha256 "{args.sha256}"', text)
     text = replace_once(r'^  version ".+"$', f'  version "{args.version}"', text)
-    text = replace_once(
-        r'^  conflicts_with ".+", because: ".+"$',
-        f'  conflicts_with "{args.conflicts_with}", because: "both install the mac-sync executables"',
-        text,
-    )
     text = replace_once(
         r"This formula installs the .+ prebuilt package asset:\n        .+\.tar\.gz",
         f"This formula installs the {args.label} prebuilt package asset:\n        {args.asset}",

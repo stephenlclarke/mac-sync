@@ -13,8 +13,6 @@ class MacSync < Formula
   depends_on macos: :ventura
   depends_on "rsync"
 
-  conflicts_with "mac-sync-current", because: "both install the mac-sync executables"
-
   def install
     package_root = if (buildpath/"mac-sync").directory?
       buildpath/"mac-sync"
