@@ -100,22 +100,23 @@ read the same locations.
 Use **Settings → Automatic sync** in Mac Sync to run at one or more chosen
 times on specific days, choose a preset interval, or enter a custom interval from
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
-same local configuration as the CLI. While the schedule is enabled, Mac Sync
-also opens when you sign in so its Dock and menu-bar controls remain available.
+same local configuration as the CLI and repairs its executable and application
+paths after a Homebrew upgrade. While the schedule is enabled, Mac Sync also
+opens when you sign in so its Dock and menu-bar controls remain available.
 Disabling automatic sync removes that launch-at-login registration. If you use
 the app-managed schedule, stop the optional Homebrew service first so there is
 only one automatic sync job:
 
 ```sh
-brew services stop mac-sync
+brew services stop mac-sync-current  # or mac-sync for the stable formula
 ```
 
 The Homebrew service remains available as an hourly alternative for scripted
 setups:
 
 ```sh
-brew services start mac-sync
-brew services restart mac-sync
+brew services start mac-sync-current  # or mac-sync for the stable formula
+brew services restart mac-sync-current
 ```
 
 For local development, build and launch the native app:
@@ -164,9 +165,12 @@ there is no separate sync implementation or additional state store.
   updated, removed, or skipped, and the source and destination paths. Preview
   runs are deliberately not added to the history.
 - **Manual Triage** is a local queue for warnings and errors from completed
-  syncs. It never pauses scheduled or background syncs. Review an issue later,
-  add a note, acknowledge it to clear the Dock badge, or mark it resolved. The
-  triage state is stored under `status/issues/` on this Mac and is never synced.
+  syncs. Repeated occurrences of the same condition are grouped with first,
+  latest, and occurrence details; a new occurrence reopens an acknowledged or
+  resolved condition. The queue never pauses scheduled or background syncs.
+  Review a condition later, add a note, acknowledge it to clear the Dock badge,
+  or mark it resolved. The triage state is stored under `status/issues/` on
+  this Mac and is never synced.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac
@@ -486,7 +490,9 @@ its current archive for the new recipient.
 
 Before replacing an existing encrypted archive, `mac-sync` decrypts and compares
 it with the new snapshot. If that verification fails, sync stops and preserves
-the existing archive.
+the existing archive. A normal sync performs the Keychain recipient and archive
+decryption checks before changing any managed snapshot files, so an access
+failure cannot leave a partially updated data repository.
 
 ## Packages
 

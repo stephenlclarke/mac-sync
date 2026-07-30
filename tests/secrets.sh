@@ -290,6 +290,14 @@ assert_file_contains "$TEST_REPO/config/secret-paths.txt" ".ssh"
 assert_file_contains "$TEST_REPO/config/secret-paths.txt" ".secrets"
 assert_file_contains "$TEST_REPO/config/age-recipients.txt" "age1fakepublicrecipient"
 
+cp "$TEST_REPO/config/age-recipients.txt" "${TMP_ROOT}/configured-recipients"
+printf '%s\n' 'age1differentrecipient' >"$TEST_REPO/config/age-recipients.txt"
+run_mac_sync_expect_failure sync
+assert_file_contains "$STDERR_FILE" "local Keychain age identity is not a shared recipient"
+[[ ! -e "$TEST_MACHINES_REPO/machines/target/home/.bashrc" ]] \
+  || fail "recipient preflight failure changed the machine snapshot"
+mv "${TMP_ROOT}/configured-recipients" "$TEST_REPO/config/age-recipients.txt"
+
 run_mac_sync secrets sync
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".ssh"
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/included-paths.txt" ".secrets"
@@ -297,6 +305,15 @@ assert_file_contains "$TEST_MACHINES_REPO/machines/target/secrets/recipients.txt
 [[ -f "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age" ]] || fail "missing encrypted archive"
 
 archive_checksum="$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")"
+run_mac_sync sync
+snapshot_checksum="$(cksum "$TEST_MACHINES_REPO/machines/target/home/.bashrc")"
+printf 'changed home bash\n' >"$TEST_HOME/.bashrc"
+AGE_DECRYPT_FAIL=1 run_mac_sync_expect_failure sync
+assert_file_contains "$STDERR_FILE" "existing encrypted secrets snapshot cannot be decrypted; refusing to replace it"
+[[ "$(cksum "$TEST_MACHINES_REPO/machines/target/home/.bashrc")" == "$snapshot_checksum" ]] \
+  || fail "decryption preflight failure changed the machine snapshot"
+printf 'home bash\n' >"$TEST_HOME/.bashrc"
+
 run_mac_sync secrets sync
 assert_stdout_contains "encrypted secrets snapshot unchanged"
 [[ "$(cksum "$TEST_MACHINES_REPO/machines/target/secrets/secrets.tar.gz.age")" == "$archive_checksum" ]] \

@@ -58,6 +58,9 @@ struct SyncIssue: Identifiable, Equatable {
     let recommendedAction: String
     let source: String
     let recordedAt: String
+    let firstRecordedAt: String
+    let occurrenceCount: Int
+    let latestOccurrenceID: String
     let detail: String?
     let disposition: SyncIssueDisposition
     let note: String

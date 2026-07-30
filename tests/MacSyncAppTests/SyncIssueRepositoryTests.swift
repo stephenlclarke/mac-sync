@@ -39,6 +39,7 @@ final class SyncIssueRepositoryTests: XCTestCase {
 
         try repository.update(
             issueID: error.id,
+            latestOccurrenceID: error.latestOccurrenceID,
             disposition: .acknowledged,
             note: "Will repair remote access after the maintenance window."
         )
@@ -49,6 +50,45 @@ final class SyncIssueRepositoryTests: XCTestCase {
         XCTAssertEqual(reloadedError.note, "Will repair remote access after the maintenance window.")
         XCTAssertEqual(history.first?.errors, ["ERROR: git push failed"])
         XCTAssertTrue(fileManager.fileExists(atPath: fixture.status.appendingPathComponent("issues/local.json").path))
+    }
+
+    func testRepeatedConditionIsGroupedAndReopensWhenItRecurs() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let repository = SyncIssueRepository(configuration: makeOverview(fixture: fixture, history: []).configuration)
+        let repeatedError = "ERROR: existing encrypted secrets snapshot cannot be decrypted"
+        let initialHistory = [
+            makeHistoryRecord(id: "newer", finishedAt: "2026-07-30 10:00:00 BST", error: repeatedError),
+            makeHistoryRecord(id: "older", finishedAt: "2026-07-30 09:00:00 BST", error: repeatedError),
+        ]
+
+        let initialIssue = try XCTUnwrap(
+            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first
+        )
+        XCTAssertEqual(initialIssue.occurrenceCount, 2)
+        XCTAssertEqual(initialIssue.firstRecordedAt, "2026-07-30 09:00:00 BST")
+        XCTAssertEqual(initialIssue.recordedAt, "2026-07-30 10:00:00 BST")
+
+        try repository.update(
+            issueID: initialIssue.id,
+            latestOccurrenceID: initialIssue.latestOccurrenceID,
+            disposition: .acknowledged,
+            note: "Recovering the trusted identity."
+        )
+        let acknowledged = try XCTUnwrap(
+            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first
+        )
+        XCTAssertEqual(acknowledged.disposition, .acknowledged)
+
+        let recurringHistory = [
+            makeHistoryRecord(id: "latest", finishedAt: "2026-07-30 11:00:00 BST", error: repeatedError),
+        ] + initialHistory
+        let reopened = try XCTUnwrap(
+            repository.issues(for: makeOverview(fixture: fixture, history: recurringHistory)).first
+        )
+        XCTAssertEqual(reopened.occurrenceCount, 3)
+        XCTAssertEqual(reopened.disposition, .open)
+        XCTAssertEqual(reopened.note, "Recovering the trusted identity.")
     }
 
     func testResolvedCurrentMachineWarningDoesNotCreateManualTriageItem() throws {
@@ -152,6 +192,27 @@ final class SyncIssueRepositoryTests: XCTestCase {
             errors: errors,
             recordedLocalChanges: [],
             currentLocalChanges: currentLocalChanges
+        )
+    }
+
+    private func makeHistoryRecord(id: String, finishedAt: String, error: String) -> SyncHistoryRecord {
+        SyncHistoryRecord(
+            id: id,
+            action: .sync,
+            sourceMachine: nil,
+            result: .failed,
+            timing: SyncHistoryTiming(
+                startedAt: finishedAt,
+                finishedAt: finishedAt,
+                durationSeconds: 1
+            ),
+            entries: [],
+            diagnostics: SyncHistoryDiagnostics(
+                warningCount: 0,
+                errorCount: 1,
+                warnings: [],
+                errors: [error]
+            )
         )
     }
 

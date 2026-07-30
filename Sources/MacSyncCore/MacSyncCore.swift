@@ -1704,6 +1704,38 @@ public final class MacSyncApp {
         )
     }
 
+    private func validateConfiguredKeychainRecipient(identity: String, recipients: [String]) throws {
+        let recipient = try recipientFromIdentityFile(identity)
+        guard recipients.contains(recipient) else {
+            try fail("local Keychain age identity is not a shared recipient; run: \(config.scriptName) secrets init")
+        }
+    }
+
+    /// Verifies encrypted snapshot access before the sync changes any managed
+    /// files. This prevents an encryption configuration failure from leaving a
+    /// partially updated data repository that blocks the next safe pull.
+    private func preflightSecretsArchive() throws {
+        guard secretsSyncEnabled() else { return }
+        let recipients = configuredAgeRecipients()
+        guard !recipients.isEmpty else { return }
+        guard runner.commandExists("security"), keychainIdentityExists() else { return }
+        guard runner.commandExists("age"), runner.commandExists("age-keygen") else { return }
+
+        let tmpDir = try tempPath(prefix: "mac-sync-secrets-preflight", directory: true)
+        defer { try? removePath(tmpDir) }
+        let identity = "\(tmpDir)/identity.txt"
+        try writeKeychainIdentityFile(identity)
+        try validateConfiguredKeychainRecipient(identity: identity, recipients: recipients)
+
+        guard fm.fileExists(atPath: config.secretsArchive) else { return }
+        let decrypt = runner.shell(
+            "age -d -i \(ShellQuoter.quote(identity)) \(ShellQuoter.quote(config.secretsArchive)) > /dev/null"
+        )
+        if decrypt.status != 0 {
+            try fail("existing encrypted secrets snapshot cannot be decrypted; refusing to replace it")
+        }
+    }
+
     private func syncSecretsArchive(mode: String = "auto") throws {
         guard secretsSyncEnabled() else { return }
         let recipients = configuredAgeRecipients()
@@ -1720,11 +1752,15 @@ public final class MacSyncApp {
             warning("missing local Keychain age identity; skipping encrypted secrets snapshot")
             return
         }
-        if !runner.commandExists("age") || !runner.commandExists("gzip") || !runner.commandExists("gtar") {
+        if !runner.commandExists("age")
+            || !runner.commandExists("age-keygen")
+            || !runner.commandExists("gzip")
+            || !runner.commandExists("gtar")
+        {
             if mode == "required" {
                 try checkSecretsRuntime()
             }
-            warning("age, gzip, or gtar not found; skipping encrypted secrets snapshot")
+            warning("age, age-keygen, gzip, or gtar not found; skipping encrypted secrets snapshot")
             return
         }
         let tmpDir = try tempPath(prefix: "mac-sync-secrets", directory: true)
@@ -1754,9 +1790,10 @@ public final class MacSyncApp {
         }
         progressPending("updating encrypted secrets snapshot")
         try ensureDirectory(config.secretsDir)
+        try writeKeychainIdentityFile(identity)
+        try validateConfiguredKeychainRecipient(identity: identity, recipients: recipients)
         try writePlainSecretsArchive(includedFile: included, target: plainArchive)
         if fm.fileExists(atPath: config.secretsArchive) {
-            try writeKeychainIdentityFile(identity)
             let decrypt = runner.shell("age -d -i \(ShellQuoter.quote(identity)) \(ShellQuoter.quote(config.secretsArchive)) > \(ShellQuoter.quote(existingArchive))")
             if decrypt.status == 0,
                let plainData = try? Data(contentsOf: URL(fileURLWithPath: plainArchive)),
@@ -2855,6 +2892,7 @@ public final class MacSyncApp {
         do {
             try pullRepoIfSafe()
             try pullMachinesRepoIfSafe()
+            try preflightSecretsArchive()
             captureSyncStartMetrics()
             progressPending("building sync manifest")
             let configured = try configuredManifestPaths()

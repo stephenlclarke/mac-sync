@@ -171,7 +171,7 @@ struct DashboardView: View {
                     .font(.title2)
                     .foregroundStyle(.red)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(store.openIssueCount) issue\(store.openIssueCount == 1 ? "" : "s") need manual triage")
+                    Text("\(store.openIssueCount) condition\(store.openIssueCount == 1 ? "" : "s") need manual triage")
                         .fontWeight(.semibold)
                     Text("Syncs continue in the background. Review, acknowledge, or resolve these items when you are ready.")
                         .font(.caption)

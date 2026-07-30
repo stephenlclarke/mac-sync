@@ -277,7 +277,12 @@ final class SyncStore: ObservableObject {
 
     func updateIssue(_ issue: SyncIssue, disposition: SyncIssueDisposition, note: String) {
         do {
-            try issueRepository.update(issueID: issue.id, disposition: disposition, note: note)
+            try issueRepository.update(
+                issueID: issue.id,
+                latestOccurrenceID: issue.latestOccurrenceID,
+                disposition: disposition,
+                note: note
+            )
             reloadSyncIssues()
         } catch {
             errorMessage = "Unable to save manual triage: \(error.localizedDescription)"

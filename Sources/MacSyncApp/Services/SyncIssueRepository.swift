@@ -9,15 +9,29 @@ struct SyncIssueRepository {
         let disposition: SyncIssueDisposition
         let note: String
         let updatedAt: Date
+        let latestOccurrenceID: String?
     }
 
     private struct Candidate {
+        let occurrenceID: String
+        let severity: SyncIssueSeverity
+        let message: String
+        let recommendedAction: String
+        let source: String
+        let recordedAt: String
+        let detail: String?
+    }
+
+    private struct GroupedCandidate {
         let id: String
         let severity: SyncIssueSeverity
         let message: String
         let recommendedAction: String
         let source: String
         let recordedAt: String
+        let firstRecordedAt: String
+        let occurrenceCount: Int
+        let latestOccurrenceID: String
         let detail: String?
     }
 
@@ -33,9 +47,11 @@ struct SyncIssueRepository {
 
     func issues(for overview: SyncOverview) -> [SyncIssue] {
         let states = readStates()
-        return candidates(for: overview)
+        return groupedCandidates(for: overview)
             .map { candidate in
-                let state = states[candidate.id]
+                let state = states[candidate.id] ?? states[candidate.latestOccurrenceID]
+                let stateAppliesToLatestOccurrence = state?.latestOccurrenceID == nil
+                    || state?.latestOccurrenceID == candidate.latestOccurrenceID
                 return SyncIssue(
                     id: candidate.id,
                     severity: candidate.severity,
@@ -43,8 +59,11 @@ struct SyncIssueRepository {
                     recommendedAction: candidate.recommendedAction,
                     source: candidate.source,
                     recordedAt: candidate.recordedAt,
+                    firstRecordedAt: candidate.firstRecordedAt,
+                    occurrenceCount: candidate.occurrenceCount,
+                    latestOccurrenceID: candidate.latestOccurrenceID,
                     detail: candidate.detail,
-                    disposition: state?.disposition ?? .open,
+                    disposition: stateAppliesToLatestOccurrence ? state?.disposition ?? .open : .open,
                     note: state?.note ?? "",
                     updatedAt: state?.updatedAt
                 )
@@ -60,14 +79,49 @@ struct SyncIssueRepository {
             }
     }
 
-    func update(issueID: String, disposition: SyncIssueDisposition, note: String) throws {
+    func update(
+        issueID: String,
+        latestOccurrenceID: String,
+        disposition: SyncIssueDisposition,
+        note: String
+    ) throws {
         var states = readStates()
         states[issueID] = PersistedState(
             disposition: disposition,
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
-            updatedAt: Date()
+            updatedAt: Date(),
+            latestOccurrenceID: latestOccurrenceID
         )
         try writeStates(states)
+    }
+
+    private func groupedCandidates(for overview: SyncOverview) -> [GroupedCandidate] {
+        Dictionary(grouping: candidates(for: overview), by: conditionKey)
+            .compactMap { _, occurrences in
+                let ordered = occurrences.sorted { $0.recordedAt > $1.recordedAt }
+                guard let latest = ordered.first, let first = ordered.last else { return nil }
+                return GroupedCandidate(
+                    id: conditionID(for: latest),
+                    severity: latest.severity,
+                    message: latest.message,
+                    recommendedAction: latest.recommendedAction,
+                    source: latest.source,
+                    recordedAt: latest.recordedAt,
+                    firstRecordedAt: first.recordedAt,
+                    occurrenceCount: ordered.count,
+                    latestOccurrenceID: latest.occurrenceID,
+                    detail: latest.detail
+                )
+            }
+    }
+
+    private func conditionKey(for candidate: Candidate) -> String {
+        "\(candidate.severity.rawValue)\u{0}\(candidate.message)"
+    }
+
+    private func conditionID(for candidate: Candidate) -> String {
+        let encoded = Data(conditionKey(for: candidate).utf8).base64EncodedString()
+        return "condition:\(encoded)"
     }
 
     private func candidates(for overview: SyncOverview) -> [Candidate] {
@@ -170,7 +224,7 @@ struct SyncIssueRepository {
         overview: SyncOverview
     ) -> Candidate {
         Candidate(
-            id: id,
+            occurrenceID: id,
             severity: severity,
             message: message,
             recommendedAction: recommendedAction(for: message, severity: severity),

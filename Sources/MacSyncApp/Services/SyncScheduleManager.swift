@@ -240,21 +240,24 @@ struct SyncScheduleManager {
         return status()
     }
 
-    /// Adds launch-at-login behavior for schedules created by versions that
-    /// installed only the background sync agent.
+    /// Repairs app-owned agents after upgrades and adds launch-at-login
+    /// behavior for schedules created by older versions.
     func ensureApplicationLaunchAgent() throws {
-        guard status().schedule != nil else { return }
-        guard !fileManager.fileExists(atPath: applicationAgentURL.path) else { return }
+        guard let schedule = status().schedule else { return }
+        guard let executableURL else {
+            throw SyncScheduleError.missingExecutable
+        }
         guard let applicationURL else {
             throw SyncScheduleError.missingApplication
         }
 
-        _ = runner.run(arguments: ["bootout", launchdDomain, applicationAgentURL.path])
-        try writeApplicationLaunchAgent(applicationURL: applicationURL)
-        guard runner.run(arguments: ["bootstrap", launchdDomain, applicationAgentURL.path]).status == 0 else {
-            try? removeLaunchAgent(at: applicationAgentURL)
-            throw SyncScheduleError.launchdUnavailable
-        }
+        let syncArguments = propertyListValues(at: agentURL)?["ProgramArguments"] as? [String]
+        let applicationArguments = propertyListValues(at: applicationAgentURL)?["ProgramArguments"] as? [String]
+        guard syncArguments != [executableURL.path, "run"]
+            || applicationArguments != ["/usr/bin/open", "-g", applicationURL.path]
+        else { return }
+
+        _ = try configure(schedule: schedule)
     }
 
     static func description(for schedule: SyncSchedule) -> String {
@@ -430,6 +433,15 @@ struct SyncScheduleManager {
             options: 0
         )
         try data.write(to: applicationAgentURL, options: .atomic)
+    }
+
+    private func propertyListValues(at url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url),
+              let propertyList = try? PropertyListSerialization.propertyList(from: data, format: nil)
+        else {
+            return nil
+        }
+        return propertyList as? [String: Any]
     }
 
     private func removeLaunchAgent(at url: URL) throws {

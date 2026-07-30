@@ -101,7 +101,9 @@ struct SyncIssuesView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(issue.message)
                     .lineLimit(2)
-                Text("\(issue.source) · \(issue.recordedAt)")
+                Text(issue.occurrenceCount == 1
+                    ? "\(issue.source) · \(issue.recordedAt)"
+                    : "\(issue.occurrenceCount) occurrences · latest \(issue.recordedAt)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text(issue.disposition.title)
@@ -135,6 +137,16 @@ struct SyncIssuesView: View {
                 LabeledContent("Recorded") {
                     Text(issue.recordedAt)
                         .textSelection(.enabled)
+                }
+                if issue.occurrenceCount > 1 {
+                    LabeledContent("First recorded") {
+                        Text(issue.firstRecordedAt)
+                            .textSelection(.enabled)
+                    }
+                    LabeledContent("Occurrences") {
+                        Text("\(issue.occurrenceCount)")
+                            .textSelection(.enabled)
+                    }
                 }
                 LabeledContent("Source") {
                     Text(issue.source)

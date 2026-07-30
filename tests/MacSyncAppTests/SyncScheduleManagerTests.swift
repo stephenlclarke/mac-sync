@@ -169,7 +169,43 @@ final class SyncScheduleManagerTests: XCTestCase {
 
         XCTAssertTrue(fileManager.fileExists(atPath: migrationManager.applicationAgentURL.path))
         XCTAssertEqual(migrationRunner.arguments, [
+            ["bootout", "gui/501", migrationManager.agentURL.path],
             ["bootout", "gui/501", migrationManager.applicationAgentURL.path],
+            ["bootstrap", "gui/501", migrationManager.agentURL.path],
+            ["bootstrap", "gui/501", migrationManager.applicationAgentURL.path],
+        ])
+    }
+
+    func testRewritesStaleExecutablePathAfterUpgrade() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let initialManager = scheduleManager(fixture: fixture, runner: FakeLaunchdRunner())
+        _ = try initialManager.configure(schedule: .interval(minutes: 12 * 60))
+        let data = try Data(contentsOf: initialManager.agentURL)
+        var values = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        values["ProgramArguments"] = ["/old/Cellar/mac-sync-current/bin/mac-sync", "run"]
+        let staleData = try PropertyListSerialization.data(
+            fromPropertyList: values,
+            format: .xml,
+            options: 0
+        )
+        try staleData.write(to: initialManager.agentURL, options: .atomic)
+        let migrationRunner = FakeLaunchdRunner()
+        let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
+
+        try migrationManager.ensureApplicationLaunchAgent()
+
+        let repairedData = try Data(contentsOf: migrationManager.agentURL)
+        let repairedValues = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: repairedData, format: nil) as? [String: Any]
+        )
+        XCTAssertEqual(repairedValues["ProgramArguments"] as? [String], ["/tmp/mac-sync", "run"])
+        XCTAssertEqual(migrationRunner.arguments, [
+            ["bootout", "gui/501", migrationManager.agentURL.path],
+            ["bootout", "gui/501", migrationManager.applicationAgentURL.path],
+            ["bootstrap", "gui/501", migrationManager.agentURL.path],
             ["bootstrap", "gui/501", migrationManager.applicationAgentURL.path],
         ])
     }
