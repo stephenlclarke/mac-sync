@@ -122,6 +122,23 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual("303\n", try String(contentsOf: lockURL, encoding: .utf8))
     }
 
+    func testProcessLockReleasesReservationWhenLockFileCannotBeOpened() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lockURL = root.appendingPathComponent("instance.lock")
+        try FileManager.default.createDirectory(
+            at: lockURL,
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertThrowsError(try MacSyncProcessLock.acquire(at: lockURL)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("open failed"))
+        }
+
+        try FileManager.default.removeItem(at: lockURL)
+        XCTAssertNotNil(try MacSyncProcessLock.acquire(at: lockURL))
+    }
+
     func testUserInterfaceAndServiceUseSeparateGlobalLocks() {
         let environment = ["TMPDIR": "/tmp/mac-sync-lock-tests"]
 
