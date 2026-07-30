@@ -151,16 +151,3 @@ jobs:
           SONAR_QUALITYGATE_WAIT: "true"
         run: make sonar-scan
         working-directory: mac-sync
-
-      - name: Build package artifact
-        if: github.ref == 'refs/heads/main'
-        timeout-minutes: 15
-        run: make package-release MAC_SYNC_ARCHIVE=mac-sync.tar.gz
-        working-directory: mac-sync
-
-      - name: Upload package artifact
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7
-        with:
-          name: mac-sync
-          path: mac-sync/mac-sync.tar.gz

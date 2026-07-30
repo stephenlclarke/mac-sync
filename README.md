@@ -1,17 +1,24 @@
 # mac-sync
 
-[![CI](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml)
-[![Homebrew](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml)
-[![Releases](https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml/badge.svg)](https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=coverage)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=bugs)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Duplicated Lines](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
-[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync)
+<!-- markdownlint-disable MD033 -->
+<p>
+  <img align="left" hspace="20" src="Design/MacSync-AppIcon.png" width="147" alt="Mac Sync app icon" />
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml"><img alt="Homebrew" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml"><img alt="Releases" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml/badge.svg" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Quality Gate Status" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=alert_status" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Coverage" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=coverage" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Bugs" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=bugs" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Code Smells" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=code_smells" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Security Rating" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=security_rating" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Maintainability Rating" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=sqale_rating" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Duplicated Lines" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=duplicated_lines_density" /></a>
+  <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Lines of Code" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=ncloc" /></a>
+</p>
+<br clear="left" />
+<br>
+<!-- markdownlint-enable MD033 -->
 
 `mac-sync` keeps a curated snapshot of important Mac dotfiles, Homebrew
 packages, VS Code extensions, encrypted secrets, and local GitHub clones in
@@ -102,7 +109,9 @@ times on specific days, choose a preset interval, or enter a custom interval fro
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
 same local configuration as the CLI and repairs its executable and application
 paths after a Homebrew upgrade. While the schedule is enabled, Mac Sync also
-opens when you sign in so its Dock and menu-bar controls remain available.
+opens when you sign in so its menu-bar controls remain available. Mac Sync does
+not show an additional Dock icon by default; enable **Show app icon in the
+Dock** under **Settings → App appearance** if you prefer regular-app behaviour.
 Disabling automatic sync removes that launch-at-login registration. If you use
 the app-managed schedule, stop the optional Homebrew service first so there is
 only one automatic sync job:
@@ -118,6 +127,11 @@ setups:
 brew services start mac-sync-current  # or mac-sync for the stable formula
 brew services restart mac-sync-current
 ```
+
+The desktop app and the `mac-sync run` background service are each
+single-instance. Reopening Mac Sync activates the running app, while a duplicate
+service launch exits successfully without starting another sync. Sync operations
+are also serialised so app, scheduled, and manual runs cannot overlap.
 
 For local development, build and launch the native app:
 
@@ -178,11 +192,14 @@ there is no separate sync implementation or additional state store.
   enabled, and never stores credentials in the launch agents.
 
 The menu-bar item gives quick access to the dashboard, current status, sync,
-stop, refresh, About, and repository setup actions. The app's settings view shows the
-active repository and status paths, lets you re-run local setup, and includes a
-non-interactive GitHub read/write check. It never stores a GitHub token: the
-check uses the Mac's existing Git authentication and redacts credentials from
-its output.
+stop, refresh, About, and repository setup actions. By default the running app
+stays in the menu bar without adding a Dock icon; **Settings → App appearance**
+can restore the Dock icon. During an active sync, the menu-bar status icon and
+the blue dashboard status icon rotate until the run finishes. The app's settings
+view shows the active repository and status paths, lets you re-run local setup,
+and includes a non-interactive GitHub read/write check. It never stores a GitHub
+token: the check uses the Mac's existing Git authentication and redacts
+credentials from its output.
 
 ## CLI Usage
 
@@ -211,7 +228,7 @@ mac-sync status
 Commands:
 
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
-- `run`: service mode; same behavior as `sync`
+- `run`: service mode; exits successfully if the service is already running
 - `restore`: copy a machine snapshot from `mac-sync-data` back into `$HOME` and
   re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain

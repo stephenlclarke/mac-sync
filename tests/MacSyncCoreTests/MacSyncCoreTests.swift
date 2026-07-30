@@ -104,6 +104,66 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual(262_144, result.stderr.utf8.count)
     }
 
+    func testProcessLockAllowsOnlyOneOwnerAndCanBeReacquired() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lockURL = root.appendingPathComponent("instance.lock")
+        var firstLock = try XCTUnwrap(
+            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 101)
+        )
+
+        XCTAssertEqual("101\n", try String(contentsOf: lockURL, encoding: .utf8))
+        XCTAssertNil(try MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 202))
+
+        firstLock.release()
+        firstLock = try XCTUnwrap(
+            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 303)
+        )
+        XCTAssertEqual("303\n", try String(contentsOf: lockURL, encoding: .utf8))
+    }
+
+    func testUserInterfaceAndServiceUseSeparateGlobalLocks() {
+        let environment = ["TMPDIR": "/tmp/mac-sync-lock-tests"]
+
+        XCTAssertEqual(
+            "/tmp/mac-sync-lock-tests/mac-sync-ui.lock",
+            MacSyncProcessLock.userInterfaceLockURL(environment: environment).path
+        )
+        XCTAssertEqual(
+            "/tmp/mac-sync-lock-tests/mac-sync-service.lock",
+            MacSyncProcessLock.syncServiceLockURL(environment: environment).path
+        )
+    }
+
+    func testRunExitsSuccessfullyWhenServiceInstanceIsAlreadyActive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let environment = [
+            "HOME": root.appendingPathComponent("home").path,
+            "TMPDIR": root.path,
+            "MAC_SYNC_MACHINE": "target",
+        ]
+        let serviceLock = try XCTUnwrap(
+            MacSyncProcessLock.acquire(
+                at: MacSyncProcessLock.syncServiceLockURL(environment: environment),
+                ownerProcessID: 404
+            )
+        )
+        let executable = Bundle(for: MacSyncCoreTests.self).bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("mac-sync")
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))
+        let result = ProcessRunner(environment: environment).run(executable.path, ["run"])
+
+        XCTAssertEqual(0, result.status)
+        XCTAssertEqual(
+            "another mac-sync service is already running; exiting: pid 404\n",
+            result.stdout
+        )
+        XCTAssertEqual("", result.stderr)
+        withExtendedLifetime(serviceLock) {}
+    }
+
     func testUserInterfaceLocatorPrefersTheFirstCompleteApplicationBundle() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

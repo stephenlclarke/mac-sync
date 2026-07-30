@@ -1,4 +1,5 @@
 import AppKit
+import MacSyncCore
 import SwiftUI
 
 @MainActor
@@ -36,9 +37,36 @@ enum MacSyncAboutPanel {
 }
 
 final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
+    private var instanceLock: MacSyncProcessLock?
+
+    func applicationWillFinishLaunching(_: Notification) {
+        do {
+            guard let lock = try MacSyncProcessLock.acquire(
+                at: MacSyncProcessLock.userInterfaceLockURL()
+            ) else {
+                activateRunningApplication()
+                NSApp.terminate(nil)
+                return
+            }
+            instanceLock = lock
+        } catch {
+            NSLog("Mac Sync could not establish its single-instance lock: \(error.localizedDescription)")
+            NSApp.terminate(nil)
+        }
+    }
+
     func applicationDidFinishLaunching(_: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        guard instanceLock != nil else { return }
+        MacSyncDockIconController.apply(isVisible: MacSyncDockIconController.isVisible())
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func activateRunningApplication() {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return }
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first { $0.processIdentifier != currentProcessID }?
+            .activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     }
 }
 
@@ -101,7 +129,11 @@ struct MacSyncDesktopApp: App {
         MenuBarExtra {
             MenuBarStatusView(store: store)
         } label: {
-            Image(systemName: menuBarImage)
+            SyncActivityIcon(
+                systemName: menuBarImage,
+                isAnimating: store.isRunning,
+            )
+            .accessibilityLabel(store.isRunning ? "Mac Sync is syncing" : "Mac Sync")
         }
 
         Settings {

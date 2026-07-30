@@ -30,6 +30,8 @@ SWIFT_TEST_RESULT_LOG ?= .build/swift-test.log
 SWIFT_TEST_ATTEMPTS ?= 2
 SWIFT_COVERAGE_TEST_ATTEMPTS ?= 3
 SWIFT_TEST_RUN_FLAGS ?= --no-parallel
+SHELL_TEST_JOBS ?= 4
+CODEQL_ARCH ?= $(shell uname -m)
 MAC_SYNC_BINARY ?= $(abspath .build/debug/mac-sync)
 MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
@@ -37,7 +39,7 @@ MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
@@ -57,6 +59,9 @@ build-release:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-sync $(SWIFT_RELEASE_FLAGS)
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-spinner $(SWIFT_RELEASE_FLAGS)
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product MacSync $(SWIFT_RELEASE_FLAGS)
+
+codeql-build:
+	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --arch "$(CODEQL_ARCH)"
 
 app-debug: build
 	$(MAKE) app-built PACKAGE_BUILD_CONFIGURATION=debug
@@ -180,28 +185,22 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/MacSyncCore.swift \
 		--sources Sources/MacSyncCore/Support.swift \
 		--sources Sources/MacSyncCore/MacSyncUserInterface.swift \
+		--sources Sources/MacSyncCore/MacSyncProcessLock.swift \
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
 
 coverage-shell-test:
-	@for test_name in $(SHELL_TESTS); do \
-		target="$(MAC_SYNC_BINARY)"; \
-		if [[ "$$test_name" == "spinner" ]]; then \
-			target="$(MAC_SPINNER_BINARY)"; \
-		fi; \
-		printf '== coverage %s ==\n' "$$test_name"; \
-		LLVM_PROFILE_FILE="$(abspath .build/codecov)/shell-$${test_name}-%p.profraw" bash "tests/$${test_name}.sh" "$$target"; \
-	done
+	@SHELL_TEST_JOBS="$(SHELL_TEST_JOBS)" \
+		MAC_SYNC_BINARY="$(MAC_SYNC_BINARY)" \
+		MAC_SPINNER_BINARY="$(MAC_SPINNER_BINARY)" \
+		COVERAGE_PROFILE_DIR="$(abspath .build/codecov)" \
+		Tools/ci/run-shell-tests.sh coverage $(SHELL_TESTS)
 
 shell-test: build
-	@for test_name in $(SHELL_TESTS); do \
-		target="$(MAC_SYNC_BINARY)"; \
-		if [[ "$$test_name" == "spinner" ]]; then \
-			target="$(MAC_SPINNER_BINARY)"; \
-		fi; \
-		printf '== %s ==\n' "$$test_name"; \
-		bash "tests/$${test_name}.sh" "$$target"; \
-	done
+	@SHELL_TEST_JOBS="$(SHELL_TEST_JOBS)" \
+		MAC_SYNC_BINARY="$(MAC_SYNC_BINARY)" \
+		MAC_SPINNER_BINARY="$(MAC_SPINNER_BINARY)" \
+		Tools/ci/run-shell-tests.sh test $(SHELL_TESTS)
 
 cli-smoke: build cli-smoke-built
 

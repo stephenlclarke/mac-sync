@@ -42,6 +42,7 @@ private struct Config {
     let secretsIncludedPathsFile: String
     let secretsRecipientsFile: String
     let lockDir: String
+    let serviceLockFile: String
     let statusDir: String
     let syncStatusFile: String
     let syncWarningsFile: String
@@ -102,6 +103,7 @@ private struct Config {
         secretsIncludedPathsFile = "\(machineDir)/secrets/included-paths.txt"
         secretsRecipientsFile = "\(machineDir)/secrets/recipients.txt"
         lockDir = "\(tmpDir)/mac-sync-\(machine).lock"
+        serviceLockFile = MacSyncProcessLock.syncServiceLockURL(environment: env).path
         self.statusDir = statusDir
         syncStatusFile = "\(statusDir)/\(machine).env"
         syncWarningsFile = "\(statusDir)/\(machine).warnings.log"
@@ -188,6 +190,8 @@ public final class MacSyncApp {
     private var historyStartedAt = ""
     private var historyStartedEpoch = 0
     private var historyEntries: [SyncHistoryEntry] = []
+    private var operationLock: MacSyncProcessLock?
+    private var serviceLock: MacSyncProcessLock?
 
     public convenience init() {
         self.init(arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
@@ -230,8 +234,10 @@ public final class MacSyncApp {
             args.removeFirst()
         }
         switch command {
-        case "sync", "run":
+        case "sync":
             try cmdSync()
+        case "run":
+            try cmdRun()
         case "restore":
             try cmdRestore(args)
         case "secrets":
@@ -265,7 +271,7 @@ public final class MacSyncApp {
 
             COMMANDS:
               sync        Sync configured paths, commit machine changes, and push
-              run         Service mode; alias for sync
+              run         Service mode; exits if the service is already running
               restore     Restore this machine snapshot back into $HOME
               restore [--from <machine>|--select] [--path <path>]... [--force]
                           Restore another machine snapshot back into $HOME
@@ -2697,28 +2703,19 @@ public final class MacSyncApp {
 
     private func acquireLock() throws {
         let pidFile = "\(config.lockDir)/pid"
-        do {
-            try fm.createDirectory(atPath: config.lockDir, withIntermediateDirectories: false)
-            try writeText(pidFile, "\(getpid())\n")
-            return
-        } catch {
+        guard let lock = try MacSyncProcessLock.acquire(
+            at: URL(fileURLWithPath: pidFile)
+        ) else {
             let lockPID = readText(pidFile).trimmed
-            if !lockPID.isEmpty, runner.run("kill", ["-0", lockPID]).status == 0 {
-                info("another mac-sync run is active; exiting: pid \(lockPID)")
-                throw ExitError(code: 0)
-            }
-            warning("removing stale sync lock: \(config.lockDir)")
-            try? removePath(config.lockDir)
-            try fm.createDirectory(atPath: config.lockDir, withIntermediateDirectories: false)
-            try writeText(pidFile, "\(getpid())\n")
+            let processDescription = lockPID.isEmpty ? "" : ": pid \(lockPID)"
+            info("another mac-sync run is active; exiting\(processDescription)")
+            throw ExitError(code: 0)
         }
+        operationLock = lock
     }
 
     private func releaseLock() {
-        let pidFile = "\(config.lockDir)/pid"
-        if readText(pidFile).trimmed == "\(getpid())" {
-            try? removePath(config.lockDir)
-        }
+        operationLock = nil
     }
 
     private func statusTimestamp() -> String {
@@ -2931,6 +2928,20 @@ public final class MacSyncApp {
             finishSyncStatus(1)
             throw error
         }
+    }
+
+    private func cmdRun() throws {
+        guard let lock = try MacSyncProcessLock.acquire(
+            at: URL(fileURLWithPath: config.serviceLockFile)
+        ) else {
+            let lockPID = readText(config.serviceLockFile).trimmed
+            let processDescription = lockPID.isEmpty ? "" : ": pid \(lockPID)"
+            info("another mac-sync service is already running; exiting\(processDescription)")
+            throw ExitError(code: 0)
+        }
+        serviceLock = lock
+        defer { serviceLock = nil }
+        try cmdSync()
     }
 
     private func cmdRestore(_ arguments: [String]) throws {

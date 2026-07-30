@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: SyncStore
+    @AppStorage(MacSyncDockIconController.preferenceKey) private var showDockIcon = false
     @State private var scheduleChoice = SyncScheduleChoice.hourly
     @State private var customIntervalMinutes = ""
     @State private var calendarRules = [CalendarScheduleRule.standard]
@@ -27,6 +28,13 @@ struct SettingsView: View {
                 Button("Configure Data Repository…") {
                     store.requestSetup()
                 }
+            }
+
+            Section("App appearance") {
+                Toggle("Show app icon in the Dock", isOn: $showDockIcon)
+                Text("Mac Sync remains available from the menu bar while the app is running.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("GitHub access") {
@@ -161,6 +169,9 @@ struct SettingsView: View {
         }
         .onChange(of: store.syncScheduleStatus) { status in
             updateScheduleControls(from: status)
+        }
+        .onChange(of: showDockIcon) { isVisible in
+            MacSyncDockIconController.apply(isVisible: isVisible)
         }
     }
 

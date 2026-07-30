@@ -47,11 +47,12 @@ struct MenuBarStatusView: View {
 
         Divider()
 
-        Text("xyzzy.tools")
-            .foregroundStyle(.secondary)
         Button("About Mac Sync") {
             MacSyncAboutPanel.show()
         }
+
+        Divider()
+
         Button("Quit Mac Sync") {
             NSApplication.shared.terminate(nil)
         }

@@ -8,11 +8,22 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Your sync control room")
-                        .font(.largeTitle.bold())
-                    Text("Inspect the snapshot for this Mac, browse other Macs, and safely publish or copy selected files.")
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 16) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 72, height: 72)
+                        .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your sync control room")
+                            .font(.largeTitle.bold())
+                        Text(
+                            "Inspect the snapshot for this Mac, browse other Macs, and safely publish or copy selected files."
+                        )
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 statusCard
@@ -99,9 +110,15 @@ struct DashboardView: View {
     private var statusCard: some View {
         GroupBox {
             HStack(alignment: .top, spacing: 16) {
-                Image(systemName: store.isRunning ? "arrow.triangle.2.circlepath.circle.fill" : store.overview.status.result.systemImage)
+                SyncActivityIcon(
+                    systemName: store.isRunning
+                        ? "arrow.triangle.2.circlepath.circle.fill"
+                        : store.overview.status.result.systemImage,
+                    isAnimating: store.isRunning,
+                )
                     .font(.system(size: 32))
                     .foregroundStyle(statusColour)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(store.activeAction?.title ?? store.overview.status.result.title)

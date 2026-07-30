@@ -44,7 +44,7 @@ jobs:
 
       - name: Build Swift package for CodeQL
         timeout-minutes: 35
-        run: make build
+        run: make codeql-build
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
