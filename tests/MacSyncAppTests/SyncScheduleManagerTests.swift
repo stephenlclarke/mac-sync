@@ -246,6 +246,7 @@ final class SyncScheduleManagerTests: XCTestCase {
         )
         XCTAssertEqual(environment["HOME"], fixture.home.path)
         XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+        XCTAssertEqual(environment["MAC_SYNC_SECRETS"], "0")
         XCTAssertEqual(migrationRunner.arguments.count, 4)
     }
 

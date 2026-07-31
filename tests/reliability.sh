@@ -39,6 +39,14 @@ assert_file_contains() {
   grep -F -- "$pattern" "$file" >/dev/null || fail "missing pattern in $file: $pattern"
 }
 
+assert_file_not_contains() {
+  local file="$1"
+  local pattern="$2"
+
+  [[ -f "$file" ]] || fail "missing file: $file"
+  ! grep -F -- "$pattern" "$file" >/dev/null || fail "unexpected pattern in $file: $pattern"
+}
+
 run_mac_sync() {
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
@@ -97,6 +105,7 @@ printf 'first snapshot\n' >"$TEST_HOME/.bashrc"
 
 cat >"$TEST_BIN/security" <<'EOF'
 #!/usr/bin/env bash
+touch "${KEYCHAIN_FAKE_DIR:?KEYCHAIN_FAKE_DIR is not set}/unexpected-access"
 exit 44
 EOF
 chmod +x "$TEST_BIN/security"
@@ -105,10 +114,13 @@ set +e
 run_mac_sync
 partial_status="$?"
 set -e
-[[ "$partial_status" -eq 0 ]] || fail "scheduled run with one skipped subsystem failed"
-assert_file_contains "$TEST_STATUS/target.env" "result=partial"
+[[ "$partial_status" -eq 0 ]] || fail "scheduled run failed"
+assert_file_contains "$TEST_STATUS/target.env" "result=success"
 assert_file_contains "$TEST_STATUS/target.env" "exit_status=0"
-assert_file_contains "$TEST_STATUS/target.conditions.json" '"code" : "encryptedSecretsIdentityMissing"'
+assert_file_not_contains "$TEST_STATUS/target.conditions.json" '"code" : "encryptedSecretsIdentityMissing"'
+[[ ! -e "${TMP_ROOT}/keychain/unexpected-access" ]] \
+  || fail "unattended sync accessed Keychain"
+assert_file_contains "$STDOUT_FILE" "unattended sync skips encrypted secrets"
 assert_file_contains \
   "$TEST_MACHINES_REPO/machines/target/home/.bashrc" \
   "first snapshot"
@@ -142,7 +154,7 @@ EOF
 chmod +x "$TEST_BIN/git"
 
 run_mac_sync
-assert_file_contains "$TEST_STATUS/target.env" "result=partial"
+assert_file_contains "$TEST_STATUS/target.env" "result=success"
 assert_file_contains "$TEST_STATUS/target.commands.json" "using SSH"
 assert_file_contains "$STDOUT_FILE" "using verified SSH access"
 rm -f "$TEST_BIN/git"

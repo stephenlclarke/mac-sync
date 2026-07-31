@@ -17,6 +17,11 @@ final class SyncHealthEvaluatorTests: XCTestCase {
             {
                 return CommandResult(status: 0, stdout: "head\n", stderr: "")
             }
+            if executable == "/usr/bin/security",
+               arguments == ["find-generic-password", "-s", "mac-sync age identity", "-a", "local"]
+            {
+                return CommandResult(status: 0, stdout: "metadata", stderr: "")
+            }
             return CommandResult(status: 1, stdout: "", stderr: "unexpected command")
         }
         let overview = makeOverview(
@@ -30,7 +35,6 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainPresenceLookup: { _, _ in .present },
             encryptedSecretsVerificationLookup: { _ in false },
         )
 
@@ -54,7 +58,6 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainPresenceLookup: { _, _ in .present },
         )
 
         XCTAssertEqual(
@@ -84,7 +87,6 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainPresenceLookup: { _, _ in .present },
             encryptedSecretsVerificationLookup: { _ in true },
         )
 
@@ -128,7 +130,6 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainPresenceLookup: { _, _ in .missing },
         )
 
         XCTAssertEqual(
@@ -139,6 +140,38 @@ final class SyncHealthEvaluatorTests: XCTestCase {
                 .encryptedSecretsRuntimeUnavailable,
             ],
         )
+    }
+
+    func testKeychainPresenceCheckUsesMetadataOnlySecurityLookup() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        var invocation: (String, [String])?
+        let runner = FakeSyncHealthRunner(commandAvailability: true) { executable, arguments in
+            invocation = (executable, arguments)
+            return CommandResult(status: 0, stdout: "metadata", stderr: "")
+        }
+        let overview = makeOverview(
+            fixture: fixture,
+            conditions: [condition(.encryptedSecretsIdentityMissing, component: .encryptedSecrets)],
+        )
+
+        let active = SyncHealthEvaluator(
+            environment: [
+                "MAC_SYNC_KEYCHAIN_SERVICE": "test service",
+                "MAC_SYNC_KEYCHAIN_ACCOUNT": "test account",
+            ],
+            runner: runner,
+            encryptedSecretsVerificationLookup: { _ in false },
+        ).activeConditionCodes(in: overview)
+
+        XCTAssertTrue(active.isEmpty)
+        XCTAssertEqual(invocation?.0, "/usr/bin/security")
+        XCTAssertEqual(
+            invocation?.1,
+            ["find-generic-password", "-s", "test service", "-a", "test account"],
+        )
+        XCTAssertFalse(invocation?.1.contains("-g") == true)
+        XCTAssertFalse(invocation?.1.contains("-w") == true)
     }
 
     private func condition(
