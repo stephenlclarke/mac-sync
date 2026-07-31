@@ -188,6 +188,49 @@ final class MacSyncCoreTests: XCTestCase {
         ))
     }
 
+    func testLiveKeychainRoundTripUsesScopedDeviceOnlyItem() {
+        let service = "tools.xyzzy.mac-sync.tests.\(UUID().uuidString)"
+        let account = "keychain-round-trip"
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ]
+        defer { SecItemDelete(query as CFDictionary) }
+
+        let missing = MacSyncKeychain.identity(
+            service: service,
+            account: account,
+            allowInteraction: false,
+        )
+        XCTAssertEqual(missing.availability, .missing)
+
+        XCTAssertEqual(
+            MacSyncKeychain.storeIdentity(
+                "AGE-SECRET-KEY-TEST-ONE",
+                service: service,
+                account: account,
+            ),
+            errSecSuccess,
+        )
+        XCTAssertEqual(
+            MacSyncKeychain.storeIdentity(
+                "AGE-SECRET-KEY-TEST-TWO",
+                service: service,
+                account: account,
+            ),
+            errSecSuccess,
+        )
+
+        let available = MacSyncKeychain.identity(
+            service: service,
+            account: account,
+            allowInteraction: false,
+        )
+        XCTAssertEqual(available.availability, .available)
+        XCTAssertEqual(available.identity, "AGE-SECRET-KEY-TEST-TWO")
+    }
+
     func testLegacyHistoryRecordDecodesWithoutStructuredDiagnostics() throws {
         let data = Data(
             """

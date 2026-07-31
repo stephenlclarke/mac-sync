@@ -173,13 +173,8 @@ enum SnapshotContentsTree {
     static func ancestorPaths(for path: String) -> [String] {
         let isHomePath = path.hasPrefix("~/")
         let isAbsolutePath = path.hasPrefix("/")
-        let pathWithoutRoot: Substring = if isHomePath {
-            path.dropFirst(2)
-        } else if isAbsolutePath {
-            path.dropFirst()
-        } else {
-            Substring(path)
-        }
+        let rootLength = isHomePath ? 2 : isAbsolutePath ? 1 : 0
+        let pathWithoutRoot = path.dropFirst(rootLength)
         let components = pathWithoutRoot.split(separator: "/").map(String.init)
 
         var currentPath = isHomePath ? "~" : ""
