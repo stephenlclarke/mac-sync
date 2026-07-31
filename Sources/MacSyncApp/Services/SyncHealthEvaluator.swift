@@ -19,34 +19,37 @@ struct SystemSyncHealthCommandRunner: SyncHealthCommandRunning {
 }
 
 struct SyncHealthEvaluator {
-    typealias KeychainLookup = (
+    typealias KeychainPresenceLookup = (
         _ service: String,
         _ account: String,
-    ) -> MacSyncKeychainIdentityLookup
+    ) -> MacSyncKeychainIdentityPresence
+    typealias EncryptedSecretsVerificationLookup = (_ overview: SyncOverview) -> Bool
 
     private let environment: [String: String]
     private let runner: any SyncHealthCommandRunning
-    private let keychainLookup: KeychainLookup
-    private let fileManager: FileManager
+    private let keychainPresenceLookup: KeychainPresenceLookup
+    private let encryptedSecretsVerificationLookup: EncryptedSecretsVerificationLookup
 
     init(
         environment: [String: String],
         runner: (any SyncHealthCommandRunning)? = nil,
-        keychainLookup: KeychainLookup? = nil,
-        fileManager: FileManager = .default,
+        keychainPresenceLookup: KeychainPresenceLookup? = nil,
+        encryptedSecretsVerificationLookup: EncryptedSecretsVerificationLookup? = nil,
     ) {
         self.environment = environment
         self.runner = runner ?? SystemSyncHealthCommandRunner(
             runner: ProcessRunner(environment: environment),
         )
-        self.keychainLookup = keychainLookup ?? { service, account in
-            MacSyncKeychain.identity(
+        self.keychainPresenceLookup = keychainPresenceLookup ?? { service, account in
+            MacSyncKeychain.identityPresence(
                 service: service,
                 account: account,
-                allowInteraction: false,
             )
         }
-        self.fileManager = fileManager
+        self.encryptedSecretsVerificationLookup = encryptedSecretsVerificationLookup ?? { overview in
+            SyncHealthVerificationStore(configuration: overview.configuration)
+                .encryptedSecretsWereVerified(for: overview)
+        }
     }
 
     func activeConditionCodes(in overview: SyncOverview) -> Set<SyncHealthConditionCode> {
@@ -72,7 +75,7 @@ struct SyncHealthEvaluator {
         }
         return Set(
             (overview.status.warnings + overview.status.errors)
-                .compactMap(Self.legacyConditionCode),
+                .compactMap(SyncHealthMessage.conditionCode),
         )
     }
 
@@ -138,98 +141,16 @@ struct SyncHealthEvaluator {
             ?? environment["USER"]
             ?? NSUserName()
         let service = environment["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
-        let lookup = keychainLookup(service, account)
-        guard lookup.availability == .available, let identity = lookup.identity else {
-            return
+        if keychainPresenceLookup(service, account) == .present {
+            active.remove(.encryptedSecretsIdentityMissing)
         }
-        active.remove(.encryptedSecretsIdentityMissing)
-        active.remove(.encryptedSecretsIdentityUnavailable)
-        guard runtimeAvailable else { return }
-
-        let temporaryDirectory = fileManager.temporaryDirectory
-            .appendingPathComponent("mac-sync-health-\(UUID().uuidString)")
-        let identityURL = temporaryDirectory.appendingPathComponent("identity.txt")
-        do {
-            try fileManager.createDirectory(
-                at: temporaryDirectory,
-                withIntermediateDirectories: true,
-            )
-            defer { try? fileManager.removeItem(at: temporaryDirectory) }
-            guard fileManager.createFile(
-                atPath: identityURL.path,
-                contents: Data(identity.utf8),
-                attributes: [.posixPermissions: NSNumber(value: 0o600)],
-            ) else {
-                return
-            }
-        } catch {
-            return
+        if encryptedSecretsVerificationLookup(overview) {
+            active.subtract([
+                .encryptedSecretsIdentityMissing,
+                .encryptedSecretsIdentityUnavailable,
+                .encryptedSecretsIdentityUntrusted,
+                .encryptedSecretsSnapshotSkipped,
+            ])
         }
-
-        let recipient = runner.run("age-keygen", ["-y", identityURL.path])
-        let recipientsFile = "\(overview.configuration.dataRepository)/machines/_shared/config/age-recipients.txt"
-        if recipient.status == 0,
-           readConfigLines(recipientsFile).contains(
-               recipient.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
-           )
-        {
-            active.remove(.encryptedSecretsIdentityUntrusted)
-        }
-
-        let archive = "\(overview.configuration.dataRepository)/machines/\(overview.configuration.machineName)/secrets/secrets.tar.gz.age"
-        guard fileManager.fileExists(atPath: archive) else {
-            active.remove(.encryptedSecretsSnapshotSkipped)
-            return
-        }
-        let decrypt = runner.run(
-            "/bin/sh",
-            [
-                "-c",
-                "age -d -i \(ShellQuoter.quote(identityURL.path)) \(ShellQuoter.quote(archive)) > /dev/null",
-            ],
-        )
-        if decrypt.status == 0 {
-            active.remove(.encryptedSecretsSnapshotSkipped)
-        }
-    }
-
-    private func readConfigLines(_ path: String) -> Set<String> {
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
-            return []
-        }
-        return Set(text.split(separator: "\n").compactMap { line in
-            let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            return value.isEmpty || value.hasPrefix("#") ? nil : value
-        })
-    }
-
-    private static func legacyConditionCode(_ message: String) -> SyncHealthConditionCode? {
-        if message.contains("could not pull machines repo") {
-            return .remoteRefreshFailed
-        }
-        if message.contains("current machine snapshot has local changes")
-            || message.contains("local repo has local changes")
-        {
-            return .remoteRefreshBlockedByLocalChanges
-        }
-        if message.contains("missing local Keychain age identity")
-            || message.contains("no local Keychain age identity")
-        {
-            return .encryptedSecretsIdentityMissing
-        }
-        if message.contains("Keychain age identity requires user interaction")
-            || message.contains("Keychain age identity is unavailable")
-        {
-            return .encryptedSecretsIdentityUnavailable
-        }
-        if message.contains("encrypted secrets snapshot cannot be decrypted") {
-            return .encryptedSecretsSnapshotSkipped
-        }
-        if message.contains("age, age-keygen, gzip, or gtar not found")
-            || message.contains("encrypted-secrets tools are unavailable")
-        {
-            return .encryptedSecretsRuntimeUnavailable
-        }
-        return nil
     }
 }

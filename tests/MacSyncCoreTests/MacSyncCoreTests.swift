@@ -140,6 +140,44 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual(undecodable.availability, .unavailable(status: errSecDecode))
     }
 
+    func testKeychainIdentityPresenceDoesNotRequestSecretData() {
+        var capturedQuery: [CFString: Any] = [:]
+        let present = MacSyncKeychain.identityPresence(
+            service: "test-service",
+            account: "test-account",
+            backend: MacSyncKeychainBackend(
+                copyMatching: { query in
+                    capturedQuery = query
+                    return (errSecSuccess, Data("persistent-reference".utf8))
+                },
+                update: { _, _ in errSecSuccess },
+                add: { _ in errSecSuccess },
+            ),
+        )
+
+        XCTAssertEqual(present, .present)
+        XCTAssertEqual(capturedQuery[kSecReturnPersistentRef] as? Bool, true)
+        XCTAssertNil(capturedQuery[kSecReturnData])
+        XCTAssertNil(capturedQuery[kSecUseAuthenticationContext])
+
+        XCTAssertEqual(
+            MacSyncKeychain.identityPresence(
+                service: "test-service",
+                account: "test-account",
+                backend: keychainBackend(copyStatus: errSecItemNotFound),
+            ),
+            .missing,
+        )
+        XCTAssertEqual(
+            MacSyncKeychain.identityPresence(
+                service: "test-service",
+                account: "test-account",
+                backend: keychainBackend(copyStatus: errSecNotAvailable),
+            ),
+            .unavailable(status: errSecNotAvailable),
+        )
+    }
+
     func testKeychainStoreUpdatesOrAddsDeviceOnlyItem() {
         var addCount = 0
         let updated = MacSyncKeychain.storeIdentity(

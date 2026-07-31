@@ -6,23 +6,9 @@ import XCTest
 final class SyncHealthEvaluatorTests: XCTestCase {
     private let fileManager = FileManager.default
 
-    func testClearsRecordedConditionsWhenRemoteAndKeychainNowWork() throws {
+    func testClearsConditionsThatCanBeCheckedWithoutReadingTheIdentity() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
-        let archive = fixture.data
-            .appendingPathComponent("machines/local/secrets/secrets.tar.gz.age")
-        try fileManager.createDirectory(
-            at: archive.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-        )
-        try Data("encrypted".utf8).write(to: archive)
-        let recipientFile = fixture.data
-            .appendingPathComponent("machines/_shared/config/age-recipients.txt")
-        try fileManager.createDirectory(
-            at: recipientFile.deletingLastPathComponent(),
-            withIntermediateDirectories: true,
-        )
-        try "age1trusted\n".write(to: recipientFile, atomically: true, encoding: .utf8)
         let runner = FakeSyncHealthRunner(
             commandAvailability: true,
         ) { executable, arguments in
@@ -31,12 +17,6 @@ final class SyncHealthEvaluatorTests: XCTestCase {
             {
                 return CommandResult(status: 0, stdout: "head\n", stderr: "")
             }
-            if executable == "age-keygen", arguments.count == 2, arguments[0] == "-y" {
-                return CommandResult(status: 0, stdout: "age1trusted\n", stderr: "")
-            }
-            if executable == "/bin/sh", arguments.count == 2, arguments[0] == "-c" {
-                return CommandResult(status: 0, stdout: "", stderr: "")
-            }
             return CommandResult(status: 1, stdout: "", stderr: "unexpected command")
         }
         let overview = makeOverview(
@@ -44,22 +24,91 @@ final class SyncHealthEvaluatorTests: XCTestCase {
             conditions: [
                 condition(.remoteRefreshFailed, component: .remoteRepository),
                 condition(.encryptedSecretsIdentityMissing, component: .encryptedSecrets),
+                condition(.encryptedSecretsRuntimeUnavailable, component: .encryptedSecrets),
+            ],
+        )
+        let evaluator = SyncHealthEvaluator(
+            environment: ["USER": "local"],
+            runner: runner,
+            keychainPresenceLookup: { _, _ in .present },
+            encryptedSecretsVerificationLookup: { _ in false },
+        )
+
+        XCTAssertTrue(evaluator.activeConditionCodes(in: overview).isEmpty)
+    }
+
+    func testKeepsConditionsThatNeedAnExplicitEncryptedSecretsTest() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = FakeSyncHealthRunner(commandAvailability: true) { _, _ in
+            CommandResult(status: 1, stdout: "", stderr: "unexpected command")
+        }
+        let overview = makeOverview(
+            fixture: fixture,
+            conditions: [
+                condition(.encryptedSecretsIdentityUnavailable, component: .encryptedSecrets),
+                condition(.encryptedSecretsIdentityUntrusted, component: .encryptedSecrets),
                 condition(.encryptedSecretsSnapshotSkipped, component: .encryptedSecrets),
             ],
         )
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainLookup: { _, _ in
-                MacSyncKeychainIdentityLookup(
-                    availability: .available,
-                    identity: "AGE-SECRET-KEY-TEST\n",
-                )
-            },
-            fileManager: fileManager,
+            keychainPresenceLookup: { _, _ in .present },
+        )
+
+        XCTAssertEqual(
+            evaluator.activeConditionCodes(in: overview),
+            [
+                .encryptedSecretsIdentityUnavailable,
+                .encryptedSecretsIdentityUntrusted,
+                .encryptedSecretsSnapshotSkipped,
+            ],
+        )
+    }
+
+    func testClearsEncryptedSecretsConditionsAfterAnExplicitTestPasses() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = FakeSyncHealthRunner(commandAvailability: true) { _, _ in
+            CommandResult(status: 1, stdout: "", stderr: "unexpected command")
+        }
+        let overview = makeOverview(
+            fixture: fixture,
+            conditions: [
+                condition(.encryptedSecretsIdentityUnavailable, component: .encryptedSecrets),
+                condition(.encryptedSecretsIdentityUntrusted, component: .encryptedSecrets),
+                condition(.encryptedSecretsSnapshotSkipped, component: .encryptedSecrets),
+            ],
+        )
+        let evaluator = SyncHealthEvaluator(
+            environment: ["USER": "local"],
+            runner: runner,
+            keychainPresenceLookup: { _, _ in .present },
+            encryptedSecretsVerificationLookup: { _ in true },
         )
 
         XCTAssertTrue(evaluator.activeConditionCodes(in: overview).isEmpty)
+    }
+
+    func testEncryptedSecretsVerificationAppliesOnlyToTheStatusThatWasTested() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let testedOverview = makeOverview(
+            fixture: fixture,
+            conditions: [],
+            finishedAt: "2026-07-31 09:00:03 BST",
+        )
+        let store = SyncHealthVerificationStore(configuration: testedOverview.configuration)
+
+        try store.markEncryptedSecretsVerified(for: testedOverview)
+
+        XCTAssertTrue(store.encryptedSecretsWereVerified(for: testedOverview))
+        XCTAssertFalse(store.encryptedSecretsWereVerified(for: makeOverview(
+            fixture: fixture,
+            conditions: [],
+            finishedAt: "2026-07-31 10:00:03 BST",
+        )))
     }
 
     func testRetainsConditionsWhenChecksStillFail() throws {
@@ -79,10 +128,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         let evaluator = SyncHealthEvaluator(
             environment: ["USER": "local"],
             runner: runner,
-            keychainLookup: { _, _ in
-                MacSyncKeychainIdentityLookup(availability: .missing)
-            },
-            fileManager: fileManager,
+            keychainPresenceLookup: { _, _ in .missing },
         )
 
         XCTAssertEqual(
@@ -112,6 +158,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
     private func makeOverview(
         fixture: Fixture,
         conditions: [SyncHealthCondition],
+        finishedAt: String = "2026-07-31 09:00:03 BST",
     ) -> SyncOverview {
         SyncOverview(
             configuration: SyncConfiguration(
@@ -126,7 +173,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
             status: SyncStatus(
                 result: .partial,
                 startedAt: nil,
-                finishedAt: "2026-07-31 09:00:03 BST",
+                finishedAt: finishedAt,
                 durationSeconds: 3,
                 updatedFileCount: 1,
                 updatedByteCount: 1,

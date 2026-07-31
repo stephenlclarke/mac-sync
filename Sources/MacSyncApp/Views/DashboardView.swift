@@ -110,9 +110,7 @@ struct DashboardView: View {
         GroupBox {
             HStack(alignment: .top, spacing: 16) {
                 SyncActivityIcon(
-                    systemName: store.isRunning
-                        ? "arrow.triangle.2.circlepath.circle.fill"
-                        : store.overview.status.result.systemImage,
+                    systemName: statusSystemImage,
                     isAnimating: store.isRunning,
                 )
                 .font(.system(size: 32))
@@ -120,7 +118,7 @@ struct DashboardView: View {
                 .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(store.activeAction?.title ?? store.overview.status.result.title)
+                    Text(statusTitle)
                         .font(.title3.weight(.semibold))
                     Text(statusDetail)
                         .foregroundStyle(.secondary)
@@ -151,7 +149,7 @@ struct DashboardView: View {
     }
 
     private var activityCard: some View {
-        GroupBox("Latest warnings and errors") {
+        GroupBox("Last sync health") {
             if visibleStatusWarnings.isEmpty, visibleStatusErrors.isEmpty {
                 Text("No recorded warnings or errors from the last sync.")
                     .foregroundStyle(.secondary)
@@ -160,23 +158,52 @@ struct DashboardView: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(visibleStatusErrors, id: \.self) { message in
-                        Label(message, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                            .textSelection(.enabled)
+                        statusMessage(message, severity: .error)
                     }
                     ForEach(visibleStatusWarnings, id: \.self) { message in
                         if isCurrentMachineLocalChangesWarning(message) {
                             localChangesWarning
                         } else {
-                            Label(message, systemImage: "exclamationmark.circle")
-                                .foregroundStyle(.orange)
-                                .textSelection(.enabled)
+                            statusMessage(message, severity: .warning)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func statusMessage(_ message: String, severity: SyncIssueSeverity) -> some View {
+        switch store.healthActivity(for: message) {
+        case .checking:
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Checking whether this condition still applies", systemImage: "clock.arrow.circlepath")
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        case .recovered:
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Recovered since the last sync", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        case .active, .none:
+            Label(
+                message,
+                systemImage: severity == .error
+                    ? "exclamationmark.triangle.fill"
+                    : "exclamationmark.circle",
+            )
+            .foregroundStyle(severity == .error ? .red : .orange)
+            .textSelection(.enabled)
         }
     }
 
@@ -311,9 +338,42 @@ struct DashboardView: View {
     }
 
     private func hasOpenManualTriageIssue(for message: String) -> Bool {
-        store.syncIssues.contains {
-            $0.requiresManualIntervention && $0.message == message
+        let conditionCode = SyncHealthMessage.conditionCode(for: message)
+        return store.syncIssues.contains {
+            store.requiresAttention($0)
+                && ($0.message == message
+                    || (conditionCode != nil && $0.conditionCode == conditionCode))
         }
+    }
+
+    private var statusTitle: String {
+        if let activeAction = store.activeAction {
+            return activeAction.title
+        }
+        if store.overview.status.result == .partial {
+            if store.isCheckingHealth {
+                return "Checking last sync health"
+            }
+            if store.activeHealthIssueCount == 0 {
+                return "Sync complete"
+            }
+        }
+        return store.overview.status.result.title
+    }
+
+    private var statusSystemImage: String {
+        if store.isRunning {
+            return "arrow.triangle.2.circlepath.circle.fill"
+        }
+        if store.overview.status.result == .partial {
+            if store.isCheckingHealth {
+                return "clock.arrow.circlepath"
+            }
+            if store.activeHealthIssueCount == 0 {
+                return "checkmark.circle.fill"
+            }
+        }
+        return store.overview.status.result.systemImage
     }
 
     private var statusDetail: String {
@@ -321,6 +381,9 @@ struct DashboardView: View {
             return "The app is monitoring a live mac-sync process."
         }
         if store.overview.status.result == .partial {
+            if store.isCheckingHealth {
+                return "Checking whether the last sync's warnings still apply."
+            }
             let count = store.activeHealthIssueCount
             return count == 0
                 ? "The last sync completed with warnings that have since recovered."
@@ -343,7 +406,10 @@ struct DashboardView: View {
         case .success:
             return .green
         case .partial:
-            return .orange
+            if store.isCheckingHealth {
+                return .secondary
+            }
+            return store.activeHealthIssueCount == 0 ? .green : .orange
         case .failed:
             return .red
         case .unknown:

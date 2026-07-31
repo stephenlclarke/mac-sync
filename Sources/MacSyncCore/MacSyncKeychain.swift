@@ -48,10 +48,52 @@ public struct MacSyncKeychainIdentityLookup: Equatable, Sendable {
     }
 }
 
+public enum MacSyncKeychainIdentityPresence: Equatable, Sendable {
+    case present
+    case missing
+    case unavailable(status: OSStatus)
+}
+
 /// Reads and stores the age identity without invoking the `security` command.
-/// Scheduled runs explicitly disallow authentication UI so a locked Keychain
-/// becomes a typed, recoverable condition instead of a false "missing" result.
+/// Scheduled callers request a non-interactive LocalAuthentication context so
+/// a locked Keychain can become a typed condition instead of a false "missing"
+/// result. Automatic app health checks use identityPresence and never request
+/// private identity data.
 public enum MacSyncKeychain {
+    public static func identityPresence(
+        service: String,
+        account: String,
+    ) -> MacSyncKeychainIdentityPresence {
+        identityPresence(
+            service: service,
+            account: account,
+            backend: .live,
+        )
+    }
+
+    static func identityPresence(
+        service: String,
+        account: String,
+        backend: MacSyncKeychainBackend,
+    ) -> MacSyncKeychainIdentityPresence {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecReturnPersistentRef: true,
+        ]
+        let (status, _) = backend.copyMatching(query)
+        switch status {
+        case errSecSuccess:
+            return .present
+        case errSecItemNotFound:
+            return .missing
+        default:
+            return .unavailable(status: status)
+        }
+    }
+
     public static func identity(
         service: String,
         account: String,

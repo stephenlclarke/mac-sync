@@ -101,11 +101,37 @@ final class SyncStore: ObservableObject {
     }
 
     var openIssueCount: Int {
-        syncIssues.filter(\.requiresManualIntervention).count
+        syncIssues.filter(requiresAttention).count
     }
 
     var activeHealthIssueCount: Int {
-        syncIssues.filter(\.isActive).count
+        syncIssues.filter { healthActivity(for: $0) == .active }.count
+    }
+
+    var isCheckingHealth: Bool {
+        isSetupComplete && activeConditionCodes == nil
+    }
+
+    func healthActivity(for issue: SyncIssue) -> SyncHealthActivity {
+        SyncHealthActivity.resolve(
+            conditionCode: issue.conditionCode,
+            recordedAsActive: issue.isActive,
+            activeConditionCodes: activeConditionCodes,
+        )
+    }
+
+    func healthActivity(for message: String) -> SyncHealthActivity? {
+        guard let conditionCode = SyncHealthMessage.conditionCode(for: message) else {
+            return nil
+        }
+        return SyncHealthActivity.resolve(
+            conditionCode: conditionCode,
+            activeConditionCodes: activeConditionCodes,
+        )
+    }
+
+    func requiresAttention(_ issue: SyncIssue) -> Bool {
+        issue.disposition == .open && healthActivity(for: issue) == .active
     }
 
     func reload() {
@@ -506,6 +532,14 @@ final class SyncStore: ObservableObject {
             encryptedSecretEntries.removeAll()
             encryptedSecretErrors.removeAll()
             encryptedSecretFailures.removeAll()
+        }
+        if status == 0, completedAction == .testingEncryptedSecretsAccess {
+            do {
+                try SyncHealthVerificationStore(configuration: overview.configuration)
+                    .markEncryptedSecretsVerified(for: overview)
+            } catch {
+                errorMessage = "Encrypted-secrets access passed, but Mac Sync could not save the verification: \(error.localizedDescription)"
+            }
         }
         reload()
         refreshHealth(force: true)

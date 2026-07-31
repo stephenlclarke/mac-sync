@@ -9,7 +9,7 @@ struct SyncIssuesView: View {
     private var filteredIssues: [SyncIssue] {
         switch filter {
         case .open:
-            store.syncIssues.filter(\.requiresManualIntervention)
+            store.syncIssues.filter(store.requiresAttention)
         case .all:
             store.syncIssues
         }
@@ -78,14 +78,12 @@ struct SyncIssuesView: View {
 
     private var emptyState: some View {
         VStack(spacing: 9) {
-            Image(systemName: filter == .open ? "checkmark.circle" : "tray")
+            Image(systemName: emptyStateSystemImage)
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            Text(filter == .open ? "No active conditions need attention" : "No recorded sync conditions")
+            Text(emptyStateTitle)
                 .font(.headline)
-            Text(filter == .open
-                ? "GitHub and encrypted-secrets checks currently pass, or active conditions have been acknowledged."
-                : "Warnings and errors from completed syncs will remain here as history.")
+            Text(emptyStateDetail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -95,8 +93,8 @@ struct SyncIssuesView: View {
 
     private func issueRow(_ issue: SyncIssue) -> some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: issue.isActive ? issue.severity.systemImage : issue.dispositionSystemImage)
-                .foregroundStyle(issue.isActive ? severityColour(issue.severity) : .green)
+            Image(systemName: activitySystemImage(for: issue))
+                .foregroundStyle(activityColour(for: issue))
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 3) {
                 Text(issue.message)
@@ -106,9 +104,9 @@ struct SyncIssuesView: View {
                     : "\(issue.occurrenceCount) occurrences · latest \(issue.recordedAt)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(issue.dispositionTitle)
+                Text(activityTitle(for: issue))
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(dispositionColour(for: issue))
+                    .foregroundStyle(activityColour(for: issue))
             }
         }
         .padding(.vertical, 3)
@@ -122,12 +120,12 @@ struct SyncIssuesView: View {
                         .font(.title2.bold())
                         .foregroundStyle(severityColour(issue.severity))
                     Spacer()
-                    Label(issue.dispositionTitle, systemImage: issue.dispositionSystemImage)
+                    Label(activityTitle(for: issue), systemImage: activitySystemImage(for: issue))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(dispositionColour(for: issue))
+                        .foregroundStyle(activityColour(for: issue))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(dispositionColour(for: issue).opacity(0.14), in: Capsule())
+                        .background(activityColour(for: issue).opacity(0.14), in: Capsule())
                 }
 
                 Text(issue.message)
@@ -159,7 +157,7 @@ struct SyncIssuesView: View {
                         .textSelection(.enabled)
                 }
 
-                if issue.isActive, !issue.recoveryActions.isEmpty {
+                if store.healthActivity(for: issue) == .active, !issue.recoveryActions.isEmpty {
                     GroupBox("Recovery actions") {
                         ViewThatFits(in: .horizontal) {
                             HStack {
@@ -171,7 +169,16 @@ struct SyncIssuesView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } else if !issue.isActive {
+                } else if store.healthActivity(for: issue) == .checking {
+                    GroupBox("Current health") {
+                        Label(
+                            "Mac Sync is checking whether this condition still applies.",
+                            systemImage: "clock.arrow.circlepath",
+                        )
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else if store.healthActivity(for: issue) == .recovered {
                     GroupBox("Current health") {
                         Label(
                             "This condition is no longer present. The occurrence is retained as sync history.",
@@ -191,7 +198,7 @@ struct SyncIssuesView: View {
                     }
                 }
 
-                if issue.isActive {
+                if store.healthActivity(for: issue) == .active {
                     VStack(alignment: .leading, spacing: 7) {
                         Text("Triage note")
                             .font(.headline)
@@ -295,8 +302,62 @@ struct SyncIssuesView: View {
         }
     }
 
-    private func dispositionColour(for issue: SyncIssue) -> Color {
-        issue.isActive ? dispositionColour(issue.disposition) : .green
+    private var emptyStateSystemImage: String {
+        if filter == .open, store.isCheckingHealth {
+            return "clock.arrow.circlepath"
+        }
+        return filter == .open ? "checkmark.circle" : "tray"
+    }
+
+    private var emptyStateTitle: String {
+        if filter == .open, store.isCheckingHealth {
+            return "Checking current health"
+        }
+        return filter == .open
+            ? "No active conditions need attention"
+            : "No recorded sync conditions"
+    }
+
+    private var emptyStateDetail: String {
+        if filter == .open, store.isCheckingHealth {
+            return "GitHub and encrypted-secrets checks are running. No remediation is requested while they complete."
+        }
+        return filter == .open
+            ? "GitHub and encrypted-secrets checks currently pass, or active conditions have been acknowledged."
+            : "Warnings and errors from completed syncs will remain here as history."
+    }
+
+    private func activityTitle(for issue: SyncIssue) -> String {
+        switch store.healthActivity(for: issue) {
+        case .checking:
+            "Checking"
+        case .active:
+            issue.disposition.title
+        case .recovered:
+            "Recovered"
+        }
+    }
+
+    private func activitySystemImage(for issue: SyncIssue) -> String {
+        switch store.healthActivity(for: issue) {
+        case .checking:
+            "clock.arrow.circlepath"
+        case .active:
+            issue.severity.systemImage
+        case .recovered:
+            "checkmark.circle.fill"
+        }
+    }
+
+    private func activityColour(for issue: SyncIssue) -> Color {
+        switch store.healthActivity(for: issue) {
+        case .checking:
+            .secondary
+        case .active:
+            dispositionColour(issue.disposition)
+        case .recovered:
+            .green
+        }
     }
 }
 

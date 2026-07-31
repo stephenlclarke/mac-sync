@@ -332,7 +332,7 @@ struct SyncIssueRepository {
         overview: SyncOverview,
         activity: CandidateActivity,
     ) -> Candidate {
-        let conditionCode = legacyConditionCode(for: message)
+        let conditionCode = SyncHealthMessage.conditionCode(for: message)
         let conditionIsActive = conditionCode.map {
             activity.activeConditionCodes?.contains($0) ?? true
         } ?? true
@@ -348,34 +348,6 @@ struct SyncIssueRepository {
             recoveryActions: conditionCode.map { recoveryActions(for: $0) } ?? [.retrySync],
             isActive: activity.isLatestRun && conditionIsActive,
         )
-    }
-
-    private func legacyConditionCode(for message: String) -> SyncHealthConditionCode? {
-        if isLocalChangesWarning(message) {
-            return .remoteRefreshBlockedByLocalChanges
-        }
-        if message.contains("could not pull machines repo") {
-            return .remoteRefreshFailed
-        }
-        if message.contains("missing local Keychain age identity")
-            || message.contains("no local Keychain age identity")
-        {
-            return .encryptedSecretsIdentityMissing
-        }
-        if message.contains("Keychain age identity requires user interaction")
-            || message.contains("Keychain age identity is unavailable")
-        {
-            return .encryptedSecretsIdentityUnavailable
-        }
-        if message.contains("encrypted-secrets tools are unavailable")
-            || message.contains("age, age-keygen, gzip, or gtar not found")
-        {
-            return .encryptedSecretsRuntimeUnavailable
-        }
-        if message.contains("encrypted secrets snapshot cannot be decrypted") {
-            return .encryptedSecretsSnapshotSkipped
-        }
-        return nil
     }
 
     private func recoveryActions(
@@ -414,25 +386,20 @@ struct SyncIssueRepository {
         latestHistoryID: String?,
         overview: SyncOverview,
     ) -> Bool {
-        guard isLocalChangesWarning(message) else { return true }
+        guard SyncHealthMessage.isLocalChangesWarning(message) else { return true }
         guard overview.status.currentLocalChanges?.isEmpty != true else { return false }
         return sourceRunID == nil || sourceRunID == latestHistoryID
     }
 
-    private func isLocalChangesWarning(_ message: String) -> Bool {
-        message.contains("current machine snapshot has local changes")
-            || message.contains("local repo has local changes")
-    }
-
     private func localChangesDetail(for message: String, overview: SyncOverview) -> String? {
-        guard isLocalChangesWarning(message) else { return nil }
+        guard SyncHealthMessage.isLocalChangesWarning(message) else { return nil }
         let changes = overview.status.currentLocalChanges ?? overview.status.recordedLocalChanges
         guard !changes.isEmpty else { return nil }
         return "Snapshot changes:\n\(changes.joined(separator: "\n"))"
     }
 
     private func recommendedAction(for message: String, severity: SyncIssueSeverity) -> String {
-        if isLocalChangesWarning(message) {
+        if SyncHealthMessage.isLocalChangesWarning(message) {
             return "Review the listed Git changes in mac-sync-data, then commit or revert them outside Mac Sync. Syncs continue and publish this Mac's selected files, but the pre-sync pull stays paused until the checkout is clean."
         }
         if severity == .error {

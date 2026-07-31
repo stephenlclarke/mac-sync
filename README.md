@@ -158,7 +158,9 @@ there is no separate sync implementation or additional state store.
   distinguishes a complete sync, a usable partial sync with a skipped optional
   subsystem, and a failed sync that stopped before unsafe writes. An active
   warning or error appears in the Sync Health card instead of being repeated
-  under Latest warnings and errors.
+  on the dashboard. While live health checks run, recorded conditions are shown
+  as neutral rather than requesting remediation; recovered warnings remain
+  visible as green history under Last sync health.
 - **This Mac** lists the configured snapshot roots and every regular file and
   folder currently stored for the local machine. The configurable outline and
   archive browser behave like purpose-built file managers: expand or collapse
@@ -193,7 +195,10 @@ there is no separate sync implementation or additional state store.
   under **All**. Active conditions offer relevant actions such as testing
   GitHub, switching the data repository to verified SSH, testing encrypted
   secrets, opening Keychain Access, or retrying sync. Notes and acknowledgements
-  remain local under `status/issues/` and are never synced.
+  remain local under `status/issues/` and are never synced. Automatic checks
+  verify that the Keychain item exists without reading the private identity or
+  presenting authentication UI; conditions that require decryption stay active
+  until the user explicitly runs **Test Encrypted Secrets**.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac

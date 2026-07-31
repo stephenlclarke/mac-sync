@@ -282,7 +282,10 @@ Warnings and errors from completed runs also feed local **Sync Health** under
 removes recovered conditions from the attention count, and retains their
 occurrences under **All**. Active conditions provide direct tests and recovery
 actions. Acknowledging an active item clears its Dock badge count. Notes and
-triage decisions are never synced.
+triage decisions are never synced. Automatic health checks inspect only
+Keychain item presence and never read the private identity or present an
+authentication prompt; a user-initiated encrypted-secrets test performs the
+access and decryption checks.
 
 ## Restore
 
