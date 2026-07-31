@@ -16,7 +16,7 @@ final class SyncRepositoryTests: XCTestCase {
             .zshrc
             .config/example
             """,
-            to: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt")
+            to: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt"),
         )
         try write(".config/example", to: fixture.data.appendingPathComponent("machines/peer/config/sync-paths.txt"))
         try write("current shell", to: fixture.data.appendingPathComponent("machines/local/home/.zshrc"))
@@ -28,7 +28,7 @@ final class SyncRepositoryTests: XCTestCase {
         try write("encrypted", to: fixture.data.appendingPathComponent("machines/peer/secrets/secrets.tar.gz.age"))
         try write(
             machineMetadata(computerName: "Peer Mac"),
-            to: fixture.data.appendingPathComponent("machines/peer/MACHINE.md")
+            to: fixture.data.appendingPathComponent("machines/peer/MACHINE.md"),
         )
         try write(
             """
@@ -36,7 +36,7 @@ final class SyncRepositoryTests: XCTestCase {
             updated_file_count=3
             storage_byte_count=42
             """,
-            to: fixture.status.appendingPathComponent("local.env")
+            to: fixture.status.appendingPathComponent("local.env"),
         )
 
         let overview = SyncRepository(environment: fixture.environment).load()
@@ -58,15 +58,15 @@ final class SyncRepositoryTests: XCTestCase {
         defer { try? fileManager.removeItem(at: fixture.root) }
         try write(
             "result=success\n",
-            to: fixture.status.appendingPathComponent("local.env")
+            to: fixture.status.appendingPathComponent("local.env"),
         )
         try write(
             "WARN: current machine snapshot has local changes; skipping pre-operation git pull\n",
-            to: fixture.status.appendingPathComponent("local.warnings.log")
+            to: fixture.status.appendingPathComponent("local.warnings.log"),
         )
         try write(
             " M machines/local/home/.zshrc\n?? machines/local/home/.config/tool/new-setting.json\n",
-            to: fixture.status.appendingPathComponent("local.local-changes.log")
+            to: fixture.status.appendingPathComponent("local.local-changes.log"),
         )
 
         let overview = SyncRepository(environment: fixture.environment).load()
@@ -76,9 +76,45 @@ final class SyncRepositoryTests: XCTestCase {
             [
                 " M machines/local/home/.zshrc",
                 "?? machines/local/home/.config/tool/new-setting.json",
-            ]
+            ],
         )
         XCTAssertNil(overview.status.currentLocalChanges)
+    }
+
+    func testLoadsPartialStatusWithStructuredDiagnostics() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let condition = SyncHealthCondition(
+            code: .remoteAuthenticationFailed,
+            component: .remoteRepository,
+            severity: .error,
+            title: "The data repository could not be refreshed",
+            detail: "fatal: could not read Username for 'https://github.com'",
+            recovery: "Test GitHub access, use SSH if offered, then retry.",
+        )
+        let command = SyncCommandDiagnostic(
+            step: "Refreshing the data repository",
+            command: "git pull --ff-only",
+            attempt: 3,
+            exitStatus: 128,
+            output: "fatal: authentication failed",
+        )
+        try write(
+            "result=partial\nwarning_count=1\nerror_count=0\n",
+            to: fixture.status.appendingPathComponent("local.env"),
+        )
+        try JSONEncoder().encode([condition]).write(
+            to: fixture.status.appendingPathComponent("local.conditions.json"),
+        )
+        try JSONEncoder().encode([command]).write(
+            to: fixture.status.appendingPathComponent("local.commands.json"),
+        )
+
+        let status = SyncRepository(environment: fixture.environment).load().status
+
+        XCTAssertEqual(status.result, .partial)
+        XCTAssertEqual(status.conditions, [condition])
+        XCTAssertEqual(status.commandDiagnostics, [command])
     }
 
     func testClearsStaleStatusAndHistoryForAConfigOnlyFreshCheckout() throws {
@@ -118,16 +154,16 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertEqual(ProcessRunner().run("git", ["-C", fixture.data.path, "init"]).status, 0)
         try write(
             "result=success\n",
-            to: fixture.status.appendingPathComponent("local.env")
+            to: fixture.status.appendingPathComponent("local.env"),
         )
         try write(
             "WARN: current machine snapshot has local changes; skipping pre-operation git pull\n",
-            to: fixture.status.appendingPathComponent("local.warnings.log")
+            to: fixture.status.appendingPathComponent("local.warnings.log"),
         )
         try write("shell", to: fixture.data.appendingPathComponent("machines/local/home/.zshrc"))
         try write(
             "age1sharedrecipient",
-            to: fixture.data.appendingPathComponent("machines/_shared/config/age-recipients.txt")
+            to: fixture.data.appendingPathComponent("machines/_shared/config/age-recipients.txt"),
         )
 
         let overview = SyncRepository(environment: fixture.environment).load()
@@ -138,7 +174,7 @@ final class SyncRepositoryTests: XCTestCase {
             [
                 "?? machines/_shared/config/age-recipients.txt",
                 "?? machines/local/home/.zshrc",
-            ]
+            ],
         )
     }
 
@@ -154,9 +190,9 @@ final class SyncRepositoryTests: XCTestCase {
                     "-C", fixture.data.path,
                     "remote", "add", "origin",
                     "https://github.com/stephenlclarke/mac-sync-data.git",
-                ]
+                ],
             ).status,
-            0
+            0,
         )
         try write(
             """
@@ -165,11 +201,11 @@ final class SyncRepositoryTests: XCTestCase {
             warning_count=1
             remote_repo=git@github.com:stephenlclarke/dot-files.git
             """,
-            to: fixture.status.appendingPathComponent("local.env")
+            to: fixture.status.appendingPathComponent("local.env"),
         )
         try write(
             "WARN: local repo has local changes; skipping pre-operation git pull\n",
-            to: fixture.status.appendingPathComponent("local.warnings.log")
+            to: fixture.status.appendingPathComponent("local.warnings.log"),
         )
 
         let overview = SyncRepository(environment: fixture.environment).load()
@@ -189,16 +225,16 @@ final class SyncRepositoryTests: XCTestCase {
                     "-C", fixture.data.path,
                     "remote", "add", "origin",
                     "https://github.com/stephenlclarke/mac-sync-data.git",
-                ]
+                ],
             ).status,
-            0
+            0,
         )
         try write(
             """
             result=success
             remote_repo=git@github.com:stephenlclarke/mac-sync-data.git
             """,
-            to: fixture.status.appendingPathComponent("local.env")
+            to: fixture.status.appendingPathComponent("local.env"),
         )
 
         let overview = SyncRepository(environment: fixture.environment).load()
@@ -206,7 +242,7 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertEqual(overview.status.result, .success)
         XCTAssertEqual(
             overview.status.remoteRepository,
-            "git@github.com:stephenlclarke/mac-sync-data.git"
+            "git@github.com:stephenlclarke/mac-sync-data.git",
         )
     }
 
@@ -221,7 +257,7 @@ final class SyncRepositoryTests: XCTestCase {
             .zshrc
             .config/tool
             """,
-            to: pathsFile
+            to: pathsFile,
         )
 
         try repository.saveConfiguredPaths([" .zshrc ", ".config/tool", ".zshrc"])
@@ -229,7 +265,7 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertEqual(repository.configuredPaths(), [".zshrc", ".config/tool"])
         XCTAssertEqual(
             try String(contentsOf: pathsFile, encoding: .utf8),
-            "# existing header\n.zshrc\n.config/tool"
+            "# existing header\n.zshrc\n.config/tool",
         )
     }
 
@@ -273,11 +309,11 @@ final class SyncRepositoryTests: XCTestCase {
 
         XCTAssertEqual(
             repository.pathForUserSelection(fixture.home.appendingPathComponent(".config/tool")),
-            ".config/tool"
+            ".config/tool",
         )
         XCTAssertEqual(
             repository.pathForUserSelection(URL(fileURLWithPath: "/Applications/Example.app")),
-            "/Applications/Example.app"
+            "/Applications/Example.app",
         )
     }
 
@@ -305,7 +341,7 @@ final class SyncRepositoryTests: XCTestCase {
             timing: SyncHistoryTiming(
                 startedAt: "2026-07-23 10:00:00 BST",
                 finishedAt: "2026-07-23 10:00:02 BST",
-                durationSeconds: 2
+                durationSeconds: 2,
             ),
             entries: [
                 SyncHistoryEntry(
@@ -314,15 +350,15 @@ final class SyncRepositoryTests: XCTestCase {
                     outcome: .new,
                     path: ".zshrc",
                     source: "/snapshot/.zshrc",
-                    destination: "/home/.zshrc"
+                    destination: "/home/.zshrc",
                 ),
             ],
             diagnostics: SyncHistoryDiagnostics(
                 warningCount: 0,
                 errorCount: 0,
                 warnings: [],
-                errors: []
-            )
+                errors: [],
+            ),
         )
         let historyFile = fixture.status.appendingPathComponent("history/local/0000000000001-run-1.json")
         try fileManager.createDirectory(at: historyFile.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -342,15 +378,15 @@ final class SyncRepositoryTests: XCTestCase {
         try fileManager.createDirectory(at: fixture.data.appendingPathComponent(".git"), withIntermediateDirectories: true)
         try write(
             "# existing selection\n.zshrc\n.config/tool\n",
-            to: fixture.home.appendingPathComponent("github/mac-sync/config/sync-paths.txt")
+            to: fixture.home.appendingPathComponent("github/mac-sync/config/sync-paths.txt"),
         )
         try write(
             ".cache\n",
-            to: fixture.home.appendingPathComponent("github/mac-sync/config/excludes.txt")
+            to: fixture.home.appendingPathComponent("github/mac-sync/config/excludes.txt"),
         )
         try write(
             "age1example\n",
-            to: fixture.home.appendingPathComponent("github/mac-sync/config/age-recipients.txt")
+            to: fixture.home.appendingPathComponent("github/mac-sync/config/age-recipients.txt"),
         )
 
         let store = SyncStore(environment: fixture.environment)
@@ -360,17 +396,17 @@ final class SyncRepositoryTests: XCTestCase {
         XCTAssertEqual(
             try String(
                 contentsOf: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt"),
-                encoding: .utf8
+                encoding: .utf8,
             ),
-            "# existing selection\n.zshrc\n.config/tool\n"
+            "# existing selection\n.zshrc\n.config/tool\n",
         )
         XCTAssertEqual(
             try String(contentsOf: fixture.data.appendingPathComponent("machines/local/config/excludes.txt"), encoding: .utf8),
-            ".cache\n"
+            ".cache\n",
         )
         XCTAssertEqual(
             try String(contentsOf: fixture.data.appendingPathComponent("machines/_shared/config/age-recipients.txt"), encoding: .utf8),
-            "age1example\n"
+            "age1example\n",
         )
         XCTAssertFalse(fileManager.fileExists(atPath: fixture.data.appendingPathComponent("machines/local/config/age-recipients.txt").path))
     }

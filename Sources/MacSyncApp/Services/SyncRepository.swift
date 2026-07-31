@@ -23,7 +23,7 @@ struct SyncRepository {
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
     ) {
         let resolvedEnvironment = MacSyncUserConfiguration.resolvedEnvironment(environment)
         self.environment = resolvedEnvironment
@@ -47,7 +47,7 @@ struct SyncRepository {
             currentMachine: currentMachine,
             peerMachines: peerMachines,
             localSyncProcessID: processID,
-            isLocalSyncActive: processID != nil
+            isLocalSyncActive: processID != nil,
         )
     }
 
@@ -139,6 +139,8 @@ struct SyncRepository {
             "\(prefix).warnings.log",
             "\(prefix).errors.log",
             "\(prefix).local-changes.log",
+            "\(prefix).conditions.json",
+            "\(prefix).commands.json",
             "\(configuration.statusDirectory)/history/\(configuration.machineName)",
         ]
         var removedStatus = false
@@ -174,7 +176,7 @@ struct SyncRepository {
             dataRepository: dataRepository,
             statusDirectory: statusDirectory,
             machineName: machineName,
-            pathsFile: pathsFile
+            pathsFile: pathsFile,
         )
     }
 
@@ -196,14 +198,14 @@ struct SyncRepository {
         let url = URL(fileURLWithPath: configuration.pathsFile)
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
         )
         try output.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func archiveURL(
         forConfiguredPath path: String,
-        configuration: SyncConfiguration
+        configuration: SyncConfiguration,
     ) throws -> URL {
         let machineRoot = URL(fileURLWithPath: configuration.dataRepository)
             .appendingPathComponent("machines")
@@ -244,7 +246,7 @@ struct SyncRepository {
         let replaced = lower.replacingOccurrences(
             of: #"[^a-z0-9._-]+"#,
             with: "-",
-            options: .regularExpression
+            options: .regularExpression,
         )
         return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
@@ -260,6 +262,8 @@ struct SyncRepository {
         let result: SyncResult = switch values["result"] {
         case "success":
             .success
+        case "partial":
+            .partial
         case "failed":
             .failed
         default:
@@ -285,11 +289,20 @@ struct SyncRepository {
             remoteRepository: values["remote_repo"],
             warnings: warnings,
             errors: readLines("\(prefix).errors.log"),
+            conditions: readJSON("\(prefix).conditions.json") ?? [],
+            commandDiagnostics: readJSON("\(prefix).commands.json") ?? [],
             recordedLocalChanges: recordedLocalChanges,
             currentLocalChanges: hasLocalChangesWarning
                 ? currentMachineLocalChanges(configuration: configuration)
-                : nil
+                : nil,
         )
+    }
+
+    private func readJSON<Value: Decodable>(_ path: String) -> Value? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(Value.self, from: data)
     }
 
     private func isCurrentMachineLocalChangesWarning(_ message: String) -> Bool {
@@ -302,14 +315,14 @@ struct SyncRepository {
     /// against a different configured checkout.
     private func statusBelongsToConfiguredRepository(
         _ values: [String: String],
-        configuration: SyncConfiguration
+        configuration: SyncConfiguration,
     ) -> Bool {
         guard let recordedRemote = values["remote_repo"], !recordedRemote.isEmpty else {
             return true
         }
         let currentRemoteResult = ProcessRunner(environment: environment).run(
             "git",
-            ["-C", configuration.dataRepository, "remote", "get-url", "origin"]
+            ["-C", configuration.dataRepository, "remote", "get-url", "origin"],
         )
         let currentRemote = currentRemoteResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         guard currentRemoteResult.status == 0, !currentRemote.isEmpty else {
@@ -334,7 +347,7 @@ struct SyncRepository {
                 "-C", configuration.dataRepository,
                 "status", "--short", "--untracked-files=all",
                 "--", "machines/\(configuration.machineName)", "machines/_shared",
-            ]
+            ],
         )
         guard result.status == 0 else { return nil }
         return result.stdout
@@ -350,7 +363,7 @@ struct SyncRepository {
         guard let files = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles],
         ) else {
             return []
         }
@@ -392,7 +405,7 @@ struct SyncRepository {
 
     private func snapshot(
         named name: String,
-        root: URL
+        root: URL,
     ) -> MachineSnapshot {
         let machineRoot = root.appendingPathComponent(name)
         let metadata = machineMetadata(machineRoot.appendingPathComponent("MACHINE.md").path)
@@ -402,7 +415,7 @@ struct SyncRepository {
             configuredPath(
                 path,
                 isDynamic: !configured.contains(path),
-                machineRoot: machineRoot
+                machineRoot: machineRoot,
             )
         }
         let files = snapshotFiles(machineRoot: machineRoot)
@@ -418,23 +431,23 @@ struct SyncRepository {
             files: files,
             configuredPaths: pathStates,
             hasEncryptedSecrets: fileManager.fileExists(
-                atPath: machineRoot.appendingPathComponent("secrets/secrets.tar.gz.age").path
+                atPath: machineRoot.appendingPathComponent("secrets/secrets.tar.gz.age").path,
             ),
             packageCount: readPathList(machineRoot.appendingPathComponent("homebrew/formulae.txt").path).count
                 + readPathList(machineRoot.appendingPathComponent("homebrew/casks.txt").path).count,
             editorExtensionCount: readPathList(
-                machineRoot.appendingPathComponent("editor/vscode-extensions.txt").path
+                machineRoot.appendingPathComponent("editor/vscode-extensions.txt").path,
             ).count,
             repositoryCount: readPathList(
-                machineRoot.appendingPathComponent("github-repositories/repositories.txt").path
-            ).count
+                machineRoot.appendingPathComponent("github-repositories/repositories.txt").path,
+            ).count,
         )
     }
 
     private func configuredPath(
         _ path: String,
         isDynamic: Bool,
-        machineRoot: URL
+        machineRoot: URL,
     ) -> ConfiguredPath {
         let snapshotPath: URL = if path.hasPrefix("/") {
             machineRoot
@@ -456,8 +469,8 @@ struct SyncRepository {
             snapshotState: .present(
                 directory ? .folder : .file,
                 directory ? recursiveFileCount(snapshotPath) : 1,
-                directory ? recursiveByteCount(snapshotPath) : fileSize(snapshotPath.path)
-            )
+                directory ? recursiveByteCount(snapshotPath) : fileSize(snapshotPath.path),
+            ),
         )
     }
 
@@ -475,8 +488,8 @@ struct SyncRepository {
                             displayPath: section == "home" ? "~/\(relative)" : "/\(relative)",
                             kind: isDirectory(url.path) ? .folder : .file,
                             byteCount: fileSize(url.path),
-                            modifiedAt: modificationDate(url.path)
-                        )
+                            modifiedAt: modificationDate(url.path),
+                        ),
                     )
                 }
             }
@@ -567,7 +580,7 @@ struct SyncRepository {
     private func recursiveFileCount(_ root: URL) -> Int {
         guard let enumerator = fileManager.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isDirectoryKey]
+            includingPropertiesForKeys: [.isDirectoryKey],
         ) else {
             return 0
         }
@@ -577,7 +590,7 @@ struct SyncRepository {
     private func recursiveByteCount(_ root: URL) -> Int {
         guard let enumerator = fileManager.enumerator(
             at: root,
-            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey]
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
         ) else {
             return 0
         }

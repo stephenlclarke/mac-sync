@@ -18,7 +18,7 @@ struct ContentView: View {
                     Label("Sync History", systemImage: "clock.arrow.circlepath")
                         .tag(NavigationItem.history)
                     HStack {
-                        Label("Manual Triage", systemImage: "exclamationmark.bubble")
+                        Label("Sync Health", systemImage: "heart.text.square")
                         Spacer()
                         if store.openIssueCount > 0 {
                             Text("\(store.openIssueCount)")
@@ -116,7 +116,7 @@ struct ContentView: View {
                 if !$0 {
                     store.dismissError()
                 }
-            }
+            },
         )) {
             Button("OK") {
                 store.dismissError()
@@ -155,7 +155,7 @@ struct ContentView: View {
             } else {
                 UnavailableSnapshotView(
                     title: "Machine snapshot unavailable",
-                    message: "Refresh the snapshot list or choose another Mac."
+                    message: "Refresh the snapshot list or choose another Mac.",
                 )
             }
         }
@@ -179,7 +179,7 @@ private struct EmptyMachineView: View {
     var body: some View {
         UnavailableSnapshotView(
             title: "No local snapshot yet",
-            message: "Save your selection and run a sync to create \(configuration.machineName)'s first snapshot."
+            message: "Save your selection and run a sync to create \(configuration.machineName)'s first snapshot.",
         )
     }
 }

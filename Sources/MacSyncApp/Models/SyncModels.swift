@@ -13,6 +13,7 @@ enum NavigationItem: Hashable {
 enum SyncResult: String, Equatable {
     case unknown
     case success
+    case partial
     case failed
 
     var title: String {
@@ -21,6 +22,8 @@ enum SyncResult: String, Equatable {
             "Not yet run"
         case .success:
             "Synced"
+        case .partial:
+            "Partially synced"
         case .failed:
             "Needs attention"
         }
@@ -32,6 +35,8 @@ enum SyncResult: String, Equatable {
             "circle.dashed"
         case .success:
             "checkmark.circle.fill"
+        case .partial:
+            "exclamationmark.circle.fill"
         case .failed:
             "exclamationmark.triangle.fill"
         }
@@ -53,10 +58,52 @@ struct SyncStatus: Equatable {
     let remoteRepository: String?
     let warnings: [String]
     let errors: [String]
+    let conditions: [SyncHealthCondition]
+    let commandDiagnostics: [SyncCommandDiagnostic]
     let recordedLocalChanges: [String]
     /// `nil` means the live working tree could not be inspected. An empty
     /// array means this Mac's snapshot is currently clean.
     let currentLocalChanges: [String]?
+
+    init(
+        result: SyncResult,
+        startedAt: String?,
+        finishedAt: String?,
+        durationSeconds: Int?,
+        updatedFileCount: Int?,
+        updatedByteCount: Int?,
+        storageFileCount: Int?,
+        storageByteCount: Int?,
+        warningCount: Int,
+        errorCount: Int,
+        lastCommit: String?,
+        remoteRepository: String?,
+        warnings: [String],
+        errors: [String],
+        conditions: [SyncHealthCondition] = [],
+        commandDiagnostics: [SyncCommandDiagnostic] = [],
+        recordedLocalChanges: [String],
+        currentLocalChanges: [String]?,
+    ) {
+        self.result = result
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.durationSeconds = durationSeconds
+        self.updatedFileCount = updatedFileCount
+        self.updatedByteCount = updatedByteCount
+        self.storageFileCount = storageFileCount
+        self.storageByteCount = storageByteCount
+        self.warningCount = warningCount
+        self.errorCount = errorCount
+        self.lastCommit = lastCommit
+        self.remoteRepository = remoteRepository
+        self.warnings = warnings
+        self.errors = errors
+        self.conditions = conditions
+        self.commandDiagnostics = commandDiagnostics
+        self.recordedLocalChanges = recordedLocalChanges
+        self.currentLocalChanges = currentLocalChanges
+    }
 
     static let empty = SyncStatus(
         result: .unknown,
@@ -73,8 +120,10 @@ struct SyncStatus: Equatable {
         remoteRepository: nil,
         warnings: [],
         errors: [],
+        conditions: [],
+        commandDiagnostics: [],
         recordedLocalChanges: [],
-        currentLocalChanges: nil
+        currentLocalChanges: nil,
     )
 }
 
@@ -137,7 +186,7 @@ enum SnapshotContentsTree {
                         displayPath: path,
                         kind: .folder,
                         byteCount: 0,
-                        modifiedAt: nil
+                        modifiedAt: nil,
                     ))
                     nodesByPath[path] = node
                     if let parent {
@@ -164,13 +213,12 @@ enum SnapshotContentsTree {
     static func ancestorPaths(for path: String) -> [String] {
         let isHomePath = path.hasPrefix("~/")
         let isAbsolutePath = path.hasPrefix("/")
-        let pathWithoutRoot: Substring
-        if isHomePath {
-            pathWithoutRoot = path.dropFirst(2)
+        let pathWithoutRoot: Substring = if isHomePath {
+            path.dropFirst(2)
         } else if isAbsolutePath {
-            pathWithoutRoot = path.dropFirst()
+            path.dropFirst()
         } else {
-            pathWithoutRoot = Substring(path)
+            Substring(path)
         }
         let components = pathWithoutRoot.split(separator: "/").map(String.init)
 
@@ -235,7 +283,7 @@ enum SnapshotContentsTree {
                 folderCount: children.reduce(0) { count, child in
                     guard child.file.kind == .folder else { return count }
                     return count + 1 + (child.contents?.folderCount ?? 0)
-                }
+                },
             )
         } else {
             nil
@@ -244,7 +292,7 @@ enum SnapshotContentsTree {
             file: node.file,
             title: isRoot ? node.file.displayPath : pathComponent(in: node.file.displayPath),
             contents: contents,
-            children: children.isEmpty ? nil : children
+            children: children.isEmpty ? nil : children,
         )
     }
 
@@ -316,7 +364,7 @@ struct RepositoryLocations: Equatable, Sendable {
 
     static func defaults(homeDirectory: String) -> RepositoryLocations {
         RepositoryLocations(
-            dataRepository: "\(homeDirectory)/github/mac-sync-data"
+            dataRepository: "\(homeDirectory)/github/mac-sync-data",
         )
     }
 }
@@ -414,6 +462,7 @@ enum SyncAction: Equatable {
     case previewingRestore(String)
     case restoring(String)
     case preparingEncryptedSecretsAccess
+    case testingEncryptedSecretsAccess
 
     var title: String {
         switch self {
@@ -425,6 +474,8 @@ enum SyncAction: Equatable {
             "Copying from \(machine)"
         case .preparingEncryptedSecretsAccess:
             "Preparing encrypted secrets access"
+        case .testingEncryptedSecretsAccess:
+            "Testing encrypted secrets access"
         }
     }
 }

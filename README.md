@@ -102,13 +102,21 @@ The setup assistant stores this location in
 `~/Library/Application Support/mac-sync/config.env`. That file contains paths
 only—GitHub credentials continue to be managed by your existing SSH setup or
 Git credential helper/Keychain. The Homebrew CLI and both scheduling options
-read the same locations.
+read the same locations. Each network operation disables terminal credential
+prompts. If HTTPS authentication fails and the equivalent GitHub SSH endpoint
+works, Mac Sync uses that verified SSH transport for the current run. Settings
+and Sync Health can verify SSH first and then change the data repository's
+origin explicitly.
 
 Use **Settings → Automatic sync** in Mac Sync to run at one or more chosen
 times on specific days, choose a preset interval, or enter a custom interval from
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
 same local configuration as the CLI and repairs its executable and application
-paths after a Homebrew upgrade. While the schedule is enabled, Mac Sync also
+paths, interactive process type, and unattended environment after a Homebrew
+upgrade. The agent supplies `HOME`, `USER`, a deterministic `PATH`, and
+non-interactive Git settings. The CLI reads the encrypted-secrets identity
+directly through macOS Security.framework, with access limited to after the
+first login unlock. While the schedule is enabled, Mac Sync also
 opens when you sign in so its menu-bar controls remain available. Mac Sync does
 not show an additional Dock icon by default; enable **Show app icon in the
 Dock** under **Settings → App appearance** if you prefer regular-app behaviour.
@@ -146,11 +154,11 @@ uses the existing CLI and the same configuration and snapshot repositories, so
 there is no separate sync implementation or additional state store.
 
 - **Overview** shows the last completed sync, live activity, warnings, errors,
-  the snapshot footprint for this Mac, and the available peer snapshots. A
-  skipped pre-operation pull shows the recorded and current local Git changes
-  in this Mac's snapshot, or marks a historical warning as resolved once the
-  snapshot is clean again. An open warning or error appears in the Manual
-  Triage card instead of being repeated under Latest warnings and errors.
+  the snapshot footprint for this Mac, and the available peer snapshots. It
+  distinguishes a complete sync, a usable partial sync with a skipped optional
+  subsystem, and a failed sync that stopped before unsafe writes. An active
+  warning or error appears in the Sync Health card instead of being repeated
+  under Latest warnings and errors.
 - **This Mac** lists the configured snapshot roots and every regular file and
   folder currently stored for the local machine. The configurable outline and
   archive browser behave like purpose-built file managers: expand or collapse
@@ -176,15 +184,16 @@ there is no separate sync implementation or additional state store.
   subject to that Mac's `config/excludes.txt` rules.
 - **Sync History** keeps a local, per-run ledger of completed publishes and
   restores. It shows file-level uploads and downloads, whether an item was new,
-  updated, removed, or skipped, and the source and destination paths. Preview
-  runs are deliberately not added to the history.
-- **Manual Triage** is a local queue for warnings and errors from completed
-  syncs. Repeated occurrences of the same condition are grouped with first,
-  latest, and occurrence details; a new occurrence reopens an acknowledged or
-  resolved condition. The queue never pauses scheduled or background syncs.
-  Review a condition later, add a note, acknowledge it to clear the Dock badge,
-  or mark it resolved. The triage state is stored under `status/issues/` on
-  this Mac and is never synced.
+  updated, removed, or skipped, and the source and destination paths. Failed
+  network attempts are recorded as bounded, credential-redacted command
+  diagnostics. Preview runs are deliberately not added to the history.
+- **Sync Health** separates active health from history. It checks recorded
+  GitHub and encrypted-secrets conditions again, automatically marks conditions
+  as recovered when the underlying check passes, and retains old occurrences
+  under **All**. Active conditions offer relevant actions such as testing
+  GitHub, switching the data repository to verified SSH, testing encrypted
+  secrets, opening Keychain Access, or retrying sync. Notes and acknowledgements
+  remain local under `status/issues/` and are never synced.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac
@@ -318,7 +327,10 @@ repo. By default it is written under:
 
 Completed real syncs and restores also write one JSON record per run under
 `history/<machine-name>/` in that same directory. These records contain transfer
-metadata and local paths only; they never contain decrypted secret contents.
+metadata, typed health conditions, and credential-redacted command diagnostics;
+they never contain decrypted secret contents. A result is `success` only when
+all enabled work completed, `partial` when the usable snapshot completed but an
+optional subsystem was skipped, and `failed` when the run stopped.
 
 Use `brew services info mac-sync` for the optional Homebrew service status.
 The app shows its own automatic-sync schedule in **Settings → Automatic sync**.
@@ -608,9 +620,11 @@ Each row stores the path relative to `~/github` and a credential-free GitHub
 clone URL. Non-GitHub remotes, submodules, and non-repo directories are ignored.
 
 Before pushing a machine snapshot, `mac-sync` checks whether the data repository
-is behind its upstream branch and rebases only when needed. Unrelated local
-edits are preserved, so scheduled backups can continue while other machines'
-data is being reviewed.
+is behind its upstream branch and rebases only when needed. A configured remote
+pull is attempted up to three times. Mac Sync stops before changing managed
+snapshot files if it cannot verify that refresh. Unrelated local edits are
+preserved with Git autostash; changes inside the current machine snapshot remain
+visible as a health condition for manual review.
 
 Rsync excludes are listed in:
 

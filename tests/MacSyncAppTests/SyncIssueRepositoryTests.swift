@@ -19,15 +19,15 @@ final class SyncIssueRepositoryTests: XCTestCase {
                 timing: SyncHistoryTiming(
                     startedAt: "2026-07-23 10:00:00 BST",
                     finishedAt: "2026-07-23 10:00:02 BST",
-                    durationSeconds: 2
+                    durationSeconds: 2,
                 ),
                 entries: [],
                 diagnostics: SyncHistoryDiagnostics(
                     warningCount: 1,
                     errorCount: 1,
                     warnings: ["WARN: remote needs attention"],
-                    errors: ["ERROR: git push failed"]
-                )
+                    errors: ["ERROR: git push failed"],
+                ),
             ),
         ]
         let overview = makeOverview(fixture: fixture, history: history)
@@ -41,7 +41,7 @@ final class SyncIssueRepositoryTests: XCTestCase {
             issueID: error.id,
             latestOccurrenceID: error.latestOccurrenceID,
             disposition: .acknowledged,
-            note: "Will repair remote access after the maintenance window."
+            note: "Will repair remote access after the maintenance window.",
         )
 
         let reloadedIssues = repository.issues(for: overview)
@@ -63,7 +63,7 @@ final class SyncIssueRepositoryTests: XCTestCase {
         ]
 
         let initialIssue = try XCTUnwrap(
-            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first
+            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first,
         )
         XCTAssertEqual(initialIssue.occurrenceCount, 2)
         XCTAssertEqual(initialIssue.firstRecordedAt, "2026-07-30 09:00:00 BST")
@@ -73,10 +73,10 @@ final class SyncIssueRepositoryTests: XCTestCase {
             issueID: initialIssue.id,
             latestOccurrenceID: initialIssue.latestOccurrenceID,
             disposition: .acknowledged,
-            note: "Recovering the trusted identity."
+            note: "Recovering the trusted identity.",
         )
         let acknowledged = try XCTUnwrap(
-            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first
+            repository.issues(for: makeOverview(fixture: fixture, history: initialHistory)).first,
         )
         XCTAssertEqual(acknowledged.disposition, .acknowledged)
 
@@ -84,7 +84,7 @@ final class SyncIssueRepositoryTests: XCTestCase {
             makeHistoryRecord(id: "latest", finishedAt: "2026-07-30 11:00:00 BST", error: repeatedError),
         ] + initialHistory
         let reopened = try XCTUnwrap(
-            repository.issues(for: makeOverview(fixture: fixture, history: recurringHistory)).first
+            repository.issues(for: makeOverview(fixture: fixture, history: recurringHistory)).first,
         )
         XCTAssertEqual(reopened.occurrenceCount, 3)
         XCTAssertEqual(reopened.disposition, .open)
@@ -105,15 +105,15 @@ final class SyncIssueRepositoryTests: XCTestCase {
                 timing: SyncHistoryTiming(
                     startedAt: "2026-07-23 09:00:00 BST",
                     finishedAt: "2026-07-23 09:00:03 BST",
-                    durationSeconds: 3
+                    durationSeconds: 3,
                 ),
                 entries: [],
                 diagnostics: SyncHistoryDiagnostics(
                     warningCount: 1,
                     errorCount: 0,
                     warnings: [localChangesWarning],
-                    errors: []
-                )
+                    errors: [],
+                ),
             ),
         ]
         let overview = makeOverview(
@@ -121,9 +121,9 @@ final class SyncIssueRepositoryTests: XCTestCase {
             status: makeStatus(
                 warnings: [localChangesWarning],
                 finishedAt: "2026-07-23 09:00:03 BST",
-                currentLocalChanges: []
+                currentLocalChanges: [],
             ),
-            history: history
+            history: history,
         )
 
         XCTAssertTrue(SyncIssueRepository(configuration: overview.configuration).issues(for: overview).isEmpty)
@@ -138,18 +138,106 @@ final class SyncIssueRepositoryTests: XCTestCase {
             status: makeStatus(
                 warnings: [warning],
                 finishedAt: "2026-06-28 22:15:18 BST",
-                currentLocalChanges: []
+                currentLocalChanges: [],
             ),
-            history: []
+            history: [],
         )
 
         XCTAssertTrue(SyncIssueRepository(configuration: overview.configuration).issues(for: overview).isEmpty)
     }
 
+    func testTypedConditionRemainsInHistoryAfterLiveHealthRecovers() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let condition = SyncHealthCondition(
+            code: .encryptedSecretsIdentityMissing,
+            component: .encryptedSecrets,
+            severity: .warning,
+            title: "Encrypted secrets were not updated",
+            detail: "No age identity was found in this Mac's Keychain.",
+            recovery: "Test encrypted-secrets access, then retry.",
+        )
+        let history = [
+            SyncHistoryRecord(
+                id: "partial-sync",
+                action: .sync,
+                result: .partial,
+                timing: SyncHistoryTiming(
+                    startedAt: "2026-07-31 09:00:00 BST",
+                    finishedAt: "2026-07-31 09:00:03 BST",
+                    durationSeconds: 3,
+                ),
+                entries: [],
+                diagnostics: SyncHistoryDiagnostics(
+                    warningCount: 1,
+                    errorCount: 0,
+                    warnings: ["WARN: no local Keychain age identity"],
+                    errors: [],
+                    conditions: [condition],
+                ),
+            ),
+        ]
+        let overview = makeOverview(fixture: fixture, history: history)
+        let repository = SyncIssueRepository(configuration: overview.configuration)
+
+        let active = try XCTUnwrap(
+            repository.issues(
+                for: overview,
+                activeConditionCodes: [.encryptedSecretsIdentityMissing],
+            ).first,
+        )
+        XCTAssertTrue(active.isActive)
+        XCTAssertTrue(active.requiresManualIntervention)
+        XCTAssertEqual(
+            active.recoveryActions,
+            [.testEncryptedSecrets, .openKeychainAccess, .retrySync],
+        )
+
+        let recovered = try XCTUnwrap(
+            repository.issues(for: overview, activeConditionCodes: []).first,
+        )
+        XCTAssertFalse(recovered.isActive)
+        XCTAssertFalse(recovered.requiresManualIntervention)
+        XCTAssertEqual(recovered.dispositionTitle, "Recovered")
+    }
+
+    func testTypedStatusConditionKeepsItsRecoveryActionsWithoutHistory() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let condition = SyncHealthCondition(
+            code: .remoteAuthenticationFailed,
+            component: .remoteRepository,
+            severity: .error,
+            title: "The data repository could not be refreshed",
+            detail: "Git authentication failed.",
+            recovery: "Test GitHub access, use SSH if offered, then retry.",
+        )
+        let status = makeStatus(
+            result: .failed,
+            errors: ["ERROR: the data repository could not be refreshed"],
+            finishedAt: "2026-07-31 09:00:03 BST",
+            conditions: [condition],
+        )
+        let overview = makeOverview(fixture: fixture, status: status, history: [])
+
+        let issue = try XCTUnwrap(
+            SyncIssueRepository(configuration: overview.configuration)
+                .issues(
+                    for: overview,
+                    activeConditionCodes: [.remoteAuthenticationFailed],
+                )
+                .first,
+        )
+
+        XCTAssertEqual(issue.conditionCode, .remoteAuthenticationFailed)
+        XCTAssertEqual(issue.message, condition.title)
+        XCTAssertEqual(issue.recoveryActions, [.testGitHubAccess, .useSSH, .retrySync])
+    }
+
     private func makeOverview(
         fixture: Fixture,
         status: SyncStatus? = nil,
-        history: [SyncHistoryRecord]
+        history: [SyncHistoryRecord],
     ) -> SyncOverview {
         SyncOverview(
             configuration: SyncConfiguration(
@@ -157,14 +245,14 @@ final class SyncIssueRepositoryTests: XCTestCase {
                 dataRepository: fixture.data.path,
                 statusDirectory: fixture.status.path,
                 machineName: "local",
-                pathsFile: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt").path
+                pathsFile: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt").path,
             ),
             status: status ?? makeStatus(),
             history: history,
             currentMachine: nil,
             peerMachines: [],
             localSyncProcessID: nil,
-            isLocalSyncActive: false
+            isLocalSyncActive: false,
         )
     }
 
@@ -173,7 +261,8 @@ final class SyncIssueRepositoryTests: XCTestCase {
         warnings: [String] = [],
         errors: [String] = [],
         finishedAt: String? = nil,
-        currentLocalChanges: [String]? = nil
+        conditions: [SyncHealthCondition] = [],
+        currentLocalChanges: [String]? = nil,
     ) -> SyncStatus {
         SyncStatus(
             result: result,
@@ -190,8 +279,9 @@ final class SyncIssueRepositoryTests: XCTestCase {
             remoteRepository: nil,
             warnings: warnings,
             errors: errors,
+            conditions: conditions,
             recordedLocalChanges: [],
-            currentLocalChanges: currentLocalChanges
+            currentLocalChanges: currentLocalChanges,
         )
     }
 
@@ -204,15 +294,15 @@ final class SyncIssueRepositoryTests: XCTestCase {
             timing: SyncHistoryTiming(
                 startedAt: finishedAt,
                 finishedAt: finishedAt,
-                durationSeconds: 1
+                durationSeconds: 1,
             ),
             entries: [],
             diagnostics: SyncHistoryDiagnostics(
                 warningCount: 0,
                 errorCount: 1,
                 warnings: [],
-                errors: [error]
-            )
+                errors: [error],
+            ),
         )
     }
 

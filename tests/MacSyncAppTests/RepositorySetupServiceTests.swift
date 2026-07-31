@@ -52,7 +52,7 @@ final class RepositorySetupServiceTests: XCTestCase {
                 GitCommandResult(
                     status: 128,
                     stdout: "",
-                    stderr: "fatal: Authentication failed for 'https://token-value@github.com/example/mac-sync-data.git'\n"
+                    stderr: "fatal: Authentication failed for 'https://token-value@github.com/example/mac-sync-data.git'\n",
                 )
             default:
                 GitCommandResult(status: 1, stdout: "", stderr: "unexpected command")
@@ -91,6 +91,74 @@ final class RepositorySetupServiceTests: XCTestCase {
         XCTAssertFalse(runner.commands.contains { $0.arguments.first == "push" })
     }
 
+    func testUseSSHVerifiesAccessBeforeUpdatingOrigin() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        try makeGitDirectory(at: fixture.locations.dataRepository)
+
+        let runner = FakeGitRunner { arguments, directory, _ in
+            switch (directory, arguments) {
+            case (fixture.locations.dataRepository, ["remote", "get-url", "origin"]):
+                GitCommandResult(
+                    status: 0,
+                    stdout: "https://github.com/example/mac-sync-data.git\n",
+                    stderr: "",
+                )
+            case (fixture.locations.dataRepository, ["branch", "--show-current"]):
+                GitCommandResult(status: 0, stdout: "main\n", stderr: "")
+            case (fixture.locations.dataRepository, ["ls-remote", "git@github.com:example/mac-sync-data.git", "HEAD"]):
+                GitCommandResult(status: 0, stdout: "head\n", stderr: "")
+            case (fixture.locations.dataRepository, ["remote", "set-url", "origin", "git@github.com:example/mac-sync-data.git"]):
+                GitCommandResult(status: 0, stdout: "", stderr: "")
+            default:
+                GitCommandResult(status: 1, stdout: "", stderr: "unexpected command")
+            }
+        }
+
+        let remote = try RepositorySetupService(fileManager: fileManager, runner: runner)
+            .useSSHRemote(for: fixture.locations)
+
+        XCTAssertEqual(remote, "git@github.com:example/mac-sync-data.git")
+        XCTAssertEqual(
+            runner.commands.suffix(2).map(\.arguments),
+            [
+                ["ls-remote", "git@github.com:example/mac-sync-data.git", "HEAD"],
+                ["remote", "set-url", "origin", "git@github.com:example/mac-sync-data.git"],
+            ],
+        )
+    }
+
+    func testUseSSHDoesNotUpdateOriginWhenAccessFails() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        try makeGitDirectory(at: fixture.locations.dataRepository)
+
+        let runner = FakeGitRunner { arguments, directory, _ in
+            switch (directory, arguments) {
+            case (fixture.locations.dataRepository, ["remote", "get-url", "origin"]):
+                GitCommandResult(
+                    status: 0,
+                    stdout: "https://github.com/example/mac-sync-data.git\n",
+                    stderr: "",
+                )
+            case (fixture.locations.dataRepository, ["branch", "--show-current"]):
+                GitCommandResult(status: 0, stdout: "main\n", stderr: "")
+            case (fixture.locations.dataRepository, ["ls-remote", "git@github.com:example/mac-sync-data.git", "HEAD"]):
+                GitCommandResult(status: 128, stdout: "", stderr: "Permission denied (publickey).\n")
+            default:
+                GitCommandResult(status: 1, stdout: "", stderr: "unexpected command")
+            }
+        }
+
+        XCTAssertThrowsError(
+            try RepositorySetupService(fileManager: fileManager, runner: runner)
+                .useSSHRemote(for: fixture.locations),
+        ) { error in
+            XCTAssertTrue(error.localizedDescription.contains("SSH access could not be verified"))
+        }
+        XCTAssertFalse(runner.commands.contains { $0.arguments.starts(with: ["remote", "set-url"]) })
+    }
+
     func testCloneFailurePrefersGitDiagnosticOverClonePreamble() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
@@ -102,7 +170,7 @@ final class RepositorySetupServiceTests: XCTestCase {
             return GitCommandResult(
                 status: 128,
                 stdout: "",
-                stderr: "Cloning into '\(fixture.locations.dataRepository)'...\nfatal: Authentication failed for 'https://token-value@github.com/example/mac-sync-data.git'\n"
+                stderr: "Cloning into '\(fixture.locations.dataRepository)'...\nfatal: Authentication failed for 'https://token-value@github.com/example/mac-sync-data.git'\n",
             )
         }
 
@@ -110,7 +178,7 @@ final class RepositorySetupServiceTests: XCTestCase {
 
         XCTAssertEqual(
             result.messages,
-            ["Unable to clone mac-sync data: fatal: Authentication failed for 'https://***@github.com/example/mac-sync-data.git'"]
+            ["Unable to clone mac-sync data: fatal: Authentication failed for 'https://***@github.com/example/mac-sync-data.git'"],
         )
         XCTAssertFalse(result.messages.joined().contains(fixture.locations.dataRepository))
         XCTAssertFalse(result.messages.joined().contains("token-value"))
@@ -154,7 +222,7 @@ final class RepositorySetupServiceTests: XCTestCase {
         try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         return SetupFixture(
             root: root,
-            locations: RepositoryLocations(dataRepository: root.appendingPathComponent("mac-sync-data").path)
+            locations: RepositoryLocations(dataRepository: root.appendingPathComponent("mac-sync-data").path),
         )
     }
 
@@ -182,7 +250,7 @@ private final class FakeGitRunner: GitCommandRunning {
     func run(
         arguments: [String],
         workingDirectory: String?,
-        extraEnvironment: [String: String]
+        extraEnvironment: [String: String],
     ) -> GitCommandResult {
         commands.append((arguments, workingDirectory))
         extraEnvironments.append(extraEnvironment)

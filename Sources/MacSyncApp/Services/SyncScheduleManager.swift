@@ -171,7 +171,7 @@ struct SyncScheduleManager {
         {
             return SyncScheduleStatus(
                 state: .configured(.interval(minutes: seconds / 60)),
-                agentPath: agentURL.path
+                agentPath: agentURL.path,
             )
         }
 
@@ -189,7 +189,7 @@ struct SyncScheduleManager {
 
         try fileManager.createDirectory(
             at: agentURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
         )
 
         // bootout is deliberately best-effort: the agent may be configured on
@@ -218,10 +218,10 @@ struct SyncScheduleManager {
             fromPropertyList: launchAgentValues(
                 executableURL: executableURL,
                 schedule: schedule,
-                logsDirectory: logsDirectory
+                logsDirectory: logsDirectory,
             ),
             format: .xml,
-            options: 0
+            options: 0,
         )
         try data.write(to: agentURL, options: .atomic)
         try writeApplicationLaunchAgent(applicationURL: applicationURL)
@@ -251,9 +251,14 @@ struct SyncScheduleManager {
             throw SyncScheduleError.missingApplication
         }
 
-        let syncArguments = propertyListValues(at: agentURL)?["ProgramArguments"] as? [String]
+        let syncValues = propertyListValues(at: agentURL)
+        let syncArguments = syncValues?["ProgramArguments"] as? [String]
+        let syncProcessType = syncValues?["ProcessType"] as? String
+        let syncEnvironment = syncValues?["EnvironmentVariables"] as? [String: String]
         let applicationArguments = propertyListValues(at: applicationAgentURL)?["ProgramArguments"] as? [String]
         guard syncArguments != [executableURL.path, "run"]
+            || syncProcessType != "Interactive"
+            || syncEnvironment != launchEnvironment
             || applicationArguments != ["/usr/bin/open", "-g", applicationURL.path]
         else { return }
 
@@ -382,12 +387,12 @@ struct SyncScheduleManager {
     private func launchAgentValues(
         executableURL: URL,
         schedule: SyncSchedule,
-        logsDirectory: URL
+        logsDirectory: URL,
     ) -> [String: Any] {
         var values: [String: Any] = [
             "Label": Self.label,
             "ProgramArguments": [executableURL.path, "run"],
-            "ProcessType": "Background",
+            "ProcessType": "Interactive",
             "EnvironmentVariables": launchEnvironment,
             "StandardOutPath": logsDirectory.appendingPathComponent("scheduler.log").path,
             "StandardErrorPath": logsDirectory.appendingPathComponent("scheduler-error.log").path,
@@ -411,13 +416,23 @@ struct SyncScheduleManager {
 
     private var launchEnvironment: [String: String] {
         let preparedEnvironment = MacSyncRuntimeEnvironment.prepared(environment)
-        return [
+        var values = [
+            "HOME": configuration.homeDirectory,
+            "USER": environment["USER"] ?? NSUserName(),
+            "GIT_TERMINAL_PROMPT": "0",
             "MAC_SYNC_MACHINE": configuration.machineName,
             "MAC_SYNC_MACHINES_REPO": configuration.dataRepository,
             "MAC_SYNC_PATHS_FILE": configuration.pathsFile,
             "MAC_SYNC_STATUS_DIR": configuration.statusDirectory,
             "PATH": preparedEnvironment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
+        if let keychainService = environment["MAC_SYNC_KEYCHAIN_SERVICE"] {
+            values["MAC_SYNC_KEYCHAIN_SERVICE"] = keychainService
+        }
+        if let keychainAccount = environment["MAC_SYNC_KEYCHAIN_ACCOUNT"] {
+            values["MAC_SYNC_KEYCHAIN_ACCOUNT"] = keychainAccount
+        }
+        return values
     }
 
     private func writeApplicationLaunchAgent(applicationURL: URL) throws {
@@ -430,7 +445,7 @@ struct SyncScheduleManager {
         let data = try PropertyListSerialization.data(
             fromPropertyList: values,
             format: .xml,
-            options: 0
+            options: 0,
         )
         try data.write(to: applicationAgentURL, options: .atomic)
     }

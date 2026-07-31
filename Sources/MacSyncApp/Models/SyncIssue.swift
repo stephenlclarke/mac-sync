@@ -1,4 +1,5 @@
 import Foundation
+import MacSyncCore
 
 enum SyncIssueSeverity: String, Codable, Hashable {
     case warning
@@ -51,8 +52,51 @@ enum SyncIssueDisposition: String, Codable, Hashable {
     }
 }
 
+enum SyncIssueRecoveryAction: String, CaseIterable, Hashable, Identifiable {
+    case retrySync
+    case testGitHubAccess
+    case useSSH
+    case testEncryptedSecrets
+    case openKeychainAccess
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .retrySync:
+            "Retry Sync"
+        case .testGitHubAccess:
+            "Test GitHub Access"
+        case .useSSH:
+            "Use SSH"
+        case .testEncryptedSecrets:
+            "Test Encrypted Secrets"
+        case .openKeychainAccess:
+            "Open Keychain Access"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .retrySync:
+            "arrow.clockwise"
+        case .testGitHubAccess:
+            "network"
+        case .useSSH:
+            "key.horizontal"
+        case .testEncryptedSecrets:
+            "lock.shield"
+        case .openKeychainAccess:
+            "key"
+        }
+    }
+}
+
 struct SyncIssue: Identifiable, Equatable {
     let id: String
+    let conditionCode: SyncHealthConditionCode?
     let severity: SyncIssueSeverity
     let message: String
     let recommendedAction: String
@@ -62,11 +106,21 @@ struct SyncIssue: Identifiable, Equatable {
     let occurrenceCount: Int
     let latestOccurrenceID: String
     let detail: String?
+    let recoveryActions: [SyncIssueRecoveryAction]
+    let isActive: Bool
     let disposition: SyncIssueDisposition
     let note: String
     let updatedAt: Date?
 
     var requiresManualIntervention: Bool {
-        disposition == .open
+        isActive && disposition == .open
+    }
+
+    var dispositionTitle: String {
+        isActive ? disposition.title : "Recovered"
+    }
+
+    var dispositionSystemImage: String {
+        isActive ? disposition.systemImage : "checkmark.circle.fill"
     }
 }

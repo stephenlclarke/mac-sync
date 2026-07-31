@@ -5,6 +5,8 @@ struct SyncHistoryView: View {
     @ObservedObject var store: SyncStore
     @State private var selectedRecordID: String?
     @State private var filter: HistoryFilter = .all
+    @State private var conditionsExpanded = true
+    @State private var diagnosticsExpanded = false
 
     private var selectedRecord: SyncHistoryRecord? {
         if let selectedRecordID,
@@ -31,7 +33,7 @@ struct SyncHistoryView: View {
                     historyEmptyState(
                         title: "No sync history yet",
                         systemImage: "clock.arrow.circlepath",
-                        detail: "Run a sync or restore to create the first local record."
+                        detail: "Run a sync or restore to create the first local record.",
                     )
                 } else {
                     List(store.overview.history, selection: $selectedRecordID) { record in
@@ -50,7 +52,7 @@ struct SyncHistoryView: View {
                 historyEmptyState(
                     title: "No sync history yet",
                     systemImage: "clock.arrow.circlepath",
-                    detail: "Completed syncs and restores will appear here."
+                    detail: "Completed syncs and restores will appear here.",
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -82,7 +84,7 @@ struct SyncHistoryView: View {
                         .font(.title2.bold())
                         .foregroundStyle(resultColour(for: record))
                     Spacer()
-                    Text(record.result == .success ? "Completed" : "Failed")
+                    Text(resultTitle(for: record))
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -97,6 +99,32 @@ struct SyncHistoryView: View {
                         .foregroundStyle(.secondary)
                 }
                 transferSummary(record)
+                if let conditions = record.conditions, !conditions.isEmpty {
+                    DisclosureGroup(
+                        "Health conditions (\(conditions.count))",
+                        isExpanded: $conditionsExpanded,
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(conditions) { condition in
+                                conditionRow(condition)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                }
+                if let commands = record.commands, !commands.isEmpty {
+                    DisclosureGroup(
+                        "Command diagnostics (\(commands.count))",
+                        isExpanded: $diagnosticsExpanded,
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(commands) { command in
+                                commandDiagnosticRow(command)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                }
             }
             .padding(20)
 
@@ -113,9 +141,9 @@ struct SyncHistoryView: View {
                 historyEmptyState(
                     title: "No \(filter.title.lowercased()) events",
                     systemImage: filter.systemImage,
-                    detail: "This run did not record any matching file events."
+                    detail: "This run did not record any matching file events.",
                 )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(entries) { entry in
                     transferRow(entry)
@@ -202,7 +230,70 @@ struct SyncHistoryView: View {
     }
 
     private func resultColour(for record: SyncHistoryRecord) -> Color {
-        record.result == .success ? .green : .red
+        switch record.result {
+        case .success:
+            .green
+        case .partial:
+            .orange
+        case .failed:
+            .red
+        }
+    }
+
+    private func resultTitle(for record: SyncHistoryRecord) -> String {
+        switch record.result {
+        case .success:
+            "Completed"
+        case .partial:
+            "Completed with warnings"
+        case .failed:
+            "Failed"
+        }
+    }
+
+    private func conditionRow(_ condition: SyncHealthCondition) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: condition.severity == .error
+                ? "exclamationmark.triangle.fill"
+                : "exclamationmark.circle.fill")
+                .foregroundStyle(condition.severity == .error ? .red : .orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(condition.title)
+                    .fontWeight(.medium)
+                Text(condition.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text(condition.recovery)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func commandDiagnosticRow(_ command: SyncCommandDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("\(command.step) · attempt \(command.attempt)")
+                    .fontWeight(.medium)
+                Spacer()
+                Text("exit \(command.exitStatus)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(command.exitStatus == 0 ? .green : .red)
+            }
+            Text(command.command)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+            if !command.output.isEmpty {
+                Text(command.output)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func transferCount(_ record: SyncHistoryRecord, direction: SyncHistoryTransferDirection) -> Int {

@@ -15,7 +15,7 @@ protocol GitCommandRunning {
     func run(
         arguments: [String],
         workingDirectory: String?,
-        extraEnvironment: [String: String]
+        extraEnvironment: [String: String],
     ) -> GitCommandResult
 }
 
@@ -25,13 +25,13 @@ struct SystemGitCommandRunner: GitCommandRunning {
     func run(
         arguments: [String],
         workingDirectory: String?,
-        extraEnvironment: [String: String]
+        extraEnvironment: [String: String],
     ) -> GitCommandResult {
         let result = ProcessRunner(environment: environment).run(
             "git",
             arguments,
             workingDirectory: workingDirectory,
-            extraEnvironment: extraEnvironment
+            extraEnvironment: extraEnvironment,
         )
         return GitCommandResult(status: result.status, stdout: result.stdout, stderr: result.stderr)
     }
@@ -46,6 +46,29 @@ struct RepositoryCloneResult: Equatable {
     }
 }
 
+enum RepositorySSHConfigurationError: LocalizedError {
+    case repositoryUnavailable
+    case missingOrigin
+    case unsupportedRemote
+    case accessFailed(String)
+    case updateFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .repositoryUnavailable:
+            "The mac-sync data folder is not a ready Git repository."
+        case .missingOrigin:
+            "The mac-sync data repository has no origin remote to change."
+        case .unsupportedRemote:
+            "The origin remote is not a supported github.com repository."
+        case let .accessFailed(detail):
+            "SSH access could not be verified, so the origin remote was not changed. \(detail)"
+        case let .updateFailed(detail):
+            "SSH access was verified, but Git could not update the origin remote. \(detail)"
+        }
+    }
+}
+
 struct RepositorySetupService {
     private let fileManager: FileManager
     private let runner: any GitCommandRunning
@@ -53,7 +76,7 @@ struct RepositorySetupService {
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
-        runner: (any GitCommandRunning)? = nil
+        runner: (any GitCommandRunning)? = nil,
     ) {
         self.fileManager = fileManager
         self.runner = runner ?? SystemGitCommandRunner(environment: environment)
@@ -82,7 +105,7 @@ struct RepositorySetupService {
             do {
                 try fileManager.createDirectory(
                     at: destination.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
+                    withIntermediateDirectories: true,
                 )
             } catch {
                 messages.append("Unable to create the folder for \(kind.shortTitle): \(error.localizedDescription)")
@@ -126,7 +149,7 @@ struct RepositorySetupService {
         else {
             return RepositoryCloneResult(
                 inspections: inspect(locations),
-                messages: ["Unable to repair \(plan.kind.shortTitle): the selected folder changed. Refresh and try again."]
+                messages: ["Unable to repair \(plan.kind.shortTitle): the selected folder changed. Refresh and try again."],
             )
         }
 
@@ -135,7 +158,7 @@ struct RepositorySetupService {
         } catch {
             return RepositoryCloneResult(
                 inspections: inspect(locations),
-                messages: ["Unable to back up \(plan.kind.shortTitle): \(error.localizedDescription)"]
+                messages: ["Unable to back up \(plan.kind.shortTitle): \(error.localizedDescription)"],
             )
         }
 
@@ -146,18 +169,18 @@ struct RepositorySetupService {
                 try fileManager.moveItem(atPath: plan.backupPath, toPath: plan.originalPath)
                 return RepositoryCloneResult(
                     inspections: inspect(locations),
-                    messages: ["Unable to clone \(plan.kind.shortTitle); the original folder was restored. \(safeMessage(from: clone, fallback: "Git clone failed."))"]
+                    messages: ["Unable to clone \(plan.kind.shortTitle); the original folder was restored. \(safeMessage(from: clone, fallback: "Git clone failed."))"],
                 )
             } catch {
                 return RepositoryCloneResult(
                     inspections: inspect(locations),
-                    messages: ["Unable to clone \(plan.kind.shortTitle). Your original folder is safe at \(plan.backupPath). \(safeMessage(from: clone, fallback: "Git clone failed."))"]
+                    messages: ["Unable to clone \(plan.kind.shortTitle). Your original folder is safe at \(plan.backupPath). \(safeMessage(from: clone, fallback: "Git clone failed."))"],
                 )
             }
         }
         return RepositoryCloneResult(
             inspections: inspect(locations),
-            messages: ["Backed up \(plan.kind.shortTitle) to \(plan.backupPath) and cloned a fresh repository."]
+            messages: ["Backed up \(plan.kind.shortTitle) to \(plan.backupPath) and cloned a fresh repository."],
         )
     }
 
@@ -168,25 +191,25 @@ struct RepositorySetupService {
                 GitHubConnectionReport(
                     repository: inspection,
                     state: .failed,
-                    detail: "Choose or clone this repository before checking GitHub access."
+                    detail: "Choose or clone this repository before checking GitHub access.",
                 )
             case .notGitRepository:
                 GitHubConnectionReport(
                     repository: inspection,
                     state: .failed,
-                    detail: "This folder is not a Git checkout accepted by mac-sync."
+                    detail: "This folder is not a Git checkout accepted by mac-sync.",
                 )
             case .ready where !inspection.hasOrigin:
                 GitHubConnectionReport(
                     repository: inspection,
                     state: .noOrigin,
-                    detail: "No origin remote is configured. Sync stays local until you add one."
+                    detail: "No origin remote is configured. Sync stays local until you add one.",
                 )
             case .ready:
                 GitHubConnectionReport(
                     repository: inspection,
                     state: .notChecked,
-                    detail: "GitHub access has not been checked in this app session."
+                    detail: "GitHub access has not been checked in this app session.",
                 )
             }
         }
@@ -199,13 +222,46 @@ struct RepositorySetupService {
                 state: inspection.isReady && inspection.hasOrigin ? .checking : initialGitHubReports(for: [inspection])[0].state,
                 detail: inspection.isReady && inspection.hasOrigin
                     ? "Checking GitHub without prompting for credentials…"
-                    : initialGitHubReports(for: [inspection])[0].detail
+                    : initialGitHubReports(for: [inspection])[0].detail,
             )
         }
     }
 
     func checkGitHubAccess(for locations: RepositoryLocations) -> [GitHubConnectionReport] {
         inspect(locations).map(checkGitHubAccess)
+    }
+
+    /// Verifies the equivalent SSH remote before changing the configured
+    /// origin. The checkout is left untouched when the access check fails.
+    @discardableResult
+    func useSSHRemote(for locations: RepositoryLocations) throws -> String {
+        let inspection = inspect(.syncData, at: locations.dataRepository)
+        guard inspection.isReady else {
+            throw RepositorySSHConfigurationError.repositoryUnavailable
+        }
+        let origin = git(["remote", "get-url", "origin"], in: inspection.path)
+        guard origin.status == 0 else {
+            throw RepositorySSHConfigurationError.missingOrigin
+        }
+        guard let sshRemote = MacSyncPaths.githubSSHRemoteURL(
+            origin.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
+        ) else {
+            throw RepositorySSHConfigurationError.unsupportedRemote
+        }
+
+        let access = git(["ls-remote", sshRemote, "HEAD"], in: inspection.path)
+        guard access.status == 0 else {
+            throw RepositorySSHConfigurationError.accessFailed(
+                safeMessage(from: access, fallback: "Git could not read the SSH remote."),
+            )
+        }
+        let update = git(["remote", "set-url", "origin", sshRemote], in: inspection.path)
+        guard update.status == 0 else {
+            throw RepositorySSHConfigurationError.updateFailed(
+                safeMessage(from: update, fallback: "Git could not update the origin remote."),
+            )
+        }
+        return sshRemote
     }
 
     private func checkGitHubAccess(_ inspection: LocalRepositoryInspection) -> GitHubConnectionReport {
@@ -221,14 +277,14 @@ struct RepositorySetupService {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: .noOrigin,
-                detail: "No origin remote is configured. Sync stays local until you add one."
+                detail: "No origin remote is configured. Sync stays local until you add one.",
             )
         }
         guard MacSyncPaths.normalizeGitHubRemoteURL(origin.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) != nil else {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: .notGitHubRemote,
-                detail: "The origin remote is not hosted on github.com."
+                detail: "The origin remote is not hosted on github.com.",
             )
         }
 
@@ -237,7 +293,7 @@ struct RepositorySetupService {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: accessFailureState(for: readCheck, requiresWrite: false),
-                detail: safeMessage(from: readCheck, fallback: "Git could not read this GitHub remote.")
+                detail: safeMessage(from: readCheck, fallback: "Git could not read this GitHub remote."),
             )
         }
 
@@ -246,7 +302,7 @@ struct RepositorySetupService {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: .readAccessReady,
-                detail: "Git can read this empty data repository. Your first sync will create and push the initial snapshot."
+                detail: "Git can read this empty data repository. Your first sync will create and push the initial snapshot.",
             )
         }
 
@@ -254,7 +310,7 @@ struct RepositorySetupService {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: .writeAccessDenied,
-                detail: "Git can read this repository, but this checkout is detached and cannot push a sync."
+                detail: "Git can read this repository, but this checkout is detached and cannot push a sync.",
             )
         }
 
@@ -263,13 +319,13 @@ struct RepositorySetupService {
             return GitHubConnectionReport(
                 repository: inspection,
                 state: accessFailureState(for: pushCheck, requiresWrite: true),
-                detail: safeMessage(from: pushCheck, fallback: "Git could not verify write access to this GitHub repository.")
+                detail: safeMessage(from: pushCheck, fallback: "Git could not verify write access to this GitHub repository."),
             )
         }
         return GitHubConnectionReport(
             repository: inspection,
             state: .syncAccessReady,
-            detail: "Git can read and dry-run push to this repository without prompting for credentials."
+            detail: "Git can read and dry-run push to this repository without prompting for credentials.",
         )
     }
 
@@ -292,7 +348,7 @@ struct RepositorySetupService {
             state: .ready,
             hasOrigin: !rawRemote.isEmpty,
             remoteURL: MacSyncPaths.normalizeGitHubRemoteURL(rawRemote),
-            branch: branch.isEmpty ? nil : branch
+            branch: branch.isEmpty ? nil : branch,
         )
     }
 
@@ -320,7 +376,7 @@ struct RepositorySetupService {
                 "GIT_ASKPASS": "/usr/bin/false",
                 "GCM_INTERACTIVE": "never",
                 "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=10",
-            ]
+            ],
         )
     }
 
@@ -364,7 +420,7 @@ struct RepositorySetupService {
         value.replacingOccurrences(
             of: #"https?://[^/@[:space:]]+@"#,
             with: "https://***@",
-            options: .regularExpression
+            options: .regularExpression,
         )
     }
 }

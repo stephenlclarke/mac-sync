@@ -29,6 +29,10 @@ final class SyncStore: ObservableObject {
     private var issueRepository: SyncIssueRepository
     private var process: Process?
     private var savedSelection: [String]
+    private var activeConditionCodes: Set<SyncHealthConditionCode>?
+    private var healthEvaluationInProgress = false
+    private var healthEvaluationPending = false
+    private var lastHealthEvaluationAt: Date?
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         let resolvedEnvironment = MacSyncUserConfiguration.resolvedEnvironment(environment)
@@ -64,7 +68,7 @@ final class SyncStore: ObservableObject {
             configuration: initialOverview.configuration,
             executableURL: MacSyncCommandLocator.scheduledExecutableURL(environment: appEnvironment),
             applicationURL: MacSyncCommandLocator.scheduledApplicationURL(environment: appEnvironment),
-            environment: appEnvironment
+            environment: appEnvironment,
         )
         let initialScheduleStatus = scheduleManager.status()
         var scheduleMigrationError: String?
@@ -81,6 +85,7 @@ final class SyncStore: ObservableObject {
         requestedNavigation = nil
         errorMessage = scheduleMigrationError
         updateDockBadge()
+        refreshHealth(force: true)
     }
 
     var isRunning: Bool {
@@ -99,10 +104,15 @@ final class SyncStore: ObservableObject {
         syncIssues.filter(\.requiresManualIntervention).count
     }
 
+    var activeHealthIssueCount: Int {
+        syncIssues.filter(\.isActive).count
+    }
+
     func reload() {
         let selectionHasChanges = hasUnsavedSelection
         overview = repository.load()
         reloadSyncIssues()
+        refreshHealth()
         if !selectionHasChanges {
             savedSelection = repository.configuredPaths()
             selectedPaths = savedSelection
@@ -117,7 +127,7 @@ final class SyncStore: ObservableObject {
         do {
             try MacSyncUserConfiguration.saveDataRepository(
                 locations.dataRepository,
-                environment: baseEnvironment
+                environment: baseEnvironment,
             )
             applyRepositoryLocations(locations)
             guard isSetupComplete else {
@@ -148,6 +158,7 @@ final class SyncStore: ObservableObject {
                 self?.repositoryInspections = reports.map(\.repository)
                 self?.gitHubReports = reports
                 self?.isCheckingGitHubAccess = false
+                self?.refreshHealth(force: true)
             }
         }
     }
@@ -229,7 +240,7 @@ final class SyncStore: ObservableObject {
             run(
                 arguments: ["sync"],
                 action: .syncing,
-                extraEnvironment: ["MAC_SYNC_DRY_RUN": "1"]
+                extraEnvironment: ["MAC_SYNC_DRY_RUN": "1"],
             )
         } catch {
             errorMessage = error.localizedDescription
@@ -243,7 +254,7 @@ final class SyncStore: ObservableObject {
         run(
             arguments: arguments,
             action: .previewingRestore(machine),
-            extraEnvironment: ["MAC_SYNC_DRY_RUN": "1"]
+            extraEnvironment: ["MAC_SYNC_DRY_RUN": "1"],
         )
     }
 
@@ -281,7 +292,7 @@ final class SyncStore: ObservableObject {
                 issueID: issue.id,
                 latestOccurrenceID: issue.latestOccurrenceID,
                 disposition: disposition,
-                note: note
+                note: note,
             )
             reloadSyncIssues()
         } catch {
@@ -358,6 +369,58 @@ final class SyncStore: ObservableObject {
         run(arguments: ["secrets", "init"], action: .preparingEncryptedSecretsAccess)
     }
 
+    func testEncryptedSecretsAccess() {
+        guardSetup()
+        guard isSetupComplete else { return }
+        run(arguments: ["secrets", "test"], action: .testingEncryptedSecretsAccess)
+    }
+
+    func useSSHForDataRepository() {
+        guardSetup()
+        guard isSetupComplete, !isCheckingGitHubAccess else { return }
+        let locations = repositoryLocations
+        let environment = commandEnvironment
+        isCheckingGitHubAccess = true
+        errorMessage = nil
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result {
+                try RepositorySetupService(environment: environment)
+                    .useSSHRemote(for: locations)
+            }
+            let reports = RepositorySetupService(environment: environment)
+                .checkGitHubAccess(for: locations)
+            DispatchQueue.main.async {
+                self?.repositoryInspections = reports.map(\.repository)
+                self?.gitHubReports = reports
+                self?.isCheckingGitHubAccess = false
+                if case let .failure(error) = result {
+                    self?.errorMessage = error.localizedDescription
+                }
+                self?.refreshHealth(force: true)
+            }
+        }
+    }
+
+    func performRecoveryAction(_ action: SyncIssueRecoveryAction) {
+        switch action {
+        case .retrySync:
+            syncSelection()
+        case .testGitHubAccess:
+            checkGitHubAccess()
+        case .useSSH:
+            useSSHForDataRepository()
+        case .testEncryptedSecrets:
+            testEncryptedSecretsAccess()
+        case .openKeychainAccess:
+            let url = URL(fileURLWithPath: "/System/Applications/Utilities/Keychain Access.app")
+            guard NSWorkspace.shared.open(url) else {
+                errorMessage = "Keychain Access could not be opened."
+                return
+            }
+        }
+    }
+
     func dismissError() {
         errorMessage = nil
     }
@@ -365,7 +428,7 @@ final class SyncStore: ObservableObject {
     private func run(
         arguments: [String],
         action: SyncAction,
-        extraEnvironment: [String: String] = [:]
+        extraEnvironment: [String: String] = [:],
     ) {
         guard isSetupComplete else {
             errorMessage = SyncConfigurationError.setupRequired.localizedDescription
@@ -445,6 +508,7 @@ final class SyncStore: ObservableObject {
             encryptedSecretFailures.removeAll()
         }
         reload()
+        refreshHealth(force: true)
     }
 
     private func applyRepositoryLocations(_ locations: RepositoryLocations) {
@@ -459,7 +523,9 @@ final class SyncStore: ObservableObject {
         isSetupComplete = repositoryInspections.allSatisfy(\.isReady)
         overview = repository.load()
         issueRepository = SyncIssueRepository(configuration: overview.configuration)
+        activeConditionCodes = nil
         reloadSyncIssues()
+        refreshHealth(force: true)
         let configuredPaths = repository.configuredPaths()
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
@@ -476,7 +542,7 @@ final class SyncStore: ObservableObject {
             configuration: overview.configuration,
             executableURL: MacSyncCommandLocator.scheduledExecutableURL(environment: commandEnvironment),
             applicationURL: MacSyncCommandLocator.scheduledApplicationURL(environment: commandEnvironment),
-            environment: commandEnvironment
+            environment: commandEnvironment,
         )
     }
 
@@ -484,7 +550,7 @@ final class SyncStore: ObservableObject {
         let home = environment["HOME"] ?? NSHomeDirectory()
         let defaults = RepositoryLocations.defaults(homeDirectory: home)
         return RepositoryLocations(
-            dataRepository: environment["MAC_SYNC_MACHINES_REPO"] ?? defaults.dataRepository
+            dataRepository: environment["MAC_SYNC_MACHINES_REPO"] ?? defaults.dataRepository,
         )
     }
 
@@ -498,8 +564,44 @@ final class SyncStore: ObservableObject {
     }
 
     private func reloadSyncIssues() {
-        syncIssues = issueRepository.issues(for: overview)
+        syncIssues = issueRepository.issues(
+            for: overview,
+            activeConditionCodes: activeConditionCodes,
+        )
         updateDockBadge()
+    }
+
+    private func refreshHealth(force: Bool = false) {
+        guard isSetupComplete else { return }
+        if healthEvaluationInProgress {
+            healthEvaluationPending = true
+            return
+        }
+        if !force,
+           let lastHealthEvaluationAt,
+           Date().timeIntervalSince(lastHealthEvaluationAt) < 15
+        {
+            return
+        }
+
+        let snapshot = overview
+        let environment = commandEnvironment
+        healthEvaluationInProgress = true
+        lastHealthEvaluationAt = Date()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let activeCodes = SyncHealthEvaluator(environment: environment)
+                .activeConditionCodes(in: snapshot)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.activeConditionCodes = activeCodes
+                self.healthEvaluationInProgress = false
+                self.reloadSyncIssues()
+                if self.healthEvaluationPending {
+                    self.healthEvaluationPending = false
+                    self.refreshHealth(force: true)
+                }
+            }
+        }
     }
 
     private func updateDockBadge() {

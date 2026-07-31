@@ -56,19 +56,49 @@ final class MacSyncCoreTests: XCTestCase {
     func testNormalizeGitHubRemoteURL() {
         XCTAssertEqual(
             "https://github.com/owner/repo.git",
-            MacSyncPaths.normalizeGitHubRemoteURL("git@github.com:owner/repo.git")
+            MacSyncPaths.normalizeGitHubRemoteURL("git@github.com:owner/repo.git"),
         )
         XCTAssertEqual(
             "https://github.com/owner/repo.git",
-            MacSyncPaths.normalizeGitHubRemoteURL("ssh://git@ssh.github.com:443/owner/repo.git")
+            MacSyncPaths.normalizeGitHubRemoteURL("ssh://git@ssh.github.com:443/owner/repo.git"),
         )
         XCTAssertEqual(
             "https://github.com/owner/repo.git",
-            MacSyncPaths.normalizeGitHubRemoteURL("https://token@github.com/owner/repo.git?x=y#frag")
+            MacSyncPaths.normalizeGitHubRemoteURL("https://token@github.com/owner/repo.git?x=y#frag"),
         )
         XCTAssertNil(MacSyncPaths.normalizeGitHubRemoteURL("https://gitlab.com/owner/repo.git"))
         XCTAssertNil(MacSyncPaths.normalizeGitHubRemoteURL("https://github.com/owner/repo/extra.git"))
         XCTAssertNil(MacSyncPaths.normalizeGitHubRemoteURL("https://github.com/own er/repo.git"))
+        XCTAssertEqual(
+            "git@github.com:owner/repo.git",
+            MacSyncPaths.githubSSHRemoteURL("https://github.com/owner/repo.git"),
+        )
+    }
+
+    func testLegacyHistoryRecordDecodesWithoutStructuredDiagnostics() throws {
+        let data = Data(
+            """
+            {
+              "id": "legacy",
+              "action": "sync",
+              "result": "success",
+              "startedAt": "2026-07-30 10:00:00 BST",
+              "finishedAt": "2026-07-30 10:00:01 BST",
+              "durationSeconds": 1,
+              "warningCount": 0,
+              "errorCount": 0,
+              "entries": [],
+              "warnings": [],
+              "errors": []
+            }
+            """.utf8,
+        )
+
+        let record = try JSONDecoder().decode(SyncHistoryRecord.self, from: data)
+
+        XCTAssertEqual(record.id, "legacy")
+        XCTAssertNil(record.conditions)
+        XCTAssertNil(record.commands)
     }
 
     func testProcessRunnerCapturesOutputAndStatus() {
@@ -97,7 +127,7 @@ final class MacSyncCoreTests: XCTestCase {
         let runner = ProcessRunner(environment: ["PATH": "/usr/bin:/bin"])
         let result = runner.run(
             "/bin/bash",
-            ["-c", "yes stdout | head -c 262144; yes stderr | head -c 262144 >&2"]
+            ["-c", "yes stdout | head -c 262144; yes stderr | head -c 262144 >&2"],
         )
         XCTAssertEqual(0, result.status)
         XCTAssertEqual(262_144, result.stdout.utf8.count)
@@ -109,7 +139,7 @@ final class MacSyncCoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let lockURL = root.appendingPathComponent("instance.lock")
         var firstLock = try XCTUnwrap(
-            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 101)
+            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 101),
         )
 
         XCTAssertEqual("101\n", try String(contentsOf: lockURL, encoding: .utf8))
@@ -117,7 +147,7 @@ final class MacSyncCoreTests: XCTestCase {
 
         firstLock.release()
         firstLock = try XCTUnwrap(
-            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 303)
+            MacSyncProcessLock.acquire(at: lockURL, ownerProcessID: 303),
         )
         XCTAssertEqual("303\n", try String(contentsOf: lockURL, encoding: .utf8))
     }
@@ -128,7 +158,7 @@ final class MacSyncCoreTests: XCTestCase {
         let lockURL = root.appendingPathComponent("instance.lock")
         try FileManager.default.createDirectory(
             at: lockURL,
-            withIntermediateDirectories: true
+            withIntermediateDirectories: true,
         )
 
         XCTAssertThrowsError(try MacSyncProcessLock.acquire(at: lockURL)) { error in
@@ -144,11 +174,11 @@ final class MacSyncCoreTests: XCTestCase {
 
         XCTAssertEqual(
             "/tmp/mac-sync-lock-tests/mac-sync-ui.lock",
-            MacSyncProcessLock.userInterfaceLockURL(environment: environment).path
+            MacSyncProcessLock.userInterfaceLockURL(environment: environment).path,
         )
         XCTAssertEqual(
             "/tmp/mac-sync-lock-tests/mac-sync-service.lock",
-            MacSyncProcessLock.syncServiceLockURL(environment: environment).path
+            MacSyncProcessLock.syncServiceLockURL(environment: environment).path,
         )
     }
 
@@ -163,8 +193,8 @@ final class MacSyncCoreTests: XCTestCase {
         let serviceLock = try XCTUnwrap(
             MacSyncProcessLock.acquire(
                 at: MacSyncProcessLock.syncServiceLockURL(environment: environment),
-                ownerProcessID: 404
-            )
+                ownerProcessID: 404,
+            ),
         )
         let executable = Bundle(for: MacSyncCoreTests.self).bundleURL
             .deletingLastPathComponent()
@@ -175,7 +205,7 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertEqual(0, result.status)
         XCTAssertEqual(
             "another mac-sync service is already running; exiting: pid 404\n",
-            result.stdout
+            result.stdout,
         )
         XCTAssertEqual("", result.stderr)
         withExtendedLifetime(serviceLock) {}
@@ -244,28 +274,28 @@ final class MacSyncCoreTests: XCTestCase {
 
     func testUserInterfaceOpenReportsUnavailableAndFailedLaunches() throws {
         XCTAssertThrowsError(
-            try MacSyncUserInterface.open(applicationURL: nil) { _ in 0 }
+            try MacSyncUserInterface.open(applicationURL: nil) { _ in 0 },
         ) { error in
             XCTAssertEqual(error.localizedDescription, "Mac Sync UI is not installed.")
         }
 
         let application = URL(fileURLWithPath: "/tmp/MacSync.app")
         XCTAssertThrowsError(
-            try MacSyncUserInterface.open(applicationURL: application) { _ in 7 }
+            try MacSyncUserInterface.open(applicationURL: application) { _ in 7 },
         ) { error in
             XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: open exited with status 7")
         }
         XCTAssertThrowsError(
             try MacSyncUserInterface.open(applicationURL: application) { _ in
                 throw NSError(domain: "MacSyncTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "launcher unavailable"])
-            }
+            },
         ) { error in
             XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: launcher unavailable")
         }
         XCTAssertThrowsError(
             try MacSyncUserInterface.open(applicationURL: application) { _ in
                 throw MacSyncUserInterfaceError.launchFailed("existing launch error")
-            }
+            },
         ) { error in
             XCTAssertEqual(error.localizedDescription, "Mac Sync UI could not be opened: existing launch error")
         }
@@ -307,7 +337,7 @@ final class MacSyncCoreTests: XCTestCase {
 
         try MacSyncUserConfiguration.saveDataRepository(
             "/Volumes/Sync/mac-sync-data",
-            environment: environment
+            environment: environment,
         )
 
         let resolved = MacSyncUserConfiguration.resolvedEnvironment(environment)
@@ -317,7 +347,7 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertFalse(try String(contentsOf: config, encoding: .utf8).lowercased().contains("token"))
 
         let directOverride = MacSyncUserConfiguration.resolvedEnvironment(
-            environment.merging(["MAC_SYNC_MACHINES_REPO": "/override/mac-sync-data"]) { _, direct in direct }
+            environment.merging(["MAC_SYNC_MACHINES_REPO": "/override/mac-sync-data"]) { _, direct in direct },
         )
         XCTAssertEqual(directOverride["MAC_SYNC_MACHINES_REPO"], "/override/mac-sync-data")
     }
@@ -329,8 +359,8 @@ final class MacSyncCoreTests: XCTestCase {
         XCTAssertThrowsError(
             try MacSyncUserConfiguration.saveDataRepository(
                 "/tmp/mac-sync-data\nother",
-                environment: ["HOME": root.path]
-            )
+                environment: ["HOME": root.path],
+            ),
         ) { error in
             XCTAssertEqual(error as? MacSyncUserConfigurationError, .invalidRepositoryLocation)
         }

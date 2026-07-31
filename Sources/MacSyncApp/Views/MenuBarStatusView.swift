@@ -13,8 +13,8 @@ struct MenuBarStatusView: View {
         Divider()
 
         if store.openIssueCount > 0 {
-            Text("\(store.openIssueCount) issue\(store.openIssueCount == 1 ? "" : "s") need manual triage")
-            Button("Review Manual Triage") {
+            Text("\(store.openIssueCount) sync condition\(store.openIssueCount == 1 ? "" : "s") need attention")
+            Button("Review Sync Health") {
                 store.requestManualTriage()
                 openWindow(id: "main")
                 NSApp.activate(ignoringOtherApps: true)

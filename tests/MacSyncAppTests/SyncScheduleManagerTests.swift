@@ -19,7 +19,7 @@ final class SyncScheduleManagerTests: XCTestCase {
         XCTAssertEqual(status.detail, "Runs every 4 hours through this Mac's launchd agent.")
         let data = try Data(contentsOf: manager.agentURL)
         let propertyList = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
         )
         XCTAssertEqual(propertyList["Label"] as? String, SyncScheduleManager.label)
         XCTAssertEqual((propertyList["StartInterval"] as? NSNumber)?.intValue, 4 * 60 * 60)
@@ -27,14 +27,18 @@ final class SyncScheduleManagerTests: XCTestCase {
         let environment = try XCTUnwrap(propertyList["EnvironmentVariables"] as? [String: String])
         XCTAssertEqual(environment["MAC_SYNC_MACHINE"], "work-mac")
         XCTAssertEqual(environment["MAC_SYNC_MACHINES_REPO"], fixture.data.path)
+        XCTAssertEqual(environment["HOME"], fixture.home.path)
+        XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+        XCTAssertNotNil(environment["USER"])
+        XCTAssertEqual(propertyList["ProcessType"] as? String, "Interactive")
         let applicationData = try Data(contentsOf: manager.applicationAgentURL)
         let applicationPropertyList = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: applicationData, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: applicationData, format: nil) as? [String: Any],
         )
         XCTAssertEqual(applicationPropertyList["Label"] as? String, SyncScheduleManager.applicationLabel)
         XCTAssertEqual(
             applicationPropertyList["ProgramArguments"] as? [String],
-            ["/usr/bin/open", "-g", "/tmp/MacSync.app"]
+            ["/usr/bin/open", "-g", "/tmp/MacSync.app"],
         )
         XCTAssertEqual(applicationPropertyList["ProcessType"] as? String, "Interactive")
         XCTAssertEqual(applicationPropertyList["RunAtLoad"] as? Bool, true)
@@ -63,7 +67,7 @@ final class SyncScheduleManagerTests: XCTestCase {
             [
                 ["bootout", "gui/501", manager.agentURL.path],
                 ["bootout", "gui/501", manager.applicationAgentURL.path],
-            ]
+            ],
         )
     }
 
@@ -85,7 +89,7 @@ final class SyncScheduleManagerTests: XCTestCase {
         let schedule = SyncSchedule.calendar(
             days: [.monday, .wednesday, .friday],
             hour: 21,
-            minute: 15
+            minute: 15,
         )
 
         let status = try manager.configure(schedule: schedule)
@@ -93,11 +97,11 @@ final class SyncScheduleManagerTests: XCTestCase {
         XCTAssertEqual(status.state, .configured(schedule))
         XCTAssertEqual(
             status.detail,
-            "Runs every Mon, Wed, Fri at 21:15 through this Mac's launchd agent."
+            "Runs every Mon, Wed, Fri at 21:15 through this Mac's launchd agent.",
         )
         let data = try Data(contentsOf: manager.agentURL)
         let propertyList = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
         )
         let calendarEntries = try XCTUnwrap(propertyList["StartCalendarInterval"] as? [[String: Any]])
         XCTAssertEqual(
@@ -108,7 +112,7 @@ final class SyncScheduleManagerTests: XCTestCase {
                     (entry["Minute"] as? NSNumber)?.intValue ?? -1,
                 ]
             },
-            [[1, 21, 15], [3, 21, 15], [5, 21, 15]]
+            [[1, 21, 15], [3, 21, 15], [5, 21, 15]],
         )
         XCTAssertNil(propertyList["StartInterval"])
     }
@@ -132,15 +136,15 @@ final class SyncScheduleManagerTests: XCTestCase {
                 SyncScheduleCalendarEntry(weekday: .monday, hour: 9, minute: 0),
                 SyncScheduleCalendarEntry(weekday: .monday, hour: 17, minute: 45),
                 SyncScheduleCalendarEntry(weekday: .tuesday, hour: 11, minute: 30),
-            ]))
+            ])),
         )
         XCTAssertEqual(
             status.detail,
-            "Runs Mon at 09:00, 17:45; Tue at 11:30 through this Mac's launchd agent."
+            "Runs Mon at 09:00, 17:45; Tue at 11:30 through this Mac's launchd agent.",
         )
         let data = try Data(contentsOf: manager.agentURL)
         let propertyList = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
         )
         let calendarEntries = try XCTUnwrap(propertyList["StartCalendarInterval"] as? [[String: Any]])
         XCTAssertEqual(
@@ -151,7 +155,7 @@ final class SyncScheduleManagerTests: XCTestCase {
                     (entry["Minute"] as? NSNumber)?.intValue ?? -1,
                 ]
             },
-            [[1, 9, 0], [1, 17, 45], [2, 11, 30]]
+            [[1, 9, 0], [1, 17, 45], [2, 11, 30]],
         )
     }
 
@@ -183,13 +187,13 @@ final class SyncScheduleManagerTests: XCTestCase {
         _ = try initialManager.configure(schedule: .interval(minutes: 12 * 60))
         let data = try Data(contentsOf: initialManager.agentURL)
         var values = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
         )
         values["ProgramArguments"] = ["/old/Cellar/mac-sync-current/bin/mac-sync", "run"]
         let staleData = try PropertyListSerialization.data(
             fromPropertyList: values,
             format: .xml,
-            options: 0
+            options: 0,
         )
         try staleData.write(to: initialManager.agentURL, options: .atomic)
         let migrationRunner = FakeLaunchdRunner()
@@ -199,7 +203,7 @@ final class SyncScheduleManagerTests: XCTestCase {
 
         let repairedData = try Data(contentsOf: migrationManager.agentURL)
         let repairedValues = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: repairedData, format: nil) as? [String: Any]
+            try PropertyListSerialization.propertyList(from: repairedData, format: nil) as? [String: Any],
         )
         XCTAssertEqual(repairedValues["ProgramArguments"] as? [String], ["/tmp/mac-sync", "run"])
         XCTAssertEqual(migrationRunner.arguments, [
@@ -208,6 +212,41 @@ final class SyncScheduleManagerTests: XCTestCase {
             ["bootstrap", "gui/501", migrationManager.agentURL.path],
             ["bootstrap", "gui/501", migrationManager.applicationAgentURL.path],
         ])
+    }
+
+    func testRewritesLegacyBackgroundAgentWithUnattendedEnvironment() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let initialManager = scheduleManager(fixture: fixture, runner: FakeLaunchdRunner())
+        _ = try initialManager.configure(schedule: .interval(minutes: 60))
+        let data = try Data(contentsOf: initialManager.agentURL)
+        var values = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+        )
+        values["ProcessType"] = "Background"
+        values["EnvironmentVariables"] = ["PATH": "/custom/bin"]
+        let legacyData = try PropertyListSerialization.data(
+            fromPropertyList: values,
+            format: .xml,
+            options: 0,
+        )
+        try legacyData.write(to: initialManager.agentURL, options: .atomic)
+        let migrationRunner = FakeLaunchdRunner()
+        let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
+
+        try migrationManager.ensureApplicationLaunchAgent()
+
+        let repairedData = try Data(contentsOf: migrationManager.agentURL)
+        let repairedValues = try XCTUnwrap(
+            try PropertyListSerialization.propertyList(from: repairedData, format: nil) as? [String: Any],
+        )
+        XCTAssertEqual(repairedValues["ProcessType"] as? String, "Interactive")
+        let environment = try XCTUnwrap(
+            repairedValues["EnvironmentVariables"] as? [String: String],
+        )
+        XCTAssertEqual(environment["HOME"], fixture.home.path)
+        XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
+        XCTAssertEqual(migrationRunner.arguments.count, 4)
     }
 
     func testLeavesExistingApplicationLaunchAgentLoaded() throws {
@@ -254,14 +293,14 @@ final class SyncScheduleManagerTests: XCTestCase {
                 dataRepository: fixture.data.path,
                 statusDirectory: fixture.home.appendingPathComponent("Library/Application Support/mac-sync/status").path,
                 machineName: "work-mac",
-                pathsFile: fixture.data.appendingPathComponent("machines/work-mac/config/sync-paths.txt").path
+                pathsFile: fixture.data.appendingPathComponent("machines/work-mac/config/sync-paths.txt").path,
             ),
             executableURL: URL(fileURLWithPath: "/tmp/mac-sync"),
             applicationURL: URL(fileURLWithPath: "/tmp/MacSync.app"),
             environment: ["PATH": "/custom/bin"],
             userID: uid_t(501),
             fileManager: fileManager,
-            runner: runner
+            runner: runner,
         )
     }
 }

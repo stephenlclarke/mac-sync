@@ -28,9 +28,9 @@ struct SyncIssuesView: View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Manual triage")
+                    Text("Sync health")
                         .font(.headline)
-                    Text("Background syncs continue. Review issues when you are ready.")
+                    Text("Active conditions are checked again automatically. Recovered events remain in All.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -81,11 +81,11 @@ struct SyncIssuesView: View {
             Image(systemName: filter == .open ? "checkmark.circle" : "tray")
                 .font(.title2)
                 .foregroundStyle(.secondary)
-            Text(filter == .open ? "No issues need manual intervention" : "No recorded sync issues")
+            Text(filter == .open ? "No active conditions need attention" : "No recorded sync conditions")
                 .font(.headline)
             Text(filter == .open
-                ? "The Dock badge clears when every issue is acknowledged or resolved."
-                : "Warnings and errors from completed syncs will appear here.")
+                ? "GitHub and encrypted-secrets checks currently pass, or active conditions have been acknowledged."
+                : "Warnings and errors from completed syncs will remain here as history.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -95,8 +95,8 @@ struct SyncIssuesView: View {
 
     private func issueRow(_ issue: SyncIssue) -> some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: issue.severity.systemImage)
-                .foregroundStyle(severityColour(issue.severity))
+            Image(systemName: issue.isActive ? issue.severity.systemImage : issue.dispositionSystemImage)
+                .foregroundStyle(issue.isActive ? severityColour(issue.severity) : .green)
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 3) {
                 Text(issue.message)
@@ -106,9 +106,9 @@ struct SyncIssuesView: View {
                     : "\(issue.occurrenceCount) occurrences · latest \(issue.recordedAt)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(issue.disposition.title)
+                Text(issue.dispositionTitle)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(dispositionColour(issue.disposition))
+                    .foregroundStyle(dispositionColour(for: issue))
             }
         }
         .padding(.vertical, 3)
@@ -122,12 +122,12 @@ struct SyncIssuesView: View {
                         .font(.title2.bold())
                         .foregroundStyle(severityColour(issue.severity))
                     Spacer()
-                    Label(issue.disposition.title, systemImage: issue.disposition.systemImage)
+                    Label(issue.dispositionTitle, systemImage: issue.dispositionSystemImage)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(dispositionColour(issue.disposition))
+                        .foregroundStyle(dispositionColour(for: issue))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(dispositionColour(issue.disposition).opacity(0.14), in: Capsule())
+                        .background(dispositionColour(for: issue).opacity(0.14), in: Capsule())
                 }
 
                 Text(issue.message)
@@ -159,6 +159,29 @@ struct SyncIssuesView: View {
                         .textSelection(.enabled)
                 }
 
+                if issue.isActive, !issue.recoveryActions.isEmpty {
+                    GroupBox("Recovery actions") {
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                recoveryButtons(for: issue)
+                            }
+                            VStack(alignment: .leading) {
+                                recoveryButtons(for: issue)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else if !issue.isActive {
+                    GroupBox("Current health") {
+                        Label(
+                            "This condition is no longer present. The occurrence is retained as sync history.",
+                            systemImage: "checkmark.circle.fill",
+                        )
+                        .foregroundStyle(.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 if let detail = issue.detail {
                     GroupBox("Relevant details") {
                         Text(detail)
@@ -168,51 +191,76 @@ struct SyncIssuesView: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Triage note")
-                        .font(.headline)
-                    TextEditor(text: $triageNote)
-                        .font(.body)
-                        .frame(minHeight: 100)
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(.quaternary)
+                if issue.isActive {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("Triage note")
+                            .font(.headline)
+                        TextEditor(text: $triageNote)
+                            .font(.body)
+                            .frame(minHeight: 100)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(.quaternary)
+                            }
+                        HStack {
+                            if let updatedAt = issue.updatedAt {
+                                Text("Last triaged \(SyncFormatting.date(updatedAt))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Save Note") {
+                                store.updateIssue(issue, disposition: issue.disposition, note: triageNote)
+                            }
+                            .disabled(triageNote == issue.note)
                         }
-                    HStack {
-                        if let updatedAt = issue.updatedAt {
-                            Text("Last triaged \(SyncFormatting.date(updatedAt))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Save Note") {
-                            store.updateIssue(issue, disposition: issue.disposition, note: triageNote)
-                        }
-                        .disabled(triageNote == issue.note)
                     }
                 }
 
-                HStack {
-                    switch issue.disposition {
-                    case .open:
-                        Button("Acknowledge") {
-                            store.updateIssue(issue, disposition: .acknowledged, note: triageNote)
+                if issue.isActive {
+                    HStack {
+                        switch issue.disposition {
+                        case .open:
+                            Button("Acknowledge") {
+                                store.updateIssue(issue, disposition: .acknowledged, note: triageNote)
+                            }
+                            .help("Keep this issue in the record and clear its Dock badge count.")
+                            Button("Resolve") {
+                                store.updateIssue(issue, disposition: .resolved, note: triageNote)
+                            }
+                        case .acknowledged, .resolved:
+                            Button("Reopen") {
+                                store.updateIssue(issue, disposition: .open, note: triageNote)
+                            }
                         }
-                        .help("Keep this issue in the record and clear its Dock badge count.")
-                        Button("Resolve") {
-                            store.updateIssue(issue, disposition: .resolved, note: triageNote)
-                        }
-                    case .acknowledged, .resolved:
-                        Button("Reopen") {
-                            store.updateIssue(issue, disposition: .open, note: triageNote)
-                        }
+                        Spacer()
                     }
-                    Spacer()
                 }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)
         }
+    }
+
+    private func recoveryButtons(for issue: SyncIssue) -> some View {
+        ForEach(Array(issue.recoveryActions.enumerated()), id: \.element.id) { index, action in
+            if index == 0 {
+                recoveryButton(action)
+                    .buttonStyle(.borderedProminent)
+            } else {
+                recoveryButton(action)
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func recoveryButton(_ action: SyncIssueRecoveryAction) -> some View {
+        Button {
+            store.performRecoveryAction(action)
+        } label: {
+            Label(action.title, systemImage: action.systemImage)
+        }
+        .disabled(store.isRunning || store.isCheckingGitHubAccess)
     }
 
     private func selectFirstIssueIfNeeded() {
@@ -248,6 +296,10 @@ struct SyncIssuesView: View {
         case .resolved:
             .green
         }
+    }
+
+    private func dispositionColour(for issue: SyncIssue) -> Color {
+        issue.isActive ? dispositionColour(issue.disposition) : .green
     }
 }
 

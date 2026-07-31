@@ -19,9 +19,9 @@ struct DashboardView: View {
                         Text("Your sync control room")
                             .font(.largeTitle.bold())
                         Text(
-                            "Inspect the snapshot for this Mac, browse other Macs, and safely publish or copy selected files."
+                            "Inspect the snapshot for this Mac, browse other Macs, and safely publish or copy selected files.",
                         )
-                            .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -41,25 +41,25 @@ struct DashboardView: View {
                         title: "This Mac",
                         value: store.overview.configuration.machineName,
                         detail: "\(store.overview.currentMachine?.fileCount ?? 0) snapshot files",
-                        systemImage: "laptopcomputer"
+                        systemImage: "laptopcomputer",
                     )
                     MetricCard(
                         title: "Other Macs",
                         value: "\(store.overview.peerMachines.count)",
                         detail: "available snapshots",
-                        systemImage: "network"
+                        systemImage: "network",
                     )
                     MetricCard(
                         title: "Sync selection",
                         value: "\(store.selectedPaths.count)",
                         detail: store.hasUnsavedSelection ? "unsaved changes" : "saved paths",
-                        systemImage: "checklist"
+                        systemImage: "checklist",
                     )
                     MetricCard(
                         title: "Sync history",
                         value: "\(store.overview.history.count)",
                         detail: "completed local runs",
-                        systemImage: "clock.arrow.circlepath"
+                        systemImage: "clock.arrow.circlepath",
                     )
                 }
 
@@ -96,11 +96,10 @@ struct DashboardView: View {
                     GroupBox("Live command activity") {
                         LiveCommandActivityView(
                             output: store.commandOutput,
-                            isRunning: store.isRunning
+                            isRunning: store.isRunning,
                         )
                     }
                 }
-
             }
             .padding(24)
             .frame(maxWidth: 1000, alignment: .leading)
@@ -116,9 +115,9 @@ struct DashboardView: View {
                         : store.overview.status.result.systemImage,
                     isAnimating: store.isRunning,
                 )
-                    .font(.system(size: 32))
-                    .foregroundStyle(statusColour)
-                    .accessibilityHidden(true)
+                .font(.system(size: 32))
+                .foregroundStyle(statusColour)
+                .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(store.activeAction?.title ?? store.overview.status.result.title)
@@ -188,9 +187,9 @@ struct DashboardView: View {
                     .font(.title2)
                     .foregroundStyle(.red)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(store.openIssueCount) condition\(store.openIssueCount == 1 ? "" : "s") need manual triage")
+                    Text("\(store.openIssueCount) active condition\(store.openIssueCount == 1 ? "" : "s") need attention")
                         .fontWeight(.semibold)
-                    Text("Syncs continue in the background. Review, acknowledge, or resolve these items when you are ready.")
+                    Text("Open Sync Health to run the relevant check or recovery action.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -202,7 +201,7 @@ struct DashboardView: View {
             }
             .padding(4)
         } label: {
-            Text("Manual triage")
+            Text("Sync health")
         }
     }
 
@@ -223,7 +222,7 @@ struct DashboardView: View {
                     if !status.recordedLocalChanges.isEmpty {
                         localChangesList(
                             title: "Changes recorded when the pull was skipped",
-                            changes: status.recordedLocalChanges
+                            changes: status.recordedLocalChanges,
                         )
                     }
 
@@ -238,7 +237,7 @@ struct DashboardView: View {
                             }
                             localChangesList(
                                 title: "Changes still present now",
-                                changes: currentChanges
+                                changes: currentChanges,
                             )
                             Text("The next sync will publish this Mac's selected files but will keep the pre-sync pull paused until these changes are committed or reverted.")
                                 .font(.caption)
@@ -321,6 +320,15 @@ struct DashboardView: View {
         if store.isRunning {
             return "The app is monitoring a live mac-sync process."
         }
+        if store.overview.status.result == .partial {
+            let count = store.activeHealthIssueCount
+            return count == 0
+                ? "The last sync completed with warnings that have since recovered."
+                : "The sync completed, but \(count) condition\(count == 1 ? "" : "s") still need attention."
+        }
+        if store.overview.status.result == .failed {
+            return "The sync did not complete. Review Sync Health and the command diagnostics."
+        }
         if let count = store.overview.status.updatedFileCount {
             return "\(count) files updated in \(SyncFormatting.duration(store.overview.status.durationSeconds))."
         }
@@ -334,6 +342,8 @@ struct DashboardView: View {
         switch store.overview.status.result {
         case .success:
             return .green
+        case .partial:
+            return .orange
         case .failed:
             return .red
         case .unknown:

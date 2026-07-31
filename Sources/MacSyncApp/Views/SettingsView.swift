@@ -46,8 +46,13 @@ struct SettingsView: View {
                     ForEach(store.gitHubReports) { report in
                         GitHubConnectionRow(report: report)
                     }
-                    Button(store.isCheckingGitHubAccess ? "Checking GitHub Access…" : "Test GitHub Access") {
-                        store.checkGitHubAccess()
+                    HStack {
+                        Button(store.isCheckingGitHubAccess ? "Checking GitHub Access…" : "Test GitHub Access") {
+                            store.checkGitHubAccess()
+                        }
+                        Button("Use SSH for Data Repository") {
+                            store.useSSHForDataRepository()
+                        }
                     }
                     .disabled(store.isCheckingGitHubAccess)
                 } else {
@@ -58,7 +63,7 @@ struct SettingsView: View {
 
                 Link(
                     "Set up SSH or Git credential access",
-                    destination: URL(string: "https://docs.github.com/authentication/keeping-your-account-and-data-secure/about-authentication-to-github")!
+                    destination: URL(string: "https://docs.github.com/authentication/keeping-your-account-and-data-secure/about-authentication-to-github")!,
                 )
                 .font(.caption)
             }
@@ -101,7 +106,7 @@ struct SettingsView: View {
                                 DatePicker(
                                     "Time",
                                     selection: ruleBinding.time,
-                                    displayedComponents: .hourAndMinute
+                                    displayedComponents: .hourAndMinute,
                                 )
                                 .labelsHidden()
 
@@ -256,7 +261,7 @@ private struct CalendarScheduleRule: Identifiable {
         return SyncScheduleCalendarEntry(
             weekday: weekday,
             hour: components.hour ?? 0,
-            minute: components.minute ?? 0
+            minute: components.minute ?? 0,
         )
     }
 
@@ -265,7 +270,7 @@ private struct CalendarScheduleRule: Identifiable {
             bySettingHour: hour,
             minute: minute,
             second: 0,
-            of: Date()
+            of: Date(),
         ) ?? Date()
     }
 }

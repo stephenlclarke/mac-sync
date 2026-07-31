@@ -232,7 +232,10 @@ mac-sync status
 
 The status output shows the `mac-sync` version SHA, data repository, last sync
 result, storage totals, warnings, errors, remote repo, and commit. Explicit
-legacy CLI mode reports its separate local and machines repositories.
+legacy CLI mode reports its separate local and machines repositories. Results
+are `success`, `partial` when optional work was skipped, or `failed` when Mac
+Sync stopped. A configured remote is retried three times and must be refreshed
+before managed snapshot writes begin.
 
 ## Automatic Sync
 
@@ -259,6 +262,9 @@ brew services info mac-sync
 ```
 
 Both schedules run `mac-sync run`, the automation entrypoint for `sync`.
+The app-managed LaunchAgent runs in the signed-in user session with explicit
+`HOME`, `USER`, `PATH`, and non-interactive Git settings. Encrypted-secrets
+identity reads use Security.framework rather than parsing the `security` CLI.
 Local sync status is written outside git:
 
 ```text
@@ -268,15 +274,15 @@ Local sync status is written outside git:
 Each completed real publish or restore also writes a local JSON history record
 under `~/Library/Application Support/mac-sync/status/history/<machine-name>/`.
 The SwiftUI app presents these records as uploads, downloads, new or updated
-files, and skipped items. Preview runs and decrypted secret contents are never
-recorded there.
+files, skipped items, typed health conditions, and redacted command diagnostics.
+Preview runs and decrypted secret contents are never recorded there.
 
-Warnings and errors from completed runs also feed the local **Manual Triage**
-queue under `status/issues/`. Scheduled and background syncs continue while
-items are open. The Overview shows an open item in the Manual Triage card and
-does not repeat the same message under Latest warnings and errors. Acknowledging
-an item clears its Dock badge count; resolving it keeps the decision in the
-local record. Triage records are never synced.
+Warnings and errors from completed runs also feed local **Sync Health** under
+`status/issues/`. Mac Sync rechecks GitHub and encrypted-secrets conditions,
+removes recovered conditions from the attention count, and retains their
+occurrences under **All**. Active conditions provide direct tests and recovery
+actions. Acknowledging an active item clears its Dock badge count. Notes and
+triage decisions are never synced.
 
 ## Restore
 

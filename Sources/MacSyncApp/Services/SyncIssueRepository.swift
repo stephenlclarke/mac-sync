@@ -14,16 +14,20 @@ struct SyncIssueRepository {
 
     private struct Candidate {
         let occurrenceID: String
+        let conditionCode: SyncHealthConditionCode?
         let severity: SyncIssueSeverity
         let message: String
         let recommendedAction: String
         let source: String
         let recordedAt: String
         let detail: String?
+        let recoveryActions: [SyncIssueRecoveryAction]
+        let isActive: Bool
     }
 
     private struct GroupedCandidate {
         let id: String
+        let conditionCode: SyncHealthConditionCode?
         let severity: SyncIssueSeverity
         let message: String
         let recommendedAction: String
@@ -33,6 +37,8 @@ struct SyncIssueRepository {
         let occurrenceCount: Int
         let latestOccurrenceID: String
         let detail: String?
+        let recoveryActions: [SyncIssueRecoveryAction]
+        let isActive: Bool
     }
 
     private let storageURL: URL
@@ -45,15 +51,19 @@ struct SyncIssueRepository {
         self.fileManager = fileManager
     }
 
-    func issues(for overview: SyncOverview) -> [SyncIssue] {
+    func issues(
+        for overview: SyncOverview,
+        activeConditionCodes: Set<SyncHealthConditionCode>? = nil,
+    ) -> [SyncIssue] {
         let states = readStates()
-        return groupedCandidates(for: overview)
+        return groupedCandidates(for: overview, activeConditionCodes: activeConditionCodes)
             .map { candidate in
                 let state = states[candidate.id] ?? states[candidate.latestOccurrenceID]
                 let stateAppliesToLatestOccurrence = state?.latestOccurrenceID == nil
                     || state?.latestOccurrenceID == candidate.latestOccurrenceID
                 return SyncIssue(
                     id: candidate.id,
+                    conditionCode: candidate.conditionCode,
                     severity: candidate.severity,
                     message: candidate.message,
                     recommendedAction: candidate.recommendedAction,
@@ -63,9 +73,11 @@ struct SyncIssueRepository {
                     occurrenceCount: candidate.occurrenceCount,
                     latestOccurrenceID: candidate.latestOccurrenceID,
                     detail: candidate.detail,
+                    recoveryActions: candidate.recoveryActions,
+                    isActive: candidate.isActive,
                     disposition: stateAppliesToLatestOccurrence ? state?.disposition ?? .open : .open,
                     note: state?.note ?? "",
-                    updatedAt: state?.updatedAt
+                    updatedAt: state?.updatedAt,
                 )
             }
             .sorted { left, right in
@@ -83,40 +95,52 @@ struct SyncIssueRepository {
         issueID: String,
         latestOccurrenceID: String,
         disposition: SyncIssueDisposition,
-        note: String
+        note: String,
     ) throws {
         var states = readStates()
         states[issueID] = PersistedState(
             disposition: disposition,
             note: note.trimmingCharacters(in: .whitespacesAndNewlines),
             updatedAt: Date(),
-            latestOccurrenceID: latestOccurrenceID
+            latestOccurrenceID: latestOccurrenceID,
         )
         try writeStates(states)
     }
 
-    private func groupedCandidates(for overview: SyncOverview) -> [GroupedCandidate] {
-        Dictionary(grouping: candidates(for: overview), by: conditionKey)
-            .compactMap { _, occurrences in
-                let ordered = occurrences.sorted { $0.recordedAt > $1.recordedAt }
-                guard let latest = ordered.first, let first = ordered.last else { return nil }
-                return GroupedCandidate(
-                    id: conditionID(for: latest),
-                    severity: latest.severity,
-                    message: latest.message,
-                    recommendedAction: latest.recommendedAction,
-                    source: latest.source,
-                    recordedAt: latest.recordedAt,
-                    firstRecordedAt: first.recordedAt,
-                    occurrenceCount: ordered.count,
-                    latestOccurrenceID: latest.occurrenceID,
-                    detail: latest.detail
-                )
-            }
+    private func groupedCandidates(
+        for overview: SyncOverview,
+        activeConditionCodes: Set<SyncHealthConditionCode>?,
+    ) -> [GroupedCandidate] {
+        Dictionary(
+            grouping: candidates(for: overview, activeConditionCodes: activeConditionCodes),
+            by: conditionKey,
+        )
+        .compactMap { _, occurrences in
+            let ordered = occurrences.sorted { $0.recordedAt > $1.recordedAt }
+            guard let latest = ordered.first, let first = ordered.last else { return nil }
+            return GroupedCandidate(
+                id: conditionID(for: latest),
+                conditionCode: latest.conditionCode,
+                severity: latest.severity,
+                message: latest.message,
+                recommendedAction: latest.recommendedAction,
+                source: latest.source,
+                recordedAt: latest.recordedAt,
+                firstRecordedAt: first.recordedAt,
+                occurrenceCount: ordered.count,
+                latestOccurrenceID: latest.occurrenceID,
+                detail: latest.detail,
+                recoveryActions: latest.recoveryActions,
+                isActive: occurrences.contains(where: \.isActive),
+            )
+        }
     }
 
     private func conditionKey(for candidate: Candidate) -> String {
-        "\(candidate.severity.rawValue)\u{0}\(candidate.message)"
+        if let conditionCode = candidate.conditionCode {
+            return "condition\u{0}\(conditionCode.rawValue)"
+        }
+        return "\(candidate.severity.rawValue)\u{0}\(candidate.message)"
     }
 
     private func conditionID(for candidate: Candidate) -> String {
@@ -124,12 +148,28 @@ struct SyncIssueRepository {
         return "condition:\(encoded)"
     }
 
-    private func candidates(for overview: SyncOverview) -> [Candidate] {
+    private func candidates(
+        for overview: SyncOverview,
+        activeConditionCodes: Set<SyncHealthConditionCode>?,
+    ) -> [Candidate] {
         var result: [Candidate] = []
         let latestHistoryID = overview.history.first?.id
 
         for record in overview.history {
             let source = sourceDescription(for: record)
+            if let conditions = record.conditions, !conditions.isEmpty {
+                for condition in conditions {
+                    result.append(candidate(
+                        condition: condition,
+                        id: "history:\(record.id):condition:\(condition.id)",
+                        source: source,
+                        recordedAt: record.finishedAt,
+                        isLatestRun: record.id == latestHistoryID,
+                        activeConditionCodes: activeConditionCodes,
+                    ))
+                }
+                continue
+            }
             for (index, message) in record.errors.enumerated() {
                 result.append(candidate(
                     id: "history:\(record.id):error:\(index)",
@@ -137,7 +177,9 @@ struct SyncIssueRepository {
                     message: message,
                     source: source,
                     recordedAt: record.finishedAt,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: record.id == latestHistoryID,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
             for (index, message) in record.warnings.enumerated() {
@@ -145,7 +187,7 @@ struct SyncIssueRepository {
                     message,
                     sourceRunID: record.id,
                     latestHistoryID: latestHistoryID,
-                    overview: overview
+                    overview: overview,
                 ) else {
                     continue
                 }
@@ -155,7 +197,9 @@ struct SyncIssueRepository {
                     message: message,
                     source: source,
                     recordedAt: record.finishedAt,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: record.id == latestHistoryID,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
             if record.result == .failed, record.errors.isEmpty {
@@ -165,13 +209,28 @@ struct SyncIssueRepository {
                     message: "Sync did not complete. Review this run for the underlying cause.",
                     source: source,
                     recordedAt: record.finishedAt,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: record.id == latestHistoryID,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
         }
 
         if !latestHistoryMatchesCurrentStatus(overview) {
             let timestamp = overview.status.finishedAt ?? overview.status.startedAt ?? "latest"
+            if !overview.status.conditions.isEmpty {
+                for condition in overview.status.conditions {
+                    result.append(candidate(
+                        condition: condition,
+                        id: "status:\(timestamp):condition:\(condition.id)",
+                        source: "Latest sync status",
+                        recordedAt: timestamp,
+                        isLatestRun: true,
+                        activeConditionCodes: activeConditionCodes,
+                    ))
+                }
+                return result
+            }
             for (index, message) in overview.status.errors.enumerated() {
                 result.append(candidate(
                     id: "status:\(timestamp):error:\(index)",
@@ -179,7 +238,9 @@ struct SyncIssueRepository {
                     message: message,
                     source: "Latest sync status",
                     recordedAt: timestamp,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: true,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
             for (index, message) in overview.status.warnings.enumerated() {
@@ -187,7 +248,7 @@ struct SyncIssueRepository {
                     message,
                     sourceRunID: nil,
                     latestHistoryID: latestHistoryID,
-                    overview: overview
+                    overview: overview,
                 ) else {
                     continue
                 }
@@ -197,7 +258,9 @@ struct SyncIssueRepository {
                     message: message,
                     source: "Latest sync status",
                     recordedAt: timestamp,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: true,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
             if overview.status.result == .failed, overview.status.errors.isEmpty {
@@ -207,7 +270,9 @@ struct SyncIssueRepository {
                     message: "Sync did not complete. Review the latest sync status for the underlying cause.",
                     source: "Latest sync status",
                     recordedAt: timestamp,
-                    overview: overview
+                    overview: overview,
+                    isLatestRun: true,
+                    activeConditionCodes: activeConditionCodes,
                 ))
             }
         }
@@ -216,22 +281,102 @@ struct SyncIssueRepository {
     }
 
     private func candidate(
+        condition: SyncHealthCondition,
+        id: String,
+        source: String,
+        recordedAt: String,
+        isLatestRun: Bool,
+        activeConditionCodes: Set<SyncHealthConditionCode>?,
+    ) -> Candidate {
+        Candidate(
+            occurrenceID: id,
+            conditionCode: condition.code,
+            severity: condition.severity == .error ? .error : .warning,
+            message: condition.title,
+            recommendedAction: condition.recovery,
+            source: source,
+            recordedAt: recordedAt,
+            detail: condition.detail,
+            recoveryActions: recoveryActions(for: condition.code),
+            isActive: isLatestRun && (activeConditionCodes?.contains(condition.code) ?? true),
+        )
+    }
+
+    private func candidate(
         id: String,
         severity: SyncIssueSeverity,
         message: String,
         source: String,
         recordedAt: String,
-        overview: SyncOverview
+        overview: SyncOverview,
+        isLatestRun: Bool,
+        activeConditionCodes: Set<SyncHealthConditionCode>?,
     ) -> Candidate {
-        Candidate(
+        let conditionCode = legacyConditionCode(for: message)
+        let conditionIsActive = conditionCode.map {
+            activeConditionCodes?.contains($0) ?? true
+        } ?? true
+        return Candidate(
             occurrenceID: id,
+            conditionCode: conditionCode,
             severity: severity,
             message: message,
             recommendedAction: recommendedAction(for: message, severity: severity),
             source: source,
             recordedAt: recordedAt,
-            detail: localChangesDetail(for: message, overview: overview)
+            detail: localChangesDetail(for: message, overview: overview),
+            recoveryActions: conditionCode.map { recoveryActions(for: $0) } ?? [.retrySync],
+            isActive: isLatestRun && conditionIsActive,
         )
+    }
+
+    private func legacyConditionCode(for message: String) -> SyncHealthConditionCode? {
+        if isLocalChangesWarning(message) {
+            return .remoteRefreshBlockedByLocalChanges
+        }
+        if message.contains("could not pull machines repo") {
+            return .remoteRefreshFailed
+        }
+        if message.contains("missing local Keychain age identity")
+            || message.contains("no local Keychain age identity")
+        {
+            return .encryptedSecretsIdentityMissing
+        }
+        if message.contains("Keychain age identity requires user interaction")
+            || message.contains("Keychain age identity is unavailable")
+        {
+            return .encryptedSecretsIdentityUnavailable
+        }
+        if message.contains("encrypted-secrets tools are unavailable")
+            || message.contains("age, age-keygen, gzip, or gtar not found")
+        {
+            return .encryptedSecretsRuntimeUnavailable
+        }
+        if message.contains("encrypted secrets snapshot cannot be decrypted") {
+            return .encryptedSecretsSnapshotSkipped
+        }
+        return nil
+    }
+
+    private func recoveryActions(
+        for code: SyncHealthConditionCode,
+    ) -> [SyncIssueRecoveryAction] {
+        switch code {
+        case .remoteAuthenticationFailed, .remoteRefreshFailed, .remoteUnavailable:
+            [.testGitHubAccess, .useSSH, .retrySync]
+        case .remoteConfigurationMissing:
+            [.testGitHubAccess]
+        case .remoteRefreshBlockedByLocalChanges:
+            [.testGitHubAccess, .retrySync]
+        case .encryptedSecretsIdentityMissing:
+            [.testEncryptedSecrets, .openKeychainAccess, .retrySync]
+        case .encryptedSecretsIdentityUntrusted,
+             .encryptedSecretsIdentityUnavailable,
+             .encryptedSecretsSnapshotSkipped:
+            [.testEncryptedSecrets, .openKeychainAccess, .retrySync]
+        case .encryptedSecretsRuntimeUnavailable:
+            [.testEncryptedSecrets, .retrySync]
+        }
     }
 
     private func latestHistoryMatchesCurrentStatus(_ overview: SyncOverview) -> Bool {
@@ -247,7 +392,7 @@ struct SyncIssueRepository {
         _ message: String,
         sourceRunID: String?,
         latestHistoryID: String?,
-        overview: SyncOverview
+        overview: SyncOverview,
     ) -> Bool {
         guard isLocalChangesWarning(message) else { return true }
         guard overview.status.currentLocalChanges?.isEmpty != true else { return false }

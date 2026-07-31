@@ -10,7 +10,84 @@ public enum SyncHistoryAction: String, Codable, Hashable, Sendable {
 
 public enum SyncHistoryResult: String, Codable, Hashable, Sendable {
     case success
+    case partial
     case failed
+}
+
+public enum SyncHealthComponent: String, Codable, Hashable, Sendable {
+    case remoteRepository
+    case encryptedSecrets
+}
+
+public enum SyncHealthSeverity: String, Codable, Hashable, Sendable {
+    case warning
+    case error
+}
+
+public enum SyncHealthConditionCode: String, Codable, Hashable, Sendable {
+    case remoteAuthenticationFailed
+    case remoteConfigurationMissing
+    case remoteRefreshFailed
+    case remoteRefreshBlockedByLocalChanges
+    case remoteUnavailable
+    case encryptedSecretsIdentityMissing
+    case encryptedSecretsIdentityUntrusted
+    case encryptedSecretsIdentityUnavailable
+    case encryptedSecretsRuntimeUnavailable
+    case encryptedSecretsSnapshotSkipped
+}
+
+public struct SyncHealthCondition: Codable, Hashable, Identifiable, Sendable {
+    public let id: String
+    public let code: SyncHealthConditionCode
+    public let component: SyncHealthComponent
+    public let severity: SyncHealthSeverity
+    public let title: String
+    public let detail: String
+    public let recovery: String
+
+    public init(
+        id: String = UUID().uuidString,
+        code: SyncHealthConditionCode,
+        component: SyncHealthComponent,
+        severity: SyncHealthSeverity,
+        title: String,
+        detail: String,
+        recovery: String,
+    ) {
+        self.id = id
+        self.code = code
+        self.component = component
+        self.severity = severity
+        self.title = title
+        self.detail = detail
+        self.recovery = recovery
+    }
+}
+
+public struct SyncCommandDiagnostic: Codable, Hashable, Identifiable, Sendable {
+    public let id: String
+    public let step: String
+    public let command: String
+    public let attempt: Int
+    public let exitStatus: Int32
+    public let output: String
+
+    public init(
+        id: String = UUID().uuidString,
+        step: String,
+        command: String,
+        attempt: Int,
+        exitStatus: Int32,
+        output: String,
+    ) {
+        self.id = id
+        self.step = step
+        self.command = command
+        self.attempt = attempt
+        self.exitStatus = exitStatus
+        self.output = output
+    }
 }
 
 public enum SyncHistoryTransferDirection: String, Codable, Hashable, Sendable {
@@ -41,7 +118,7 @@ public struct SyncHistoryEntry: Codable, Hashable, Identifiable, Sendable {
         path: String,
         source: String,
         destination: String,
-        detail: String? = nil
+        detail: String? = nil,
     ) {
         self.id = id
         self.direction = direction
@@ -70,17 +147,23 @@ public struct SyncHistoryDiagnostics: Codable, Hashable, Sendable {
     public let errorCount: Int
     public let warnings: [String]
     public let errors: [String]
+    public let conditions: [SyncHealthCondition]
+    public let commands: [SyncCommandDiagnostic]
 
     public init(
         warningCount: Int,
         errorCount: Int,
         warnings: [String],
-        errors: [String]
+        errors: [String],
+        conditions: [SyncHealthCondition] = [],
+        commands: [SyncCommandDiagnostic] = [],
     ) {
         self.warningCount = warningCount
         self.errorCount = errorCount
         self.warnings = warnings
         self.errors = errors
+        self.conditions = conditions
+        self.commands = commands
     }
 }
 
@@ -97,6 +180,10 @@ public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
     public let entries: [SyncHistoryEntry]
     public let warnings: [String]
     public let errors: [String]
+    /// Optional for backward compatibility with history written before typed
+    /// health and command diagnostics were introduced.
+    public let conditions: [SyncHealthCondition]?
+    public let commands: [SyncCommandDiagnostic]?
 
     public init(
         id: String = UUID().uuidString,
@@ -105,7 +192,7 @@ public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
         result: SyncHistoryResult,
         timing: SyncHistoryTiming,
         entries: [SyncHistoryEntry],
-        diagnostics: SyncHistoryDiagnostics
+        diagnostics: SyncHistoryDiagnostics,
     ) {
         self.id = id
         self.action = action
@@ -119,6 +206,8 @@ public struct SyncHistoryRecord: Codable, Hashable, Identifiable, Sendable {
         self.entries = entries
         warnings = diagnostics.warnings
         errors = diagnostics.errors
+        conditions = diagnostics.conditions
+        commands = diagnostics.commands
     }
 }
 
@@ -223,6 +312,16 @@ public enum MacSyncPaths {
         }
         return "https://github.com/\(owner)/\(repo).git"
     }
+
+    public static func githubSSHRemoteURL(_ rawURL: String) -> String? {
+        guard let normalized = normalizeGitHubRemoteURL(rawURL),
+              normalized.hasPrefix("https://github.com/")
+        else {
+            return nil
+        }
+        let repository = normalized.dropFirst("https://github.com/".count)
+        return "git@github.com:\(repository)"
+    }
 }
 
 public enum MacSyncUserConfiguration {
@@ -231,14 +330,14 @@ public enum MacSyncUserConfiguration {
     ]
 
     public static func configurationFilePath(
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
     ) -> String {
         let home = environment["HOME"] ?? NSHomeDirectory()
         return environment["MAC_SYNC_APP_CONFIG"] ?? "\(home)/Library/Application Support/mac-sync/config.env"
     }
 
     public static func resolvedEnvironment(
-        _ environment: [String: String] = ProcessInfo.processInfo.environment
+        _ environment: [String: String] = ProcessInfo.processInfo.environment,
     ) -> [String: String] {
         let filePath = configurationFilePath(environment: environment)
         let stored = values(in: filePath)
@@ -252,7 +351,7 @@ public enum MacSyncUserConfiguration {
     public static func saveDataRepository(
         _ dataRepository: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
     ) throws {
         guard !dataRepository.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !dataRepository.contains("\n"),
@@ -327,7 +426,7 @@ public struct ProcessRunner {
         _ arguments: [String] = [],
         workingDirectory: String? = nil,
         extraEnvironment: [String: String] = [:],
-        capture: Bool = true
+        capture: Bool = true,
     ) -> CommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -372,7 +471,7 @@ public struct ProcessRunner {
             return CommandResult(
                 status: process.terminationStatus,
                 stdout: String(decoding: captured.stdout, as: UTF8.self),
-                stderr: String(decoding: captured.stderr, as: UTF8.self)
+                stderr: String(decoding: captured.stderr, as: UTF8.self),
             )
         }
         return CommandResult(status: process.terminationStatus, stdout: "", stderr: "")
@@ -382,14 +481,14 @@ public struct ProcessRunner {
         _ script: String,
         workingDirectory: String? = nil,
         extraEnvironment: [String: String] = [:],
-        capture: Bool = true
+        capture: Bool = true,
     ) -> CommandResult {
         run(
             "/bin/bash",
             ["-c", script],
             workingDirectory: workingDirectory,
             extraEnvironment: extraEnvironment,
-            capture: capture
+            capture: capture,
         )
     }
 
