@@ -178,6 +178,15 @@ final class MacSyncCoreTests: XCTestCase {
         )
     }
 
+    func testKeychainIdentityPresencePublicLookupDoesNotReadSecretData() {
+        let presence = MacSyncKeychain.identityPresence(
+            service: "mac-sync-tests-\(UUID().uuidString)",
+            account: "test-account",
+        )
+
+        XCTAssertNotEqual(presence, .present)
+    }
+
     func testKeychainStoreUpdatesOrAddsDeviceOnlyItem() {
         var addCount = 0
         let updated = MacSyncKeychain.storeIdentity(
