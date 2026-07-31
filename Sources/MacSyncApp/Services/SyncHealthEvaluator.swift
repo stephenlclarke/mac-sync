@@ -19,33 +19,21 @@ struct SystemSyncHealthCommandRunner: SyncHealthCommandRunning {
 }
 
 struct SyncHealthEvaluator {
-    typealias KeychainPresenceLookup = (
-        _ service: String,
-        _ account: String,
-    ) -> MacSyncKeychainIdentityPresence
     typealias EncryptedSecretsVerificationLookup = (_ overview: SyncOverview) -> Bool
 
     private let environment: [String: String]
     private let runner: any SyncHealthCommandRunning
-    private let keychainPresenceLookup: KeychainPresenceLookup
     private let encryptedSecretsVerificationLookup: EncryptedSecretsVerificationLookup
 
     init(
         environment: [String: String],
         runner: (any SyncHealthCommandRunning)? = nil,
-        keychainPresenceLookup: KeychainPresenceLookup? = nil,
         encryptedSecretsVerificationLookup: EncryptedSecretsVerificationLookup? = nil,
     ) {
         self.environment = environment
         self.runner = runner ?? SystemSyncHealthCommandRunner(
             runner: ProcessRunner(environment: environment),
         )
-        self.keychainPresenceLookup = keychainPresenceLookup ?? { service, account in
-            MacSyncKeychain.identityPresence(
-                service: service,
-                account: account,
-            )
-        }
         self.encryptedSecretsVerificationLookup = encryptedSecretsVerificationLookup ?? { overview in
             SyncHealthVerificationStore(configuration: overview.configuration)
                 .encryptedSecretsWereVerified(for: overview)
@@ -137,11 +125,7 @@ struct SyncHealthEvaluator {
             active.remove(.encryptedSecretsRuntimeUnavailable)
         }
 
-        let account = environment["MAC_SYNC_KEYCHAIN_ACCOUNT"]
-            ?? environment["USER"]
-            ?? NSUserName()
-        let service = environment["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
-        if keychainPresenceLookup(service, account) == .present {
+        if active.contains(.encryptedSecretsIdentityMissing), keychainIdentityMetadataExists() {
             active.remove(.encryptedSecretsIdentityMissing)
         }
         if encryptedSecretsVerificationLookup(overview) {
@@ -152,5 +136,20 @@ struct SyncHealthEvaluator {
                 .encryptedSecretsSnapshotSkipped,
             ])
         }
+    }
+
+    /// `SecItemCopyMatching` can present authentication UI for a legacy Login
+    /// Keychain ACL even when it requests only a persistent reference. The
+    /// `security` command's default find mode returns item metadata and does
+    /// not request password data; never add its `-g` or `-w` flags here.
+    private func keychainIdentityMetadataExists() -> Bool {
+        let account = environment["MAC_SYNC_KEYCHAIN_ACCOUNT"]
+            ?? environment["USER"]
+            ?? NSUserName()
+        let service = environment["MAC_SYNC_KEYCHAIN_SERVICE"] ?? "mac-sync age identity"
+        return runner.run(
+            "/usr/bin/security",
+            ["find-generic-password", "-s", service, "-a", account],
+        ).status == 0
     }
 }

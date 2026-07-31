@@ -715,7 +715,7 @@ public final class MacSyncApp {
     }
 
     private func secretsSyncEnabled() -> Bool {
-        enabled(config.secretsSync)
+        enabled(config.secretsSync) && !isServiceInvocation
     }
 
     private func pathExists(_ path: String) -> Bool {
@@ -3406,6 +3406,9 @@ public final class MacSyncApp {
         defer {
             isServiceInvocation = false
             serviceLock = nil
+        }
+        if enabled(config.secretsSync) {
+            info("unattended sync skips encrypted secrets; use `\(config.scriptName) sync` to update them interactively")
         }
         try cmdSync()
     }

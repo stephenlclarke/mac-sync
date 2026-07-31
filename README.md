@@ -114,9 +114,10 @@ times on specific days, choose a preset interval, or enter a custom interval fro
 same local configuration as the CLI and repairs its executable and application
 paths, interactive process type, and unattended environment after a Homebrew
 upgrade. The agent supplies `HOME`, `USER`, a deterministic `PATH`, and
-non-interactive Git settings. The CLI reads the encrypted-secrets identity
-directly through macOS Security.framework, with access limited to after the
-first login unlock. While the schedule is enabled, Mac Sync also
+non-interactive Git settings. Unattended runs deliberately skip encrypted
+secrets so a legacy Keychain ACL cannot present a password window; use **Sync
+Now** or `mac-sync sync` to update them interactively. While the schedule is
+enabled, Mac Sync also
 opens when you sign in so its menu-bar controls remain available. Mac Sync does
 not show an additional Dock icon by default; enable **Show app icon in the
 Dock** under **Settings → App appearance** if you prefer regular-app behaviour.
@@ -196,14 +197,16 @@ there is no separate sync implementation or additional state store.
   GitHub, switching the data repository to verified SSH, testing encrypted
   secrets, opening Keychain Access, or retrying sync. Notes and acknowledgements
   remain local under `status/issues/` and are never synced. Automatic checks
-  verify that the Keychain item exists without reading the private identity or
-  presenting authentication UI; conditions that require decryption stay active
-  until the user explicitly runs **Test Encrypted Secrets**.
+  verify that the Keychain item exists through a metadata-only lookup without
+  requesting password data or presenting authentication UI; conditions that
+  require decryption stay active until the user explicitly runs **Test
+  Encrypted Secrets**.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac
   Sync keeps the schedule local, opens the app at login while the schedule is
-  enabled, and never stores credentials in the launch agents.
+  enabled, and never stores credentials in the launch agents. Scheduled runs
+  skip encrypted secrets; use **Sync Now** when those need updating.
 
 The menu-bar item gives quick access to the dashboard, current status, sync,
 stop, refresh, About, and repository setup actions. By default the running app

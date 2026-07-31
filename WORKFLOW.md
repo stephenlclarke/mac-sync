@@ -245,6 +245,11 @@ installs a per-user `launchd` job and uses the same local repository
 configuration as the CLI. It also supports preset intervals from every 30
 minutes to daily and custom intervals from 15 minutes to 31 days.
 
+Unattended runs skip encrypted secrets so legacy Keychain permissions cannot
+present a password window. Use **Sync Now** or `mac-sync sync` when the
+encrypted snapshot needs updating; those explicit actions may request Keychain
+access.
+
 If you choose the app-managed schedule, stop the optional Homebrew hourly
 service first so only one job runs:
 
@@ -282,10 +287,10 @@ Warnings and errors from completed runs also feed local **Sync Health** under
 removes recovered conditions from the attention count, and retains their
 occurrences under **All**. Active conditions provide direct tests and recovery
 actions. Acknowledging an active item clears its Dock badge count. Notes and
-triage decisions are never synced. Automatic health checks inspect only
-Keychain item presence and never read the private identity or present an
-authentication prompt; a user-initiated encrypted-secrets test performs the
-access and decryption checks.
+triage decisions are never synced. Automatic health checks use a metadata-only
+Keychain lookup without password-return flags, so they neither read the private
+identity nor present an authentication prompt; a user-initiated
+encrypted-secrets test performs the access and decryption checks.
 
 ## Restore
 

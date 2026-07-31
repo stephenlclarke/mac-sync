@@ -420,6 +420,7 @@ struct SyncScheduleManager {
             "HOME": configuration.homeDirectory,
             "USER": environment["USER"] ?? NSUserName(),
             "GIT_TERMINAL_PROMPT": "0",
+            "MAC_SYNC_SECRETS": "0",
             "MAC_SYNC_MACHINE": configuration.machineName,
             "MAC_SYNC_MACHINES_REPO": configuration.dataRepository,
             "MAC_SYNC_PATHS_FILE": configuration.pathsFile,

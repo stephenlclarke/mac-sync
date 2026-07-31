@@ -55,10 +55,11 @@ public enum MacSyncKeychainIdentityPresence: Equatable, Sendable {
 }
 
 /// Reads and stores the age identity without invoking the `security` command.
-/// Scheduled callers request a non-interactive LocalAuthentication context so
-/// a locked Keychain can become a typed condition instead of a false "missing"
-/// result. Automatic app health checks use identityPresence and never request
-/// private identity data.
+/// Non-interactive callers can request a LocalAuthentication context so a
+/// locked Keychain becomes a typed condition instead of a false "missing"
+/// result. `identityPresence` never requests private identity data, but a
+/// legacy Login Keychain ACL can still make Security.framework present UI, so
+/// automatic app health checks use a metadata-only `security` lookup instead.
 public enum MacSyncKeychain {
     public static func identityPresence(
         service: String,
