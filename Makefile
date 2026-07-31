@@ -10,7 +10,7 @@ MARKDOWNLINT ?= markdownlint
 COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
 MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
-MAC_SYNC_VERSION ?= 1.0.2
+MAC_SYNC_VERSION ?= 1.0.3
 MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
@@ -183,6 +183,7 @@ swift-coverage: swift-test-build
 		-instr-profile="$$profile" \
 		"$$test_binary" \
 		--sources Sources/MacSyncCore/MacSyncCore.swift \
+		--sources Sources/MacSyncCore/MacSyncKeychain.swift \
 		--sources Sources/MacSyncCore/Support.swift \
 		--sources Sources/MacSyncCore/MacSyncUserInterface.swift \
 		--sources Sources/MacSyncCore/MacSyncProcessLock.swift \

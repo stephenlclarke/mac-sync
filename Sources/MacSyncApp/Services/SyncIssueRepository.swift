@@ -25,6 +25,11 @@ struct SyncIssueRepository {
         let isActive: Bool
     }
 
+    private struct CandidateActivity {
+        let isLatestRun: Bool
+        let activeConditionCodes: Set<SyncHealthConditionCode>?
+    }
+
     private struct GroupedCandidate {
         let id: String
         let conditionCode: SyncHealthConditionCode?
@@ -164,8 +169,10 @@ struct SyncIssueRepository {
                         id: "history:\(record.id):condition:\(condition.id)",
                         source: source,
                         recordedAt: record.finishedAt,
-                        isLatestRun: record.id == latestHistoryID,
-                        activeConditionCodes: activeConditionCodes,
+                        activity: CandidateActivity(
+                            isLatestRun: record.id == latestHistoryID,
+                            activeConditionCodes: activeConditionCodes,
+                        ),
                     ))
                 }
                 continue
@@ -178,8 +185,10 @@ struct SyncIssueRepository {
                     source: source,
                     recordedAt: record.finishedAt,
                     overview: overview,
-                    isLatestRun: record.id == latestHistoryID,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: record.id == latestHistoryID,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
             for (index, message) in record.warnings.enumerated() {
@@ -198,8 +207,10 @@ struct SyncIssueRepository {
                     source: source,
                     recordedAt: record.finishedAt,
                     overview: overview,
-                    isLatestRun: record.id == latestHistoryID,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: record.id == latestHistoryID,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
             if record.result == .failed, record.errors.isEmpty {
@@ -210,8 +221,10 @@ struct SyncIssueRepository {
                     source: source,
                     recordedAt: record.finishedAt,
                     overview: overview,
-                    isLatestRun: record.id == latestHistoryID,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: record.id == latestHistoryID,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
         }
@@ -225,8 +238,10 @@ struct SyncIssueRepository {
                         id: "status:\(timestamp):condition:\(condition.id)",
                         source: "Latest sync status",
                         recordedAt: timestamp,
-                        isLatestRun: true,
-                        activeConditionCodes: activeConditionCodes,
+                        activity: CandidateActivity(
+                            isLatestRun: true,
+                            activeConditionCodes: activeConditionCodes,
+                        ),
                     ))
                 }
                 return result
@@ -239,8 +254,10 @@ struct SyncIssueRepository {
                     source: "Latest sync status",
                     recordedAt: timestamp,
                     overview: overview,
-                    isLatestRun: true,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: true,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
             for (index, message) in overview.status.warnings.enumerated() {
@@ -259,8 +276,10 @@ struct SyncIssueRepository {
                     source: "Latest sync status",
                     recordedAt: timestamp,
                     overview: overview,
-                    isLatestRun: true,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: true,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
             if overview.status.result == .failed, overview.status.errors.isEmpty {
@@ -271,8 +290,10 @@ struct SyncIssueRepository {
                     source: "Latest sync status",
                     recordedAt: timestamp,
                     overview: overview,
-                    isLatestRun: true,
-                    activeConditionCodes: activeConditionCodes,
+                    activity: CandidateActivity(
+                        isLatestRun: true,
+                        activeConditionCodes: activeConditionCodes,
+                    ),
                 ))
             }
         }
@@ -285,8 +306,7 @@ struct SyncIssueRepository {
         id: String,
         source: String,
         recordedAt: String,
-        isLatestRun: Bool,
-        activeConditionCodes: Set<SyncHealthConditionCode>?,
+        activity: CandidateActivity,
     ) -> Candidate {
         Candidate(
             occurrenceID: id,
@@ -298,7 +318,8 @@ struct SyncIssueRepository {
             recordedAt: recordedAt,
             detail: condition.detail,
             recoveryActions: recoveryActions(for: condition.code),
-            isActive: isLatestRun && (activeConditionCodes?.contains(condition.code) ?? true),
+            isActive: activity.isLatestRun
+                && (activity.activeConditionCodes?.contains(condition.code) ?? true),
         )
     }
 
@@ -309,12 +330,11 @@ struct SyncIssueRepository {
         source: String,
         recordedAt: String,
         overview: SyncOverview,
-        isLatestRun: Bool,
-        activeConditionCodes: Set<SyncHealthConditionCode>?,
+        activity: CandidateActivity,
     ) -> Candidate {
         let conditionCode = legacyConditionCode(for: message)
         let conditionIsActive = conditionCode.map {
-            activeConditionCodes?.contains($0) ?? true
+            activity.activeConditionCodes?.contains($0) ?? true
         } ?? true
         return Candidate(
             occurrenceID: id,
@@ -326,7 +346,7 @@ struct SyncIssueRepository {
             recordedAt: recordedAt,
             detail: localChangesDetail(for: message, overview: overview),
             recoveryActions: conditionCode.map { recoveryActions(for: $0) } ?? [.retrySync],
-            isActive: isLatestRun && conditionIsActive,
+            isActive: activity.isLatestRun && conditionIsActive,
         )
     }
 

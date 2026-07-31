@@ -139,6 +139,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
                 warnings: [],
                 errors: [],
                 conditions: conditions,
+                commandDiagnostics: [],
                 recordedLocalChanges: [],
                 currentLocalChanges: [],
             ),

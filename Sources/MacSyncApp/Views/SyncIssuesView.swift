@@ -215,9 +215,6 @@ struct SyncIssuesView: View {
                             .disabled(triageNote == issue.note)
                         }
                     }
-                }
-
-                if issue.isActive {
                     HStack {
                         switch issue.disposition {
                         case .open:

@@ -280,6 +280,7 @@ final class SyncIssueRepositoryTests: XCTestCase {
             warnings: warnings,
             errors: errors,
             conditions: conditions,
+            commandDiagnostics: [],
             recordedLocalChanges: [],
             currentLocalChanges: currentLocalChanges,
         )

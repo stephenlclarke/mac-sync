@@ -52,6 +52,7 @@ run_mac_sync() {
     MAC_SYNC_GITHUB_REPOS=0 \
     MAC_SYNC_KEYCHAIN_SERVICE="mac-sync reliability test" \
     MAC_SYNC_KEYCHAIN_ACCOUNT=target \
+    MAC_SYNC_RELIABILITY_REMOTE="$TEST_REMOTE" \
     KEYCHAIN_FAKE_DIR="${TMP_ROOT}/keychain" \
     PATH="${TEST_BIN}:/usr/bin:/bin:/usr/sbin:/sbin" \
     SCRIPT_COLOUR=off \
@@ -68,6 +69,7 @@ run_mac_sync() {
     MAC_SYNC_GITHUB_REPOS=0 \
     MAC_SYNC_KEYCHAIN_SERVICE="mac-sync reliability test" \
     MAC_SYNC_KEYCHAIN_ACCOUNT=target \
+    MAC_SYNC_RELIABILITY_REMOTE="$TEST_REMOTE" \
     KEYCHAIN_FAKE_DIR="${TMP_ROOT}/keychain" \
     PATH="${TEST_BIN}:/usr/bin:/bin:/usr/sbin:/sbin" \
     SCRIPT_COLOUR=off \
@@ -110,6 +112,40 @@ assert_file_contains "$TEST_STATUS/target.conditions.json" '"code" : "encryptedS
 assert_file_contains \
   "$TEST_MACHINES_REPO/machines/target/home/.bashrc" \
   "first snapshot"
+
+git -C "$TEST_MACHINES_REPO" remote set-url origin \
+  "https://github.com/example/mac-sync-data.git"
+cat >"$TEST_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly REAL_GIT=/usr/bin/git
+
+if [[ "$1" == "ls-remote" && "$2" == "git@github.com:example/mac-sync-data.git" ]]; then
+  printf '%s\tHEAD\n' "$("$REAL_GIT" -C "$MAC_SYNC_MACHINES_REPO" rev-parse HEAD)"
+  exit 0
+fi
+
+if [[ "$1" == "-C" && "$2" == "$MAC_SYNC_MACHINES_REPO" && "$3" == "pull" ]]; then
+  printf 'fatal: could not read Username for https://github.com\n' >&2
+  exit 1
+fi
+
+if [[ "$1" == "-c" && "$3" == "-C" && "$4" == "$MAC_SYNC_MACHINES_REPO" && "$5" == "pull" ]]; then
+  "$REAL_GIT" -C "$MAC_SYNC_MACHINES_REPO" remote set-url origin \
+    "$MAC_SYNC_RELIABILITY_REMOTE"
+  exec "$REAL_GIT" -C "$MAC_SYNC_MACHINES_REPO" pull --ff-only
+fi
+
+exec "$REAL_GIT" "$@"
+EOF
+chmod +x "$TEST_BIN/git"
+
+run_mac_sync
+assert_file_contains "$TEST_STATUS/target.env" "result=partial"
+assert_file_contains "$TEST_STATUS/target.commands.json" "using SSH"
+assert_file_contains "$STDOUT_FILE" "using verified SSH access"
+rm -f "$TEST_BIN/git"
 
 printf 'must not be published\n' >"$TEST_HOME/.bashrc"
 rm -rf "$TEST_REMOTE"

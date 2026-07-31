@@ -626,9 +626,9 @@ public final class MacSyncApp {
     }
 
     private func safeDiagnosticOutput(_ rawOutput: String) -> String {
-        let credentialPattern = #"https://[^/@\s]+@"#
+        let embeddedUserInfoPattern = #"https://[^/@\s]+@"#
         let redacted = rawOutput.replacingOccurrences(
-            of: credentialPattern,
+            of: embeddedUserInfoPattern,
             with: "https://<redacted>@",
             options: .regularExpression,
         )

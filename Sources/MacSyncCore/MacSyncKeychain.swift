@@ -2,6 +2,32 @@ import Foundation
 import LocalAuthentication
 import Security
 
+struct MacSyncKeychainBackend {
+    let copyMatching: ([CFString: Any]) -> (status: OSStatus, item: Any?)
+    let update: ([CFString: Any], [CFString: Any]) -> OSStatus
+    let add: ([CFString: Any]) -> OSStatus
+
+    static var live: MacSyncKeychainBackend {
+        MacSyncKeychainBackend(
+            copyMatching: { query in
+                var item: CFTypeRef?
+                let status = SecItemCopyMatching(query as CFDictionary, &item)
+                return (status, item)
+            },
+            update: { query, attributes in
+                SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            },
+            add: { query in
+                // The age identity must be available to a scheduled sync after the
+                // first unlock. This device-only item deliberately has no per-use
+                // authentication prompt; adding one would make unattended sync
+                // impossible. The app never logs or exports the identity.
+                SecItemAdd(query as CFDictionary, nil) // NOSONAR
+            },
+        )
+    }
+}
+
 public enum MacSyncKeychainIdentityAvailability: Equatable, Sendable {
     case available
     case missing
@@ -31,6 +57,20 @@ public enum MacSyncKeychain {
         account: String,
         allowInteraction: Bool,
     ) -> MacSyncKeychainIdentityLookup {
+        identity(
+            service: service,
+            account: account,
+            allowInteraction: allowInteraction,
+            backend: .live,
+        )
+    }
+
+    static func identity(
+        service: String,
+        account: String,
+        allowInteraction: Bool,
+        backend: MacSyncKeychainBackend,
+    ) -> MacSyncKeychainIdentityLookup {
         let context = LAContext()
         context.interactionNotAllowed = !allowInteraction
         context.localizedReason = "Mac Sync needs its age identity to update encrypted secrets."
@@ -43,8 +83,7 @@ public enum MacSyncKeychain {
             kSecUseAuthenticationContext: context,
         ]
 
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let (status, item) = backend.copyMatching(query)
         switch status {
         case errSecSuccess:
             guard let data = item as? Data,
@@ -68,6 +107,20 @@ public enum MacSyncKeychain {
         service: String,
         account: String,
     ) -> OSStatus {
+        storeIdentity(
+            identity,
+            service: service,
+            account: account,
+            backend: .live,
+        )
+    }
+
+    static func storeIdentity(
+        _ identity: String,
+        service: String,
+        account: String,
+        backend: MacSyncKeychainBackend,
+    ) -> OSStatus {
         let match: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -75,9 +128,9 @@ public enum MacSyncKeychain {
         ]
         let attributes: [CFString: Any] = [
             kSecValueData: Data(identity.utf8),
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let updateStatus = SecItemUpdate(match as CFDictionary, attributes as CFDictionary)
+        let updateStatus = backend.update(match, attributes)
         if updateStatus == errSecSuccess {
             return errSecSuccess
         }
@@ -87,6 +140,6 @@ public enum MacSyncKeychain {
 
         var item = match
         attributes.forEach { item[$0.key] = $0.value }
-        return SecItemAdd(item as CFDictionary, nil)
+        return backend.add(item)
     }
 }

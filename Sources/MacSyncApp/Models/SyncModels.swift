@@ -65,46 +65,6 @@ struct SyncStatus: Equatable {
     /// array means this Mac's snapshot is currently clean.
     let currentLocalChanges: [String]?
 
-    init(
-        result: SyncResult,
-        startedAt: String?,
-        finishedAt: String?,
-        durationSeconds: Int?,
-        updatedFileCount: Int?,
-        updatedByteCount: Int?,
-        storageFileCount: Int?,
-        storageByteCount: Int?,
-        warningCount: Int,
-        errorCount: Int,
-        lastCommit: String?,
-        remoteRepository: String?,
-        warnings: [String],
-        errors: [String],
-        conditions: [SyncHealthCondition] = [],
-        commandDiagnostics: [SyncCommandDiagnostic] = [],
-        recordedLocalChanges: [String],
-        currentLocalChanges: [String]?,
-    ) {
-        self.result = result
-        self.startedAt = startedAt
-        self.finishedAt = finishedAt
-        self.durationSeconds = durationSeconds
-        self.updatedFileCount = updatedFileCount
-        self.updatedByteCount = updatedByteCount
-        self.storageFileCount = storageFileCount
-        self.storageByteCount = storageByteCount
-        self.warningCount = warningCount
-        self.errorCount = errorCount
-        self.lastCommit = lastCommit
-        self.remoteRepository = remoteRepository
-        self.warnings = warnings
-        self.errors = errors
-        self.conditions = conditions
-        self.commandDiagnostics = commandDiagnostics
-        self.recordedLocalChanges = recordedLocalChanges
-        self.currentLocalChanges = currentLocalChanges
-    }
-
     static let empty = SyncStatus(
         result: .unknown,
         startedAt: nil,

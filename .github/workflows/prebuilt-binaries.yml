@@ -202,7 +202,7 @@ jobs:
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
             label="current"
             title="Current build"
-            app_version="1.0.2"
+            app_version="1.0.3"
           fi
           {
             printf 'app_version=%s\n' "$app_version"

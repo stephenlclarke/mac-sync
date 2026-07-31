@@ -1,4 +1,6 @@
+import LocalAuthentication
 @testable import MacSyncCore
+import Security
 import XCTest
 
 final class MacSyncCoreTests: XCTestCase {
@@ -73,6 +75,117 @@ final class MacSyncCoreTests: XCTestCase {
             "git@github.com:owner/repo.git",
             MacSyncPaths.githubSSHRemoteURL("https://github.com/owner/repo.git"),
         )
+        XCTAssertEqual(
+            "https://github.com/owner/repo.git",
+            MacSyncPaths.normalizeGitHubRemoteURL("http://user@github.com/owner/repo.git///"),
+        )
+        XCTAssertNil(MacSyncPaths.githubSSHRemoteURL("https://gitlab.com/owner/repo.git"))
+    }
+
+    func testKeychainIdentityMapsSecurityResultsWithoutInteraction() throws {
+        var capturedQuery: [CFString: Any] = [:]
+        let available = MacSyncKeychain.identity(
+            service: "test-service",
+            account: "test-account",
+            allowInteraction: false,
+            backend: MacSyncKeychainBackend(
+                copyMatching: { query in
+                    capturedQuery = query
+                    return (errSecSuccess, Data("AGE-SECRET-KEY-TEST\n".utf8))
+                },
+                update: { _, _ in errSecSuccess },
+                add: { _ in errSecSuccess },
+            ),
+        )
+
+        XCTAssertEqual(available.availability, .available)
+        XCTAssertEqual(available.identity, "AGE-SECRET-KEY-TEST\n")
+        XCTAssertEqual(capturedQuery[kSecAttrService] as? String, "test-service")
+        XCTAssertEqual(capturedQuery[kSecAttrAccount] as? String, "test-account")
+        let context = try XCTUnwrap(capturedQuery[kSecUseAuthenticationContext] as? LAContext)
+        XCTAssertTrue(context.interactionNotAllowed)
+
+        let missing = MacSyncKeychain.identity(
+            service: "test-service",
+            account: "test-account",
+            allowInteraction: true,
+            backend: keychainBackend(copyStatus: errSecItemNotFound),
+        )
+        XCTAssertEqual(missing.availability, .missing)
+
+        for status in [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled] {
+            let result = MacSyncKeychain.identity(
+                service: "test-service",
+                account: "test-account",
+                allowInteraction: true,
+                backend: keychainBackend(copyStatus: status),
+            )
+            XCTAssertEqual(result.availability, .interactionRequired)
+        }
+
+        let unavailable = MacSyncKeychain.identity(
+            service: "test-service",
+            account: "test-account",
+            allowInteraction: true,
+            backend: keychainBackend(copyStatus: errSecNotAvailable),
+        )
+        XCTAssertEqual(unavailable.availability, .unavailable(status: errSecNotAvailable))
+
+        let undecodable = MacSyncKeychain.identity(
+            service: "test-service",
+            account: "test-account",
+            allowInteraction: true,
+            backend: keychainBackend(copyStatus: errSecSuccess, copyItem: Data([0xFF])),
+        )
+        XCTAssertEqual(undecodable.availability, .unavailable(status: errSecDecode))
+    }
+
+    func testKeychainStoreUpdatesOrAddsDeviceOnlyItem() {
+        var addCount = 0
+        let updated = MacSyncKeychain.storeIdentity(
+            "AGE-SECRET-KEY-UPDATED",
+            service: "test-service",
+            account: "test-account",
+            backend: MacSyncKeychainBackend(
+                copyMatching: { _ in (errSecItemNotFound, nil) },
+                update: { _, _ in errSecSuccess },
+                add: { _ in
+                    addCount += 1
+                    return errSecSuccess
+                },
+            ),
+        )
+        XCTAssertEqual(updated, errSecSuccess)
+        XCTAssertEqual(addCount, 0)
+
+        let updateFailure = MacSyncKeychain.storeIdentity(
+            "AGE-SECRET-KEY-FAILED",
+            service: "test-service",
+            account: "test-account",
+            backend: keychainBackend(updateStatus: errSecAuthFailed),
+        )
+        XCTAssertEqual(updateFailure, errSecAuthFailed)
+
+        var addedItem: [CFString: Any] = [:]
+        let added = MacSyncKeychain.storeIdentity(
+            "AGE-SECRET-KEY-ADDED",
+            service: "test-service",
+            account: "test-account",
+            backend: MacSyncKeychainBackend(
+                copyMatching: { _ in (errSecItemNotFound, nil) },
+                update: { _, _ in errSecItemNotFound },
+                add: { item in
+                    addedItem = item
+                    return errSecSuccess
+                },
+            ),
+        )
+        XCTAssertEqual(added, errSecSuccess)
+        XCTAssertEqual(addedItem[kSecValueData] as? Data, Data("AGE-SECRET-KEY-ADDED".utf8))
+        XCTAssertTrue(CFEqual(
+            addedItem[kSecAttrAccessible] as CFTypeRef,
+            kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ))
     }
 
     func testLegacyHistoryRecordDecodesWithoutStructuredDiagnostics() throws {
@@ -121,6 +234,18 @@ final class MacSyncCoreTests: XCTestCase {
 
         XCTAssertTrue(runner.commandExists("sh"))
         XCTAssertFalse(runner.commandExists("definitely-missing-mac-sync-test-tool"))
+
+        let uncaptured = runner.run("/usr/bin/true", capture: false)
+        XCTAssertEqual(0, uncaptured.status)
+        XCTAssertEqual("", uncaptured.stdout)
+        XCTAssertEqual("", uncaptured.stderr)
+    }
+
+    func testUserConfigurationErrorDescription() {
+        XCTAssertEqual(
+            MacSyncUserConfigurationError.invalidRepositoryLocation.errorDescription,
+            "Repository locations must not be empty or contain new lines.",
+        )
     }
 
     func testProcessRunnerDrainsLargeOutputWithoutDeadlocking() {
@@ -383,5 +508,18 @@ final class MacSyncCoreTests: XCTestCase {
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
         try data.write(to: application.appendingPathComponent("Contents/Info.plist"))
+    }
+
+    private func keychainBackend(
+        copyStatus: OSStatus = errSecItemNotFound,
+        copyItem: Any? = nil,
+        updateStatus: OSStatus = errSecSuccess,
+        addStatus: OSStatus = errSecSuccess,
+    ) -> MacSyncKeychainBackend {
+        MacSyncKeychainBackend(
+            copyMatching: { _ in (copyStatus, copyItem) },
+            update: { _, _ in updateStatus },
+            add: { _ in addStatus },
+        )
     }
 }
