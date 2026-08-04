@@ -1,12 +1,13 @@
 # mac-sync
 
-<!-- markdownlint-disable MD033 -->
+<!-- markdownlint-disable MD013 MD033 -->
 <p>
   <img align="left" hspace="20" src="docs/images/mac-sync-icon.png" width="147" alt="Mac Sync project icon" />
-  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg" /></a>
-  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg" /></a>
-  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml"><img alt="Homebrew" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg" /></a>
-  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml"><img alt="Releases" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml/badge.svg" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml?query=branch%3Amain"><img alt="CI" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml?query=branch%3Amain"><img alt="CodeQL" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/docs.yml?query=branch%3Amain"><img alt="Documentation" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/docs.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml?query=branch%3Amain"><img alt="Homebrew" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml?query=branch%3Amain"><img alt="Releases" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml/badge.svg?branch=main" /></a>
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Quality Gate Status" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=alert_status" /></a>
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Coverage" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=coverage" /></a>
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Bugs" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=bugs" /></a>
@@ -15,6 +16,7 @@
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Maintainability Rating" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=sqale_rating" /></a>
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Duplicated Lines" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=duplicated_lines_density" /></a>
   <a href="https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync"><img alt="Lines of Code" src="https://sonarcloud.io/api/project_badges/measure?project=stephenlclarke_mac-sync&amp;metric=ncloc" /></a>
+  <img alt="Repo Visitors" src="https://visitor-badge.laobi.icu/badge?page_id=stephenlclarke.mac-sync" />
 </p>
 <br clear="left" />
 <br>
