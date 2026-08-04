@@ -1,0 +1,35 @@
+/* Show the repository-owned project icon in the DocC hero. */
+.documentation-hero .icon.icon {
+  top: 50%;
+  width: 80px;
+  height: 80px;
+  margin-top: 0;
+  margin-inline-end: 32px;
+  transform: translateY(-50%);
+}
+
+.documentation-hero .background-icon.background-icon {
+  top: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  opacity: 0.72;
+  transform: none;
+}
+
+.documentation-hero .background-icon.background-icon img,
+.documentation-hero .background-icon.background-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.documentation-hero .background-icon svg.technology-icon {
+  background: url("__PROJECT_ICON_URL__") center / contain no-repeat;
+}
+
+.documentation-hero .background-icon svg.technology-icon > * {
+  opacity: 0;
+}

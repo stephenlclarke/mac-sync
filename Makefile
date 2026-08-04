@@ -31,6 +31,8 @@ SWIFT_TEST_ATTEMPTS ?= 2
 SWIFT_COVERAGE_TEST_ATTEMPTS ?= 3
 SWIFT_TEST_RUN_FLAGS ?= --no-parallel
 SHELL_TEST_JOBS ?= 4
+DOCS_OUTPUT ?= .build/docc-site
+DOCS_BASE_PATH ?= projects/mac-sync
 CODEQL_ARCH ?= $(shell uname -m)
 MAC_SYNC_BINARY ?= $(abspath .build/debug/mac-sync)
 MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
@@ -39,7 +41,7 @@ MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
@@ -49,6 +51,12 @@ ci: check coverage-check cli-smoke-built
 
 resolve:
 	$(SWIFT) package resolve
+
+docs:
+	./scripts/make-docs.sh "$(DOCS_OUTPUT)" "$(DOCS_BASE_PATH)"
+
+serve-docs: docs
+	$(PYTHON) -m http.server 8000 --directory "$(DOCS_OUTPUT)"
 
 build:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product mac-sync

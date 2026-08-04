@@ -11,6 +11,9 @@ let package = Package(
         .executable(name: "MacSync", targets: ["MacSyncApp"]),
         .library(name: "MacSyncCore", targets: ["MacSyncCore"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin.git", from: "1.5.0"),
+    ],
     targets: [
         .target(
             name: "MacSyncCore",

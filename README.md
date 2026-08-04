@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD033 -->
 <p>
-  <img align="left" hspace="20" src="Design/MacSync-AppIcon.png" width="147" alt="Mac Sync app icon" />
+  <img align="left" hspace="20" src="docs/images/mac-sync-icon.png" width="147" alt="Mac Sync project icon" />
   <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml/badge.svg" /></a>
   <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml/badge.svg" /></a>
   <a href="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml"><img alt="Homebrew" src="https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml/badge.svg" /></a>
@@ -261,6 +261,15 @@ Commands:
 During `sync`, in-progress work is shown with a compact three-dot figure-eight Braille
 marker from `mac-spinner`, and completed work is printed with a tick marker.
 Paths that are already unchanged stay quiet.
+
+## Documentation
+
+The [DocC developer documentation][mac-sync-docs] covers the core
+synchronisation, configuration, history, diagnostics, and scheduling APIs.
+
+[mac-sync-docs]: https://stephenlclarke.github.io/projects/mac-sync/
+
+Build the same static documentation locally with `make docs`.
 
 ## Development
 
