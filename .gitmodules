@@ -1,0 +1,3 @@
+[submodule "submodules/mac-spinner"]
+	path = submodules/mac-spinner
+	url = https://github.com/stephenlclarke/mac-spinner.git

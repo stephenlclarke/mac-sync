@@ -41,13 +41,16 @@ MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
 MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
 
-.PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
+.PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve submodules spinner-build cli-binaries docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
 
 workflow: ci package
 
 ci: check coverage-check cli-smoke-built
+
+submodules:
+	git submodule update --init --recursive
 
 resolve:
 	$(SWIFT) package resolve
@@ -58,14 +61,19 @@ docs:
 serve-docs: docs
 	$(PYTHON) -m http.server 8000 --directory "$(DOCS_OUTPUT)"
 
-build:
+spinner-build: submodules
+	$(SWIFT) build --package-path submodules/mac-spinner $(SWIFT_RESOLVED_FLAGS) --product mac-spinner
+	mkdir -p .build/debug
+	cp submodules/mac-spinner/.build/debug/mac-spinner "$(MAC_SPINNER_BINARY)"
+
+cli-binaries: spinner-build
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product mac-sync
-	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product mac-spinner
+
+build: cli-binaries
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --product MacSync
 
 build-release:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-sync $(SWIFT_RELEASE_FLAGS)
-	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product mac-spinner $(SWIFT_RELEASE_FLAGS)
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) -c release --product MacSync $(SWIFT_RELEASE_FLAGS)
 
 codeql-build:
@@ -198,7 +206,7 @@ swift-coverage: swift-test-build
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
 
-coverage-shell-test:
+coverage-shell-test: cli-binaries
 	@SHELL_TEST_JOBS="$(SHELL_TEST_JOBS)" \
 		MAC_SYNC_BINARY="$(MAC_SYNC_BINARY)" \
 		MAC_SPINNER_BINARY="$(MAC_SPINNER_BINARY)" \
@@ -213,7 +221,7 @@ shell-test: build
 
 cli-smoke: build cli-smoke-built
 
-cli-smoke-built:
+cli-smoke-built: cli-binaries
 	@test -x "$(MAC_SYNC_BINARY)" || { \
 		printf '%s is missing; run make build before make cli-smoke-built\n' "$(MAC_SYNC_BINARY)" >&2; \
 		exit 2; \
@@ -307,7 +315,6 @@ package-built:
 	rm -rf "$(DIST_DIR)"
 	mkdir -p "$(DIST_DIR)/mac-sync/bin" "$(DIST_DIR)/mac-sync/resources"
 	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-sync" "$(DIST_DIR)/mac-sync/bin/mac-sync"
-	cp ".build/$(PACKAGE_BUILD_CONFIGURATION)/mac-spinner" "$(DIST_DIR)/mac-sync/bin/mac-spinner"
 	$(MAKE) app-built \
 		PACKAGE_BUILD_CONFIGURATION="$(PACKAGE_BUILD_CONFIGURATION)" \
 		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \

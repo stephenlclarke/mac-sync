@@ -7,7 +7,6 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .executable(name: "mac-sync", targets: ["MacSyncCLI"]),
-        .executable(name: "mac-spinner", targets: ["MacSyncSpinner"]),
         .executable(name: "MacSync", targets: ["MacSyncApp"]),
         .library(name: "MacSyncCore", targets: ["MacSyncCore"]),
     ],
@@ -23,10 +22,6 @@ let package = Package(
             name: "MacSyncCLI",
             dependencies: ["MacSyncCore"],
             path: "Sources/MacSyncCLI",
-        ),
-        .executableTarget(
-            name: "MacSyncSpinner",
-            path: "Sources/MacSyncSpinner",
         ),
         .executableTarget(
             name: "MacSyncApp",

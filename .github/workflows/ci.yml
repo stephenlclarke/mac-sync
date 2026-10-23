@@ -32,6 +32,7 @@ jobs:
         with:
           path: mac-sync
           fetch-depth: 0
+          submodules: recursive
 
       - name: Compute SwiftPM cache fingerprint
         id: swiftpm-cache
@@ -42,6 +43,7 @@ jobs:
             swift --version 2>&1
             shasum -a 256 mac-sync/Package.swift
             shasum -a 256 mac-sync/Makefile
+            git -C mac-sync/submodules/mac-spinner rev-parse HEAD
           } | shasum -a 256 | awk '{ printf "fingerprint=%s\n", $1 }' >> "$GITHUB_OUTPUT"
 
       - name: Cache SwiftPM build artifacts

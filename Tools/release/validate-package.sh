@@ -40,14 +40,12 @@ payload="$package_root/mac-sync"
 app="$payload/MacSync.app"
 
 test -x "$payload/bin/mac-sync"
-test -x "$payload/bin/mac-spinner"
 test -x "$app/Contents/MacOS/MacSync"
 test -x "$app/Contents/Resources/mac-sync"
 test -f "$app/Contents/Resources/MacSync.icns"
 test -f "$payload/resources/build-info.json"
 
 "$payload/bin/mac-sync" --help >/dev/null
-"$payload/bin/mac-spinner" --message package-smoke --pending >/dev/null
 plutil -lint "$app/Contents/Info.plist"
 
 actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"

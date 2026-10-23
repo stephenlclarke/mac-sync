@@ -72,8 +72,9 @@ Stable and Current use separate Homebrew prefixes. Uninstall one before
 switching to the other so only one Mac Sync app and CLI remain active.
 
 The formula installs every non-system command required for syncing and encrypted
-secrets: `age` (including `age-keygen`), GNU `tar` (`gtar`), Git, and a current
-`rsync`. Finder launches receive those Homebrew paths automatically, and the
+secrets: `age` (including `age-keygen`), GNU `tar` (`gtar`), Git, `mac-spinner`,
+and a current `rsync`. It gets `mac-spinner` from the standalone formula in the
+same tap. Finder launches receive those Homebrew paths automatically, and the
 Homebrew service and the app-managed schedule declare the same `PATH`, so both
 can find the installed tools.
 Apple provides Keychain,
@@ -274,6 +275,12 @@ synchronisation, configuration, history, diagnostics, and scheduling APIs.
 Build the same static documentation locally with `make docs`.
 
 ## Development
+
+Local builds use the standalone `mac-spinner` repository pinned as a Git submodule. Clone with `--recurse-submodules`, or initialise it in an existing checkout:
+
+```sh
+git submodule update --init --recursive
+```
 
 ```sh
 make ci
