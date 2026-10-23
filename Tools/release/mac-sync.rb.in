@@ -11,8 +11,8 @@ class MacSync < Formula
   depends_on "git"
   depends_on "gnu-tar"
   depends_on macos: :ventura
-  depends_on "stephenlclarke/tap/mac-spinner"
   depends_on "rsync"
+  depends_on "stephenlclarke/tap/mac-spinner"
 
   def install
     package_root = if (buildpath/"mac-sync").directory?
