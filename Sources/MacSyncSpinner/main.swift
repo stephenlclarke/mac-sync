@@ -76,10 +76,14 @@ private func spin(message: String) -> Never {
         }
     }
 
-    var index = 0
+    let firstFrame = coloured(frames[0], code: "38;5;63")
+    print("\(firstFrame) \(message)", terminator: "")
+    fflush(stdout)
+
+    var index = 1
     while true {
         let frame = coloured(frames[index % frames.count], code: "38;5;63")
-        print("\r\(frame) \(message)", terminator: "")
+        print("\r\(frame)", terminator: "")
         fflush(stdout)
         index += 1
         usleep(100_000)
