@@ -206,7 +206,7 @@ swift-coverage: swift-test-build
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
 
-coverage-shell-test: cli-binaries
+coverage-shell-test: spinner-build
 	@SHELL_TEST_JOBS="$(SHELL_TEST_JOBS)" \
 		MAC_SYNC_BINARY="$(MAC_SYNC_BINARY)" \
 		MAC_SPINNER_BINARY="$(MAC_SPINNER_BINARY)" \
