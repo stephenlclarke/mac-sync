@@ -55,16 +55,17 @@ struct SyncIssuesView: View {
                     .listStyle(.inset)
                 }
             }
-            .frame(minWidth: 300, idealWidth: 360, maxWidth: 430)
+            .frame(minWidth: 300, idealWidth: 360, maxWidth: 430, maxHeight: .infinity, alignment: .topLeading)
 
             if let selectedIssue {
                 issueDetail(selectedIssue)
                     .frame(minWidth: 540)
             } else {
                 emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             selectFirstIssueIfNeeded()
         }
