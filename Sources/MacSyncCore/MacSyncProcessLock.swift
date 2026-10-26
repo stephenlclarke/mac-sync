@@ -1,6 +1,17 @@
 import Darwin
 import Foundation
 
+public enum MacSyncProcessIdentity {
+    /// PID files can survive a crash and PIDs can be reused. Never treat an
+    /// arbitrary live PID, zero or a process-group selector as our worker.
+    public static func isWorker(_ pid: Int32, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        guard pid > 1, kill(pid, 0) == 0 else { return false }
+        let result = ProcessRunner(environment: environment).run("/bin/ps", ["-p", String(pid), "-o", "comm="], timeout: 2, outputLimit: 4096)
+        guard result.status == 0 else { return false }
+        return URL(fileURLWithPath: result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)).lastPathComponent == "mac-sync"
+    }
+}
+
 /// An advisory process lock whose ownership is released automatically when the
 /// process exits, including after a crash.
 public final class MacSyncProcessLock: @unchecked Sendable {

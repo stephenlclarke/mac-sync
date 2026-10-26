@@ -15,6 +15,7 @@ public final class LocalHistoryStore {
         let path = URL(fileURLWithPath: directory).appendingPathComponent("history.sqlite").path
         guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             sqlite3_close(database)
+            database = nil
             throw NSError(domain: "MacSyncHistory", code: 1)
         }
         sqlite3_busy_timeout(database, 5000)

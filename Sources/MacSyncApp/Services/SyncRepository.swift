@@ -35,7 +35,7 @@ struct SyncRepository: @unchecked Sendable {
         let configuration = configuration()
         let currentStatus = readStatus(configuration: configuration)
         let history = readHistory(configuration: configuration, offset: historyOffset)
-        let processID = activeSyncProcessID(machine: configuration.machineName)
+        let processID = activeSyncProcessID(configuration: configuration)
         let snapshots = machineSnapshots(configuration: configuration, includeDetails: includeSnapshotDetails)
         let currentMachine = snapshots.first { $0.name == configuration.machineName }
         let peerMachines = snapshots.filter { $0.name != configuration.machineName }
@@ -368,15 +368,19 @@ struct SyncRepository: @unchecked Sendable {
         return (try? store.page(offset: offset)) ?? []
     }
 
-    private func activeSyncProcessID(machine: String) -> Int32? {
+    private func activeSyncProcessID(configuration: SyncConfiguration) -> Int32? {
         let temporaryDirectory = environment["TMPDIR"] ?? "/tmp"
-        let lockFile = "\(temporaryDirectory)/mac-sync-\(machine).lock/pid"
-        guard let processID = Int32(readText(lockFile).trimmingCharacters(in: .whitespacesAndNewlines)),
-              kill(processID, 0) == 0
-        else {
-            return nil
+        let paths = ["\(configuration.statusDirectory)/\(configuration.machineName).running",
+                     "\(temporaryDirectory)/mac-sync-\(configuration.machineName).lock/pid"]
+        for path in paths {
+            guard let size = try? fileManager.attributesOfItem(atPath: path)[.size] as? NSNumber,
+                  size.intValue <= 64,
+                  let processID = Int32(readText(path).trimmingCharacters(in: .whitespacesAndNewlines)),
+                  MacSyncProcessIdentity.isWorker(processID, environment: environment)
+            else { continue }
+            return processID
         }
-        return processID
+        return nil
     }
 
     private func machineSnapshots(configuration: SyncConfiguration, includeDetails: Bool) -> [MachineSnapshot] {

@@ -22,7 +22,8 @@ page/detail reads. Reproduce it with
 the full SwiftUI app or a multi-day soak. The historical crash is not proven.
 
 The complete local CI contract passed with more than 87% instrumented core coverage,
-above the unchanged 85% floor. ASan and TSan passed the 42 core and 77 app tests.
+above the unchanged 85% floor. The final suite includes 44 core and 78 app tests,
+including database-open failure and stale/invalid PID recovery cases.
 Hosted gates and release provenance must still pass for the exact published
 commit; local tests do not establish that result.
 

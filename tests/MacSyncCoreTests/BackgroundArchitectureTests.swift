@@ -3,6 +3,27 @@ import Foundation
 import XCTest
 
 final class BackgroundArchitectureTests: XCTestCase {
+    func testWorkerIdentityRejectsProcessGroupsMissingAndUnrelatedPIDs() {
+        XCTAssertFalse(MacSyncProcessIdentity.isWorker(-1))
+        XCTAssertFalse(MacSyncProcessIdentity.isWorker(0))
+        XCTAssertFalse(MacSyncProcessIdentity.isWorker(1))
+        XCTAssertFalse(MacSyncProcessIdentity.isWorker(Int32.max))
+        XCTAssertFalse(MacSyncProcessIdentity.isWorker(ProcessInfo.processInfo.processIdentifier))
+    }
+
+    func testFailedDatabaseOpenCanBeRetriedSafely() throws {
+        let root = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let blocked = root.appendingPathComponent("history.sqlite")
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        for _ in 0 ..< 10 {
+            XCTAssertThrowsError(try LocalHistoryStore(directory: root.path))
+        }
+        try FileManager.default.removeItem(at: blocked)
+        let store = try LocalHistoryStore(directory: root.path)
+        XCTAssertEqual(try store.count(), 0)
+    }
+
     private func fixture() throws -> URL {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

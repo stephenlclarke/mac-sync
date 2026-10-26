@@ -10,6 +10,10 @@ struct SnapshotDirectoryReader: Sendable {
     let dataRepository: String
 
     func page(machine: String, directory: String, offset: Int = 0, limit: Int = 100) throws -> SnapshotDirectoryPage {
+        try autoreleasepool { try readPage(machine: machine, directory: directory, offset: offset, limit: limit) }
+    }
+
+    private func readPage(machine: String, directory: String, offset: Int, limit: Int) throws -> SnapshotDirectoryPage {
         guard MacSyncPaths.safeMachineName(machine), directory.hasPrefix("~/") || directory.hasPrefix("/") else {
             throw SnapshotFileInspectionError.invalidSnapshotPath
         }

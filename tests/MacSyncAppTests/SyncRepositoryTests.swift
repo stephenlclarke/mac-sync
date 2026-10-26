@@ -6,6 +6,25 @@ import XCTest
 final class SyncRepositoryTests: XCTestCase {
     private let fileManager = FileManager.default
 
+    func testRejectsInvalidStaleAndUnrelatedWorkerPIDFiles() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        var environment = fixture.environment
+        let temporary = fixture.root.appendingPathComponent("tmp")
+        environment["TMPDIR"] = temporary.path
+        let repository = SyncRepository(environment: environment)
+        let markers = [fixture.status.appendingPathComponent("local.running"),
+                       temporary.appendingPathComponent("mac-sync-local.lock/pid")]
+        for value in ["-1", "0", "1", String(Int32.max), String(ProcessInfo.processInfo.processIdentifier), "invalid", String(repeating: "1", count: 128)] {
+            for marker in markers {
+                try write(value, to: marker)
+            }
+            let overview = repository.load(includeSnapshotDetails: false)
+            XCTAssertNil(overview.localSyncProcessID)
+            XCTAssertFalse(overview.isLocalSyncActive)
+        }
+    }
+
     func testLoadsCurrentAndPeerSnapshotWithoutListingSecretContents() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }

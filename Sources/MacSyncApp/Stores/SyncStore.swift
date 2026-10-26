@@ -28,6 +28,9 @@ final class SyncStore: ObservableObject {
     @Published private(set) var backgroundDetail = ""
     @Published private(set) var isRefreshing = false
     private var stateObservation: LocalStateObservation?
+    // Global queues do not guarantee a per-work-item autorelease pool.
+    private let readQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.overview", qos: .utility, autoreleaseFrequency: .workItem)
+    private let healthQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.health", qos: .utility, autoreleaseFrequency: .workItem)
     private var refreshPending = false
     private var generation = 0
 
@@ -146,7 +149,7 @@ final class SyncStore: ObservableObject {
         let requestedGeneration = generation
         let repository = repository
         let offset = historyOffset
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        readQueue.async { [weak self] in
             let snapshot = repository.load(includeSnapshotDetails: false, historyOffset: offset)
             let path = "\(snapshot.configuration.statusDirectory)/history/\(snapshot.configuration.machineName)"
             let history = FileManager.default.fileExists(atPath: path) ? try? LocalHistoryStore(directory: path) : nil
@@ -345,7 +348,9 @@ final class SyncStore: ObservableObject {
             process.terminate()
             return
         }
-        if let processID = overview.localSyncProcessID {
+        if let processID = overview.localSyncProcessID,
+           MacSyncProcessIdentity.isWorker(processID, environment: commandEnvironment)
+        {
             _ = kill(processID, SIGTERM)
         }
     }
@@ -682,7 +687,7 @@ final class SyncStore: ObservableObject {
         let environment = commandEnvironment
         healthEvaluationInProgress = true
         lastHealthEvaluationAt = Date()
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        healthQueue.async { [weak self] in
             let activeCodes = SyncHealthEvaluator(environment: environment)
                 .activeConditionCodes(in: snapshot)
             DispatchQueue.main.async {

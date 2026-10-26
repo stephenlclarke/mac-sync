@@ -27,6 +27,14 @@ changes over 500 ms; window activation also refreshes saved state. Only one
 overview read and one pending replacement are allowed. Disk reads run off the
 main thread. A user-requested sync or health action can use the network and
 interactive credentials.
+Overview and health queues drain an autorelease pool after each work item;
+folder reads also drain one per page. They do not rely on a global queue to
+release Foundation's temporary objects.
+
+Activity uses the shared status PID marker, not just a temporary-directory
+path which may differ between Finder and launchd. A PID must identify a real
+`mac-sync` worker. Stop rechecks that identity; invalid, reused or process-group
+PIDs are not signalled.
 
 ## Bounded work
 
