@@ -41,7 +41,7 @@ MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
 MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md .github/pull_request_template.md
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/desktop-guide.md docs/cli-reference.md docs/configuration.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md .github/pull_request_template.md
 
 .PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve submodules spinner-build cli-binaries docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 

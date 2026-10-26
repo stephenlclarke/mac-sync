@@ -1,6 +1,12 @@
 # mac-sync Workflow
 
+<!-- markdownlint-disable MD013 -->
+
 This workflow describes how to download, configure, install, sync, restore, and update `mac-sync` on a Mac.
+
+Use the [README](README.md) for the quick start, the [desktop guide](docs/desktop-guide.md) for screen-by-screen help, the [CLI reference](docs/cli-reference.md) for command details, and [Configuration](docs/configuration.md) for paths and environment overrides.
+
+> The desktop app has an unresolved [memory-growth issue during sync](SUPPORT.md#desktop-ui-memory-growth). Keep it closed during manual and scheduled syncs until the issue is fixed.
 
 mac-sync is implemented as a SwiftPM package with a CLI and a native SwiftUI
 macOS app. Homebrew owns the installed executables and app bundle. Automatic
@@ -20,8 +26,6 @@ status and machine snapshot records.
 
 ## End-to-End Flow
 
-<!-- markdownlint-disable MD013 -->
-
 ```mermaid
 flowchart TD
   A["Start on a Mac"] --> B["Install with Homebrew<br/>brew tap stephenlclarke/tap<br/>brew install mac-sync"]
@@ -40,8 +44,6 @@ flowchart TD
   L --> M
 ```
 
-<!-- markdownlint-enable MD013 -->
-
 ## Download
 
 Install Homebrew first if this Mac does not already have it. Then install the
@@ -54,8 +56,16 @@ brew install mac-sync
 open "$(brew --prefix mac-sync)/MacSync.app"
 ```
 
-The formula installs the required non-system runtime commands: `age`, GNU tar
-(`gtar`), Git, and rsync. Finder-launched Mac Sync adds Homebrew's standard paths
+Stable is the default `mac-sync` formula. To opt in to Current, uninstall stable before installing the other channel:
+
+```sh
+brew uninstall mac-sync
+brew install mac-sync-current
+```
+
+Use `mac-sync-current` in upgrade and service commands while on that channel. Do not install both formulae together. The trust command above approves only the standalone spinner dependency, not the whole tap. See [Releases](RELEASES.md) for channel, verification and rollback details.
+
+The formula installs the required non-system runtime commands: `age`, GNU tar (`gtar`), Git, `mac-spinner`, and rsync. Finder-launched Mac Sync adds Homebrew's standard paths
 before invoking its bundled CLI, and both scheduling options declare the same
 PATH. Its setup, sync, restore, and encrypted-secret flows therefore find the
 installed tools in either mode. Keychain access and the other POSIX utilities
@@ -165,13 +175,7 @@ app to copy just the selected snapshot roots. This deliberately skips the
 package, editor, repository, and secrets restore hints, which remain part of a
 normal full restore.
 
-For local development, build and launch the native app from the checkout:
-
-```sh
-cd ~/github/mac-sync
-./script/build_and_run.sh
-dist/mac-sync/MacSync.app/Contents/Resources/mac-sync --help
-```
+For local builds and developer documentation, see [Contributing](CONTRIBUTING.md#local-development).
 
 ## Initial Sync
 
@@ -199,8 +203,6 @@ complete snapshot. Existing encrypted secrets are also decrypted and compared
 before replacement; a decryption failure preserves the current archive and
 stops sync.
 
-<!-- markdownlint-disable MD013 -->
-
 ```mermaid
 sequenceDiagram
   participant User
@@ -223,8 +225,6 @@ sequenceDiagram
   CLI->>Data: git commit -m chore(machine): sync machine state
   Data->>GitHub: git push -u origin main
 ```
-
-<!-- markdownlint-enable MD013 -->
 
 Check status after the first run:
 
@@ -285,6 +285,8 @@ brew services restart mac-sync
 brew services info mac-sync
 ```
 
+The desktop app and the `mac-sync run` worker are each single-instance. Reopening the app activates the existing instance; a duplicate worker launch exits without starting another sync. Operations are serialised so app, scheduled and manual runs cannot overlap.
+
 Both schedules run `mac-sync run`, the automation entrypoint for `sync`.
 The app-managed LaunchAgent runs in the signed-in user session with explicit
 `HOME`, `USER`, `PATH`, and non-interactive Git settings. Encrypted-secrets
@@ -295,7 +297,7 @@ Local sync status is written outside git:
 ~/Library/Application Support/mac-sync/status/<machine-name>.env
 ```
 
-Each completed real publish or restore also writes a local JSON history record
+Each real sync or restore attempt also writes a local JSON history record
 under `~/Library/Application Support/mac-sync/status/history/<machine-name>/`.
 Entries stream to a local SQLite index and the JSON export, not an in-memory
 array. The UI reads 50 summaries and 200 transfer entries per page. Legacy
@@ -376,8 +378,6 @@ those package/editor commands for you. It also clones missing GitHub repos from
 the selected machine's `github-repositories/repositories.txt` into `~/github`,
 skipping targets that already exist.
 
-<!-- markdownlint-disable MD013 -->
-
 ```mermaid
 flowchart TD
   A["Choose source machine<br/>mac-sync restore --list-machines"] --> B["Dry-run restore<br/>MAC_SYNC_DRY_RUN=1 mac-sync restore --select"]
@@ -403,8 +403,6 @@ flowchart TD
   L --> N
   M --> N
 ```
-
-<!-- markdownlint-enable MD013 -->
 
 ## Encrypted Secrets
 
@@ -472,8 +470,6 @@ For a replacement Mac, the usual order is:
 12. Run `mac-sync sync` to create this Mac's own snapshot.
 13. Confirm with `mac-sync status`.
 
-<!-- markdownlint-disable MD013 -->
-
 ```mermaid
 flowchart LR
   Old["Old Mac snapshot<br/>mac-sync sync"] --> Data["mac-sync-data repo<br/>git clone ... ~/github/mac-sync-data"]
@@ -488,8 +484,6 @@ flowchart LR
   Secrets --> Sync
   Sync --> Data
 ```
-
-<!-- markdownlint-enable MD013 -->
 
 ## Useful Commands
 
@@ -514,40 +508,4 @@ brew upgrade mac-sync
 
 ## Development and Release Validation
 
-Run the same local validation and release packaging used by CI:
-
-```sh
-cd ~/github/mac-sync
-make ci
-make package-release
-```
-
-`make ci` runs Swift unit tests and every shell regression against
-coverage-instrumented executables, writes `coverage.lcov` and the
-Sonar-compatible `coverage.xml`, and enforces at least 85% line coverage across
-`MacSyncCore.swift` and `Support.swift`. It also runs CLI smoke checks and
-repository lint checks. SonarCloud scans all maintained source for
-static-analysis findings and applies coverage only to those two instrumented
-core files.
-
-Every successful `main` CI run queues a Current build after CodeQL passes for
-the same commit. Current uses the movable `current` tag, a commit-addressed
-archive, and the opt-in `mac-sync-current` Homebrew formula. Stable releases use
-immutable semantic tags, a fixed archive name, and the default `mac-sync`
-formula. Publishing to `stephenlclarke/homebrew-tap` requires the repository
-secret `HOMEBREW_TAP_TOKEN`; the workflow fails when it is absent, updates the
-appropriate formula, then installs and tests it from the canonical tap.
-
-The app bundle in these Homebrew archives is not Developer ID signed or
-notarised. The release validator records that state and still verifies archive
-layout, executables, plist version/build values, provenance, and checksums.
-
-Only Current and the latest stable release retain binary assets. Older release
-records and tags remain available, but their assets are removed after each
-successful publication. See [RELEASES.md](RELEASES.md) for the release and
-rollback procedure. Formula fixtures can be rendered and checked locally with:
-
-```sh
-make check
-python3 Tools/release/update-homebrew-formula.py --help
-```
+Build commands, coverage, sanitizers, CodeQL and quality dashboards are maintained in [Contributing](CONTRIBUTING.md#validation). Signing, exact-commit release gates, Homebrew publication, asset retention and rollback are maintained in [Releases](RELEASES.md). Process boundaries, resource limits and remaining validation gaps are described in [Architecture](docs/architecture.md).

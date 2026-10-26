@@ -1,5 +1,7 @@
 # Mac Sync Releases
 
+<!-- markdownlint-disable MD013 -->
+
 Mac Sync uses the same two-lane release contract as `container-compose`.
 Semantic releases are immutable and Current is a replaceable prerelease built
 from the newest fully validated `main` commit.
@@ -41,6 +43,26 @@ certificate into an ephemeral runner Keychain and never writes either value to
 the repository or release asset. The prior `MAC_SYNC_DEVELOPER_ID_...` and
 `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_...` secret names remain supported for
 migration.
+
+## Local Developer ID signing
+
+The app bundle ID is `tools.xyzzy.mac-sync`. Direct-distribution signing uses a Developer ID Application certificate, not a provisioning profile. Sign in to Xcode with the maintainer's Apple Developer account and create or download the certificate. Its private key must be available in the login Keychain.
+
+List available signing identities:
+
+```sh
+make signing-identities
+```
+
+Build a signed archive using the identity and optional Team ID from that output:
+
+```sh
+make package-signed \
+  MAC_SYNC_CODESIGN_IDENTITY='Developer ID Application: Stephen Clarke (TEAMID)' \
+  MAC_SYNC_CODESIGN_TEAM_ID='TEAMID'
+```
+
+`make package-release` remains available for local development without a certificate. An explicitly requested Developer ID build never falls back to ad hoc signing. Keep certificate material and passwords out of the repository. Signing does not notarise an archive; the hosted signing contract is described above.
 
 ## Current Build
 

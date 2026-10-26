@@ -1,5 +1,22 @@
 # Contributing to This Project
 
+<!-- markdownlint-disable MD013 -->
+
+## Local development
+
+Clone with `--recurse-submodules`, or initialise the pinned standalone `mac-spinner` submodule in an existing checkout:
+
+```sh
+git submodule update --init --recursive
+make ci
+make package-release
+./script/build_and_run.sh --verify
+```
+
+To build and launch the app for development without the verification-only flag, run `./script/build_and_run.sh`. Its bundled CLI is available at `dist/mac-sync/MacSync.app/Contents/Resources/mac-sync`. Source builds are for development and release packaging; users install with Homebrew.
+
+The [DocC developer documentation](https://stephenlclarke.github.io/projects/mac-sync/) covers synchronisation, configuration, history, diagnostics and scheduling APIs. Build the same static site locally with `make docs`.
+
 ## Commit Message Guidelines (Conventional Commits)
 
 All commit messages **must follow the
@@ -34,6 +51,8 @@ docs: clarify Homebrew service setup
 ```
 
 ## Validation
+
+Live project checks: [CI](https://github.com/stephenlclarke/mac-sync/actions/workflows/ci.yml), [CodeQL](https://github.com/stephenlclarke/mac-sync/actions/workflows/codeql.yml), [Documentation](https://github.com/stephenlclarke/mac-sync/actions/workflows/docs.yml), [Homebrew](https://github.com/stephenlclarke/mac-sync/actions/workflows/homebrew.yml), [Releases](https://github.com/stephenlclarke/mac-sync/actions/workflows/prebuilt-binaries.yml), and the [SonarCloud quality and coverage dashboard](https://sonarcloud.io/summary/new_code?id=stephenlclarke_mac-sync).
 
 Before opening a pull request, run:
 
