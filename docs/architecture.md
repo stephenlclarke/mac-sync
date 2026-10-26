@@ -105,7 +105,9 @@ replace an existing archive, its saved public-recipient manifest must match the
 configuration. A changed or missing recipient manifest requires a reviewed
 interactive sync. The new encrypted archive is staged on the destination
 filesystem and renamed only after encryption succeeds. Pipelines fail if any
-stage fails. Temporary secret directories are mode 0700; temporary files are
+stage fails. Archive creation does not ignore unreadable inputs: a source-read
+failure preserves the previous archive and is recorded as a local error, not a
+GitHub outage. Temporary secret directories are mode 0700; temporary files are
 mode 0600. Normal completion/error cleanup removes them. Abrupt process or
 machine termination can leave private temporary directories for OS cleanup.
 

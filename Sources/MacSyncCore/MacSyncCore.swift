@@ -1827,12 +1827,12 @@ public final class MacSyncApp {
 
     private func writePlainSecretsArchive(includedFile: String, target: String) throws {
         let script = """
-        gtar -C \(ShellQuoter.quote(config.homeDir)) --ignore-failed-read --warning=no-file-ignored --sort=name --exclude='.DS_Store' --exclude='*/.DS_Store' --exclude='*.sock' --exclude='*.socket' --exclude='.ssh/agent' --exclude='.ssh/agent/*' -cf - -T \(ShellQuoter.quote(includedFile)) | gzip -n > \(ShellQuoter.quote(target))
+        gtar -C \(ShellQuoter.quote(config.homeDir)) --sort=name --exclude='.DS_Store' --exclude='*/.DS_Store' --exclude='*.sock' --exclude='*.socket' --exclude='.ssh/agent' --exclude='.ssh/agent/*' -cf - -T \(ShellQuoter.quote(includedFile)) | gzip -n > \(ShellQuoter.quote(target))
         """
         let result = runner.shell(script)
         if result.status != 0 {
             fputs(result.combinedOutput, stderr)
-            throw ExitError(code: Int(result.status))
+            try fail("could not read all configured secret paths; the previous encrypted archive was preserved", code: Int(result.status))
         }
     }
 
@@ -3590,6 +3590,9 @@ public final class MacSyncApp {
                 backgroundCheckpoint.nextAttempt = Date().addingTimeInterval(900)
             } else {
                 backgroundCheckpoint.failed(authentication: gitNetworkFailureKind(lastCommandOutput) == .authentication)
+                if !healthConditions.contains(where: { $0.component == .remoteRepository && $0.severity == .error }) {
+                    backgroundCheckpoint.detail = "Waiting to retry a local sync error; review the last run"
+                }
             }
             try? backgroundCheckpoint.save(to: checkpointPath)
             throw error

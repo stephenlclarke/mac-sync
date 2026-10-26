@@ -185,6 +185,14 @@ cat >"$FAKE_BIN/gtar" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${GTAR_CREATE_FAIL:-0}" == "1" ]]; then
+  if [[ " $* " == *" --ignore-failed-read "* ]]; then
+    exit 0
+  fi
+  printf 'forced unreadable secret input\n' >&2
+  exit 2
+fi
+
 args=()
 for arg in "$@"; do
   case "$arg" in
@@ -403,6 +411,15 @@ run_single_repo_mac_sync run
 readonly BACKGROUND_ARCHIVE="$TEST_DATA_REPO/machines/target/secrets/secrets.tar.gz.age"
 [[ -f "$BACKGROUND_ARCHIVE" ]] || fail "background encryption did not create an archive"
 background_checksum="$(cksum "$BACKGROUND_ARCHIVE")"
+rm -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.background.json"
+set +e
+GTAR_CREATE_FAIL=1 run_single_repo_mac_sync run
+unreadable_status="$?"
+set -e
+[[ "$unreadable_status" -ne 0 ]] || fail "unreadable secret input was reported as successful"
+[[ "$(cksum "$BACKGROUND_ARCHIVE")" == "$background_checksum" ]] || fail "unreadable input replaced the encrypted archive"
+assert_file_contains "$STDERR_FILE" "previous encrypted archive was preserved"
+assert_file_contains "$TEST_HOME/Library/Application Support/mac-sync/status/target.background.json" "Waiting to retry a local sync error"
 printf 'age1unreviewedrecipient\n' >>"$TEST_DATA_REPO/machines/_shared/config/age-recipients.txt"
 rm -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.background.json"
 run_single_repo_mac_sync run

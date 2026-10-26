@@ -10,7 +10,8 @@
   drain Foundation autorelease buffers per chunk.
 - Page local SQLite history and snapshot folders; coalesce activity updates.
 - Encrypt unattended backups with public recipients, without private Keychain
-  reads. Preserve existing archives when recipients change or encryption fails.
+  reads. Preserve existing archives when recipients change, source reads fail
+  or encryption fails.
 - Recover pending local commits after a push outage; verify GitHub SSH fallback
   on port 22 or 443 without changing the configured remote.
 - Gate CI on ASan/TSan and scan Swift with CodeQL security-and-quality queries.
