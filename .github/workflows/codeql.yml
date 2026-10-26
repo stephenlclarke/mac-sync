@@ -32,6 +32,9 @@ jobs:
     env:
       # Swift traced extraction is not supported with Xcode 27 / Swift 6.4.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      # Tracing uses Rosetta, so uname inside the traced build reports x86_64.
+      # Keep the actual Swift target native to this arm64 runner.
+      CODEQL_ARCH: arm64
     steps:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
@@ -42,6 +45,10 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
+
+      - name: Resolve dependencies before tracing
+        timeout-minutes: 10
+        run: swift package resolve
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

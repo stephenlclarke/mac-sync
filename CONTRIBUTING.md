@@ -61,6 +61,11 @@ make memory-check
 
 CI runs ASan and TSan as separate jobs; both must succeed for the workflow to pass. They use isolated build directories, two build workers, serial tests, and retained logs. Sanitizer failures fail the job directly, without the normal test runner's toolchain-failure exception. ASan checks invalid memory access; TSan checks data races. Neither proves that a long-running app has bounded memory use or no retained objects. Use Instruments Allocations/Leaks and a representative sustained workload for that assessment. The existing CodeQL workflow scans Swift with the security-and-quality suite on macOS 26 and Xcode 26.6, since Swift traced extraction does not support Xcode 27 / Swift 6.4.
 
+CodeQL resolves SwiftPM dependencies before enabling tracing and explicitly
+targets ARM64 on the ARM64 runner. LLVM coverage-tool discovery is lazy, so it
+does not run Swift toolchain probes during the traced build. Maintained app and
+core sources are still compiled under tracing.
+
 Only maintainers publish releases. The exact stable/current contract, validation
 gates, Homebrew update sequence, retention policy, and rollback commands are in
 [RELEASES.md](RELEASES.md).
