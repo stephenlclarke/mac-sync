@@ -87,6 +87,21 @@ The stable workflow publishes the immutable release, updates the default
 
 ## Asset Retention
 
+If publication stops after uploading a stable archive (for example during tap
+verification), dispatch the same tag again from the repaired main workflow.
+The workflow downloads the existing archive and checksum, validates their
+original build/version/commit and signature, and resumes tap verification. It
+does not rebuild, replace assets or move the semantic tag. Installation guidance
+in release notes can be corrected without changing those immutable artefacts.
+
+Homebrew requires explicit trust for the separately installed spinner formula:
+
+```sh
+brew trust --formula stephenlclarke/tap/mac-spinner
+```
+
+The workflow trusts only that dependency, not every formula in the tap.
+
 Only these releases retain downloadable assets:
 
 - `current`

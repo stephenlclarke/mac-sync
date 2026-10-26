@@ -136,6 +136,9 @@ choices, uses stable Homebrew opt paths and removes the old UI-at-login job.
 It does not change another service or start the UI. Resave a schedule for
 immediate migration; otherwise the worker updates its plist on its next run.
 Restart an existing Homebrew service after upgrading to reload its definition.
+An old job pinned to an older Cellar binary cannot migrate itself to new code:
+save Automatic sync once after upgrading such a schedule. This one-off
+migration is explicit; opening the UI does not repair jobs or start work.
 
 ## Validation and remaining limits
 

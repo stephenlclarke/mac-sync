@@ -62,6 +62,7 @@ Install with Homebrew:
 
 ```sh
 brew tap stephenlclarke/tap
+brew trust --formula stephenlclarke/tap/mac-spinner
 brew install mac-sync
 mac-sync ui
 ```
@@ -70,9 +71,16 @@ The opt-in Current build tracks the newest fully validated `main` commit:
 
 ```sh
 brew uninstall mac-sync
+brew trust --formula stephenlclarke/tap/mac-spinner
 brew install mac-sync-current
 mac-sync ui
 ```
+
+The trust command approves only the standalone spinner dependency. It does not
+trust all formulae in the tap. After upgrading an older app-managed schedule,
+save **Settings → Automatic sync** once so it uses the new worker's stable opt
+path. An old Cellar-pinned job cannot upgrade itself by running the old binary.
+For a Homebrew service, restart that service after upgrading instead.
 
 Stable and Current use separate Homebrew prefixes. Uninstall one before
 switching to the other so only one Mac Sync app and CLI remain active.

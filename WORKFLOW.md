@@ -49,6 +49,7 @@ released Swift binary and runtime dependencies from Homebrew:
 
 ```sh
 brew tap stephenlclarke/tap
+brew trust --formula stephenlclarke/tap/mac-spinner
 brew install mac-sync
 open "$(brew --prefix mac-sync)/MacSync.app"
 ```
@@ -138,6 +139,7 @@ alternative. Do not run both schedules at once:
 
 ```sh
 brew tap stephenlclarke/tap
+brew trust --formula stephenlclarke/tap/mac-spinner
 brew install mac-sync
 ```
 
@@ -264,6 +266,8 @@ rsync/Git; this is not an all-or-nothing filesystem transaction. The desktop UI
 does not launch at login and can remain closed. Legacy app-owned worker jobs
 are migrated when the worker next runs; save the schedule once to migrate it
 immediately. Restart an existing Homebrew service after upgrading.
+Old Cellar-pinned app jobs require that one-off schedule save before they can
+run the new worker; opening the UI does not repair them or start a sync.
 
 If you choose the app-managed schedule, stop the optional Homebrew hourly
 service first so only one job runs:
@@ -331,6 +335,7 @@ manually:
 
 ```sh
 brew tap stephenlclarke/tap
+brew trust --formula stephenlclarke/tap/mac-spinner
 brew install mac-sync
 mkdir -p ~/github
 git clone https://github.com/stephenlclarke/mac-sync-data ~/github/mac-sync-data

@@ -227,7 +227,9 @@ jobs:
           bash Tools/release/prepare-developer-id-signing.sh "$GITHUB_OUTPUT"
 
       - name: Build release package
+        id: package
         env:
+          GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.metadata.outputs.asset }}
           APP_VERSION: ${{ steps.metadata.outputs.app_version }}
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -237,18 +239,29 @@ jobs:
         working-directory: mac-sync
         run: |
           set -euo pipefail
-          make package-release \
-            MAC_SYNC_ARCHIVE="${RUNNER_TEMP}/${ASSET}" \
-            MAC_SYNC_BRANCH="${RELEASE_TAG}" \
-            MAC_SYNC_BUILD="${GITHUB_RUN_NUMBER}" \
-            MAC_SYNC_COMMIT="${RELEASE_COMMIT}" \
-            MAC_SYNC_CODESIGN_IDENTITY="${{ steps.signing.outputs.identity }}" \
-            MAC_SYNC_LANE="${RELEASE_MODE}" \
-            MAC_SYNC_REQUIRE_DEVELOPER_ID="${{ steps.signing.outputs.require_developer_id }}" \
-            MAC_SYNC_VERSION="${APP_VERSION}"
+          package_build="$GITHUB_RUN_NUMBER"
+          if [[ "$RELEASE_MODE" == "stable" ]] && gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # Recover a failed tap/verification phase without rebuilding or
+            # replacing an already-published immutable binary.
+            gh release download "$RELEASE_TAG" --pattern "$ASSET" --pattern "${ASSET}.sha256" --dir "$RUNNER_TEMP"
+            package_build="$(tar -xOf "${RUNNER_TEMP}/${ASSET}" mac-sync/resources/build-info.json | jq -er '.build')"
+            [[ "$package_build" =~ ^[0-9]+$ ]]
+          else
+            make package-release \
+              MAC_SYNC_ARCHIVE="${RUNNER_TEMP}/${ASSET}" \
+              MAC_SYNC_BRANCH="${RELEASE_TAG}" \
+              MAC_SYNC_BUILD="${GITHUB_RUN_NUMBER}" \
+              MAC_SYNC_COMMIT="${RELEASE_COMMIT}" \
+              MAC_SYNC_CODESIGN_IDENTITY="${{ steps.signing.outputs.identity }}" \
+              MAC_SYNC_LANE="${RELEASE_MODE}" \
+              MAC_SYNC_REQUIRE_DEVELOPER_ID="${{ steps.signing.outputs.require_developer_id }}" \
+              MAC_SYNC_VERSION="${APP_VERSION}"
+          fi
+          printf 'build=%s\n' "$package_build" >> "$GITHUB_OUTPUT"
 
       - name: Validate release package
         env:
+          PACKAGE_BUILD: ${{ steps.package.outputs.build }}
           ASSET: ${{ steps.metadata.outputs.asset }}
           APP_VERSION: ${{ steps.metadata.outputs.app_version }}
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
@@ -261,7 +274,7 @@ jobs:
           Tools/release/validate-package.sh \
             "${RUNNER_TEMP}/${ASSET}" \
             "$APP_VERSION" \
-            "$GITHUB_RUN_NUMBER" \
+            "$PACKAGE_BUILD" \
             "$RELEASE_MODE" \
             "$RELEASE_COMMIT"
 
@@ -309,9 +322,9 @@ jobs:
             fi
             printf '## Install\n\n'
             if [[ "$RELEASE_MODE" == "stable" ]]; then
-              printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync\n```\n\n'
+              printf '```console\nbrew tap stephenlclarke/tap\nbrew trust --formula stephenlclarke/tap/mac-spinner\nbrew install mac-sync\n```\n\n'
             else
-              printf '```console\nbrew tap stephenlclarke/tap\nbrew install mac-sync-current\n```\n\n'
+              printf '```console\nbrew tap stephenlclarke/tap\nbrew trust --formula stephenlclarke/tap/mac-spinner\nbrew install mac-sync-current\n```\n\n'
             fi
             printf 'Stable and Current use separate Homebrew prefixes. Uninstall the other formula before switching so only one Mac Sync app and CLI remain active.\n\n'
             printf '## Assets\n\n'
@@ -320,6 +333,9 @@ jobs:
             printf -- '- SHA-256: `%s`\n\n' "$checksum"
             printf '## Included changes\n\n'
             previous_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+            if [[ "$previous_tag" == "$RELEASE_TAG" ]]; then
+              previous_tag="$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' "${RELEASE_COMMIT}^" 2>/dev/null || true)"
+            fi
             if [[ "$RELEASE_MODE" == "stable" && "$previous_tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && \
                git rev-parse --verify "refs/tags/${previous_tag}" >/dev/null 2>&1; then
               git log --no-merges --pretty='format:- %s (`%h`)' "${previous_tag}..${RELEASE_COMMIT}"
@@ -361,6 +377,8 @@ jobs:
             "${RUNNER_TEMP}/${ASSET}" \
             "${RUNNER_TEMP}/${ASSET}.sha256" \
             true
+          # Installation guidance can be corrected without altering tag/assets.
+          gh release edit "$RELEASE_TAG" --notes-file "$NOTES"
 
       - name: Stage Current build assets
         if: needs.resolve.outputs.mode == 'current'
@@ -462,6 +480,7 @@ jobs:
           set -euo pipefail
           brew untap stephenlclarke/tap >/dev/null 2>&1 || true
           brew tap stephenlclarke/tap
+          brew trust --formula stephenlclarke/tap/mac-spinner
           brew install --formula "stephenlclarke/tap/${FORMULA_NAME}"
           brew test "stephenlclarke/tap/${FORMULA_NAME}"
 
