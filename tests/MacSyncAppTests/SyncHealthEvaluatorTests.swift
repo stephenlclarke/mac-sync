@@ -6,6 +6,28 @@ import XCTest
 final class SyncHealthEvaluatorTests: XCTestCase {
     private let fileManager = FileManager.default
 
+    func testOriginAloneDoesNotClearABranchCondition() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let overview = makeOverview(fixture: fixture, conditions: [condition(.remoteConfigurationMissing, component: .remoteRepository)])
+        let results = [
+            CommandResult(status: 1, stdout: "", stderr: ""),
+            CommandResult(status: 128, stdout: "", stderr: "fatal: cannot read HEAD"),
+            CommandResult(status: 0, stdout: "", stderr: ""),
+            CommandResult(status: 0, stdout: "refs/heads/main\n", stderr: ""),
+        ]
+        for branch in results {
+            let runner = FakeSyncHealthRunner(commandAvailability: true) { _, arguments in
+                if arguments.contains("symbolic-ref") {
+                    return branch
+                }
+                return CommandResult(status: 0, stdout: "https://github.com/example/data.git\n", stderr: "")
+            }
+            let active = SyncHealthEvaluator(environment: [:], runner: runner).activeConditionCodes(in: overview)
+            XCTAssertEqual(active.contains(.remoteConfigurationMissing), branch.stdout.isEmpty)
+        }
+    }
+
     func testClearsConditionsThatCanBeCheckedWithoutReadingTheIdentity() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }

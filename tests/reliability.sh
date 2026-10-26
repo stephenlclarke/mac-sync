@@ -161,6 +161,71 @@ assert_file_contains "$TEST_STATUS/target.commands.json" "using SSH"
 assert_file_contains "$STDOUT_FILE" "using verified SSH access"
 rm -f "$TEST_BIN/git"
 
+# A failed branch command is not a detached HEAD. Fail before snapshots or
+# commits change, retain the actual diagnostic, and allow the next manual retry.
+cat >"$TEST_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$3" == "symbolic-ref" || ( "$3" == "branch" && "$4" == "--show-current" ) ]]; then
+  if [[ -n "${MAC_SYNC_TEST_BRANCH_PROBE:-}" && ! -e "$MAC_SYNC_TEST_BRANCH_PROBE" ]]; then
+    touch "$MAC_SYNC_TEST_BRANCH_PROBE"
+    exec /usr/bin/git "$@"
+  fi
+  if [[ "$MAC_SYNC_TEST_BRANCH_STATUS" != 0 ]]; then
+    printf 'fatal: injected branch lookup failure\n' >&2
+  fi
+  exit "$MAC_SYNC_TEST_BRANCH_STATUS"
+fi
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$TEST_BIN/git"
+branch_test_head="$(git -C "$TEST_MACHINES_REPO" rev-parse HEAD)"
+printf 'waiting for branch check\n' >"$TEST_HOME/.bashrc"
+for MAC_SYNC_TEST_BRANCH_STATUS in 128 124 1 0; do
+  export MAC_SYNC_TEST_BRANCH_STATUS
+  if run_mac_sync sync; then
+    fail "branch lookup failure was reported as successful"
+  fi
+  assert_file_contains "$TEST_STATUS/target.env" 'result=failed'
+  assert_file_contains "$TEST_STATUS/target.conditions.json" 'Git could not read the repository branch'
+  assert_file_not_contains "$TEST_STATUS/target.conditions.json" '"title" : "The repository is on a detached commit"'
+  assert_file_contains "$TEST_STATUS/target.commands.json" "\"exitStatus\" : $MAC_SYNC_TEST_BRANCH_STATUS"
+  assert_file_contains "$TEST_MACHINES_REPO/machines/target/home/.bashrc" 'first snapshot'
+  [[ "$(git -C "$TEST_MACHINES_REPO" rev-parse HEAD)" == "$branch_test_head" ]] \
+    || fail "branch lookup failure created a commit"
+done
+
+# If the initial probe passed but the final check fails, keep copied snapshots
+# available for retry without creating a new commit or claiming publication.
+export MAC_SYNC_TEST_BRANCH_STATUS=128
+export MAC_SYNC_TEST_BRANCH_PROBE="${TMP_ROOT}/branch-probe"
+if run_mac_sync sync; then
+  fail "late branch lookup failure was reported as successful"
+fi
+assert_file_contains "$TEST_STATUS/target.env" 'result=failed'
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/home/.bashrc" 'waiting for branch check'
+[[ "$(git -C "$TEST_MACHINES_REPO" rev-parse HEAD)" == "$branch_test_head" ]] \
+  || fail "late branch lookup failure created a commit"
+unset MAC_SYNC_TEST_BRANCH_STATUS MAC_SYNC_TEST_BRANCH_PROBE
+rm -f "$TEST_BIN/git"
+
+# Confirm a real detached HEAD separately; never commit snapshots onto it or
+# switch branches automatically. The fixture alone returns to its main branch.
+git -C "$TEST_MACHINES_REPO" switch --detach >/dev/null 2>&1
+if run_mac_sync sync; then
+  fail "detached HEAD was reported as successful"
+fi
+assert_file_contains "$TEST_STATUS/target.env" 'result=failed'
+assert_file_contains "$TEST_STATUS/target.conditions.json" 'The repository is on a detached commit'
+[[ "$(git -C "$TEST_MACHINES_REPO" rev-parse HEAD)" == "$branch_test_head" ]] \
+  || fail "detached HEAD run created a commit"
+git -C "$TEST_MACHINES_REPO" switch main >/dev/null 2>&1
+run_mac_sync sync
+assert_file_contains "$TEST_STATUS/target.env" 'exit_status=0'
+[[ "$(git -C "$TEST_MACHINES_REPO" rev-parse HEAD)" == "$(git --git-dir="$TEST_REMOTE" rev-parse main)" ]] \
+  || fail "retry did not publish the pending snapshot"
+run_mac_sync sync
+assert_file_contains "$TEST_STATUS/target.env" 'result=success'
+
 # A push outage preserves the local commit. A later run rebases it over a
 # peer's update, rather than requiring a user to repair a divergent branch.
 cat >"$TEST_BIN/git" <<'EOF'

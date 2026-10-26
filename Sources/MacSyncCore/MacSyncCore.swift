@@ -1794,6 +1794,7 @@ public final class MacSyncApp {
             info("dry run enabled; skipping config commit and push")
             return
         }
+        let branch = try publishingBranch(in: config.repoDir)
         _ = runner.run("git", ["-C", config.repoDir, "add", "--"] + paths)
         if runner.run("git", ["-C", config.repoDir, "diff", "--cached", "--quiet", "--"] + paths).status == 0 {
             info("no secrets config changes to commit")
@@ -1806,11 +1807,6 @@ public final class MacSyncApp {
         }
         guard repoHasOrigin(config.repoDir) else {
             warning("no origin remote configured; skipping git push")
-            return
-        }
-        let branch = runner.run("git", ["-C", config.repoDir, "branch", "--show-current"]).stdout.trimmed
-        guard !branch.isEmpty else {
-            warning("detached HEAD; skipping git push")
             return
         }
         if branchAheadOfUpstream(config.repoDir) {
@@ -3191,6 +3187,7 @@ public final class MacSyncApp {
             progressPending("dry run enabled; skipping git commit and push")
             return
         }
+        let branch = try publishingBranch(in: config.machinesRepoDir)
         let snapshotPaths = managedSnapshotPaths()
         guard runWithProgressCommand(
             "checking machine snapshot changes",
@@ -3231,24 +3228,40 @@ public final class MacSyncApp {
             warning("no origin remote configured for machines repo; skipping git push")
             return
         }
-        let branch = runner.run("git", ["-C", config.machinesRepoDir, "branch", "--show-current"]).stdout.trimmed
-        guard !branch.isEmpty else {
-            recordHealthCondition(SyncHealthCondition(
-                code: .remoteConfigurationMissing,
-                component: .remoteRepository,
-                severity: .warning,
-                title: "The data repository is on a detached commit",
-                detail: "Mac Sync cannot publish a detached HEAD.",
-                recovery: "Switch the data repository to its normal branch, then retry.",
-            ))
-            warning("detached HEAD; skipping git push")
-            return
-        }
         if !committed, !branchAheadOfUpstream(config.machinesRepoDir) {
             progressDone("no local commits to push")
             return
         }
         guard pushMachinesRepoWithRetries(branch: branch) else { throw ExitError(code: 1) }
+    }
+
+    private func publishingBranch(in repo: String) throws -> String {
+        // Unlike an empty `branch --show-current` result, symbolic-ref's exit
+        // status distinguishes a detached HEAD from a failed Git invocation.
+        let arguments = ["-C", repo, "symbolic-ref", "--quiet", "HEAD"]
+        let result = runner.run("git", arguments)
+        let reference = result.stdout.trimmed
+        let prefix = "refs/heads/"
+        if result.status == 0, reference.hasPrefix(prefix), reference.count > prefix.count {
+            return String(reference.dropFirst(prefix.count))
+        }
+        recordCommandDiagnostic(step: "checking the repository branch", command: "git -C <repository> symbolic-ref --quiet HEAD",
+                                attempt: 1, result: result)
+        let detached = result.status == 1 && reference.isEmpty && result.stderr.trimmed.isEmpty
+        let title = detached ? "The repository is on a detached commit" : "Git could not read the repository branch"
+        recordHealthCondition(SyncHealthCondition(
+            code: .remoteConfigurationMissing,
+            component: .remoteRepository,
+            severity: .error,
+            title: title,
+            detail: detached
+                ? "Git confirmed that HEAD is not on a branch. This run did not publish a snapshot."
+                : "The branch check failed or returned an unexpected result. This does not mean HEAD is detached. This run did not publish a snapshot.",
+            recovery: detached
+                ? "Check for an unfinished rebase or other Git operation. Preserve local changes before returning to the intended branch, then retry."
+                : "Retry the sync. If the check still fails, review its exit status and output in command diagnostics.",
+        ))
+        try fail("\(title); sync stopped without publishing")
     }
 
     private func acquireLock() throws {
@@ -3476,6 +3489,9 @@ public final class MacSyncApp {
         try writeText(runningPath, "\(getpid())\n")
         defer { try? fm.removeItem(atPath: runningPath) }
         do {
+            if config.dryRun != "1" {
+                _ = try publishingBranch(in: config.machinesRepoDir)
+            }
             try pullRepoIfSafe()
             try pullMachinesRepoIfSafe()
             try preflightSecretsArchive()

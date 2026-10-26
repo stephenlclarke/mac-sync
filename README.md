@@ -203,11 +203,13 @@ portable JSON history; neither index nor history is pushed to GitHub.
   reveal and copy selected roots, remove several at once, save it, then sync
   it. Folders are copied
   subject to that Mac's `config/excludes.txt` rules.
-- **Sync History** keeps a local, per-run ledger of completed publishes and
-  restores. It shows file-level uploads and downloads, whether an item was new,
+- **Sync History** keeps a local, per-run ledger of sync and restore attempts, including failed, deferred and local-only runs. Its headings do not imply a successful GitHub upload. It shows file-level snapshot transfers, whether an item was new,
   updated, removed, or skipped, and the source and destination paths. Failed
   network attempts are recorded as bounded, credential-redacted command
   diagnostics. Preview runs are deliberately not added to the history.
+
+  Before a sync changes snapshots, Git must confirm the data repository's named branch. Mac Sync checks again before committing. A confirmed detached HEAD and a failed branch command are separate errors; neither triggers an automatic branch switch or reset. Review the recorded exit status and command output when a branch check fails. Existing history remains a record of the original run and is not rewritten by an upgrade.
+
 - **Sync Health** separates active health from history. It checks recorded
   GitHub and encrypted-secrets conditions again, automatically marks conditions
   as recovered when the underlying check passes, and retains old occurrences

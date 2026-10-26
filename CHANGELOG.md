@@ -1,5 +1,11 @@
 # Changelog
 
+## Current (after 1.1.0)
+
+- Distinguish a failed Git branch lookup from a confirmed detached HEAD. Stop before changing snapshots when the initial branch check fails, check again before committing, and retain the command's exit status and output in diagnostics.
+- Use neutral sync and restore history headings: an attempted run is not proof that a snapshot was published. Preserve existing historical records and local repository changes.
+- Require a healthy named branch, not just an origin URL, before marking a recorded branch condition as recovered.
+
 ## 1.1.0
 
 - Separate automatic sync from the optional desktop UI; remove UI-at-login and

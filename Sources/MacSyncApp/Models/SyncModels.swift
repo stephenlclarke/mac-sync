@@ -1,6 +1,18 @@
 import Foundation
 import MacSyncCore
 
+extension SyncHistoryRecord {
+    /// History includes failed, deferred and local-only attempts, not just pushes.
+    var actionTitle: String {
+        switch action {
+        case .sync:
+            "Sync from this Mac"
+        case .restore:
+            "Restore to this Mac"
+        }
+    }
+}
+
 enum NavigationItem: Hashable {
     case dashboard
     case thisMac

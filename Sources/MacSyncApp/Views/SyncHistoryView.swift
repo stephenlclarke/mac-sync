@@ -26,7 +26,7 @@ struct SyncHistoryView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Sync history")
                         .font(.headline)
-                    Text("Completed uploads and downloads recorded on this Mac.")
+                    Text("Sync and restore attempts recorded on this Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -235,12 +235,7 @@ struct SyncHistoryView: View {
     }
 
     private func actionTitle(for record: SyncHistoryRecord) -> String {
-        switch record.action {
-        case .sync:
-            "Published this Mac"
-        case .restore:
-            "Restored to this Mac"
-        }
+        record.actionTitle
     }
 
     private func actionImage(for record: SyncHistoryRecord) -> String {

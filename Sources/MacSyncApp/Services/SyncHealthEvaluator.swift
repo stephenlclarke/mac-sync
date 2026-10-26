@@ -94,7 +94,14 @@ struct SyncHealthEvaluator {
                 ["-C", overview.configuration.dataRepository, "remote", "get-url", "origin"],
             )
             if remote.status == 0, !remote.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                active.remove(.remoteConfigurationMissing)
+                let branch = runner.run(
+                    "git",
+                    ["-C", overview.configuration.dataRepository, "symbolic-ref", "--quiet", "HEAD"],
+                )
+                let reference = branch.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                if branch.status == 0, reference.hasPrefix("refs/heads/"), reference.count > "refs/heads/".count {
+                    active.remove(.remoteConfigurationMissing)
+                }
             }
         }
     }
