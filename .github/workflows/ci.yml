@@ -103,6 +103,11 @@ jobs:
         run: make ci
         working-directory: mac-sync
 
+      - name: Check bounded-memory regression
+        timeout-minutes: 10
+        run: make memory-check
+        working-directory: mac-sync
+
       - name: Check SonarQube token
         id: sonar-token
         if: >

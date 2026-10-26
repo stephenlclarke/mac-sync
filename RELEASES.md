@@ -17,7 +17,8 @@ The formula version is `current.<workflow-run>.<commit>`.
 
 Both lanes require successful CI and CodeQL runs for the exact commit. CI runs
 the local `make ci` contract, including the 85% coverage floor and the Sonar
-quality gate, plus separate ASan and TSan test jobs. Release packaging then checks the checksum, archive paths,
+quality gate, plus the synthetic memory budget and separate ASan and TSan test
+jobs. Release packaging then checks the checksum, archive paths,
 executables, CLI smoke tests, app plist version/build values, icon, and
 `build-info.json` provenance.
 
