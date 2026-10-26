@@ -69,7 +69,11 @@ Scheduled work makes one attempt, then saves retry state in
 `status/<machine>.background.json`. Transient failures back off from 15 minutes
 to six hours. Authentication failures wait 12 hours and remain actionable.
 The schedule determines the next opportunity to retry. A manual sync bypasses
-this background checkpoint and makes up to three attempts.
+this background checkpoint and makes up to three attempts. A successful manual
+sync clears saved backoff and refreshes inventory/encryption timestamps, so
+automatic work does not stay paused after explicit recovery.
+Checkpoints are scoped to the machine and canonical data-repository path;
+selecting another checkout cannot carry its backoff or inventory timestamps over.
 
 Git disables terminal/Git Credential Manager prompts, uses low-speed limits and
 bounded connection attempts. An HTTPS failure can use verified SSH on port 22,

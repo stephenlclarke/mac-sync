@@ -85,6 +85,12 @@ final class BackgroundArchitectureTests: XCTestCase {
         XCTAssertEqual(BackgroundCheckpoint.load(from: path), state)
         state.failed(now: now, authentication: true)
         XCTAssertEqual(state.nextAttempt, now.addingTimeInterval(12 * 3600))
+        state.repository = root.appendingPathComponent("old-repository").path
+        try state.save(to: path)
+        let changedRepository = BackgroundCheckpoint.load(from: path, repository: root.appendingPathComponent("new-repository").path)
+        XCTAssertEqual(changedRepository.consecutiveFailures, 0)
+        XCTAssertNil(changedRepository.nextAttempt)
+        XCTAssertEqual(BackgroundCheckpoint.load(from: path, repository: state.repository), state)
         try Data(repeating: 0, count: 65537).write(to: URL(fileURLWithPath: path))
         XCTAssertEqual(BackgroundCheckpoint.load(from: path), BackgroundCheckpoint())
     }

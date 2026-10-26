@@ -318,6 +318,8 @@ retry later. HTTPS failures can fall back to verified SSH on port 22, then
 `ssh.github.com:443`. This does not change `origin`, disable host-key checking
 or show credential prompts. Git operations have a two-minute deadline and
 low-speed limits. Conflicts are preserved for review, not force-pushed away.
+A successful manual sync clears saved backoff, so automatic work can resume
+after you resolve an access issue.
 
 ## Restore
 

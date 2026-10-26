@@ -7,16 +7,26 @@ public struct BackgroundCheckpoint: Codable, Equatable {
     public var lastInventory: Date?
     public var lastSecrets: Date?
     public var lastSuccess: Date?
+    public var repository: String?
     public var detail = "Waiting for the next scheduled sync"
 
     public init() {}
 
-    public static func load(from path: String) -> BackgroundCheckpoint {
+    public static func load(from path: String, repository: String? = nil) -> BackgroundCheckpoint {
+        let canonicalRepository = repository.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path }
+        var result = Self()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               (attributes[.size] as? NSNumber)?.intValue ?? Int.max < 64 * 1024,
               let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let state = try? JSONDecoder().decode(Self.self, from: data)
-        else { return Self() }
+        else {
+            result.repository = canonicalRepository
+            return result
+        }
+        if let canonicalRepository, state.repository != canonicalRepository {
+            result.repository = canonicalRepository
+            return result
+        }
         return state
     }
 

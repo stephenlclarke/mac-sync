@@ -152,7 +152,7 @@ final class SyncStore: ObservableObject {
             let history = FileManager.default.fileExists(atPath: path) ? try? LocalHistoryStore(directory: path) : nil
             let count = (try? history?.count()) ?? 0
             let counts = Dictionary(uniqueKeysWithValues: snapshot.history.map { ($0.id, (try? history?.entryCount(runID: $0.id)) ?? 0) })
-            let checkpoint = BackgroundCheckpoint.load(from: "\(snapshot.configuration.statusDirectory)/\(snapshot.configuration.machineName).background.json")
+            let checkpoint = BackgroundCheckpoint.load(from: "\(snapshot.configuration.statusDirectory)/\(snapshot.configuration.machineName).background.json", repository: snapshot.configuration.dataRepository)
             DispatchQueue.main.async {
                 guard let self, self.generation == requestedGeneration else { return }
                 self.overview = snapshot

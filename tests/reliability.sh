@@ -48,6 +48,7 @@ assert_file_not_contains() {
 }
 
 run_mac_sync() {
+  local action="${1:-run}"
   if [[ -n "$SCRIPT_RUNNER" ]]; then
     HOME="$TEST_HOME" \
     TMPDIR="${TEST_TEMP}/" \
@@ -65,7 +66,7 @@ run_mac_sync() {
     KEYCHAIN_FAKE_DIR="${TMP_ROOT}/keychain" \
     PATH="${TEST_BIN}:/usr/bin:/bin:/usr/sbin:/sbin" \
     SCRIPT_COLOUR=off \
-      "$SCRIPT_RUNNER" "$SCRIPT_PATH" run >"$STDOUT_FILE" 2>"$STDERR_FILE"
+      "$SCRIPT_RUNNER" "$SCRIPT_PATH" "$action" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   else
     HOME="$TEST_HOME" \
     TMPDIR="${TEST_TEMP}/" \
@@ -83,7 +84,7 @@ run_mac_sync() {
     KEYCHAIN_FAKE_DIR="${TMP_ROOT}/keychain" \
     PATH="${TEST_BIN}:/usr/bin:/bin:/usr/sbin:/sbin" \
     SCRIPT_COLOUR=off \
-      "$SCRIPT_PATH" run >"$STDOUT_FILE" 2>"$STDERR_FILE"
+      "$SCRIPT_PATH" "$action" >"$STDOUT_FILE" 2>"$STDERR_FILE"
   fi
 }
 
@@ -178,7 +179,7 @@ push_status="$?"
 set -e
 [[ "$push_status" -ne 0 ]] || fail "push outage was reported as successful"
 assert_file_contains "$TEST_STATUS/target.env" "result=deferred"
-rm -f "$TEST_BIN/git" "$TEST_STATUS/target.background.json"
+rm -f "$TEST_BIN/git"
 git clone "$TEST_REMOTE" "${TMP_ROOT}/peer" >/dev/null 2>&1
 git -C "${TMP_ROOT}/peer" config user.name "peer test"
 git -C "${TMP_ROOT}/peer" config user.email "peer@example.invalid"
@@ -186,10 +187,14 @@ printf 'peer snapshot\n' >"${TMP_ROOT}/peer/peer.txt"
 git -C "${TMP_ROOT}/peer" add peer.txt
 git -C "${TMP_ROOT}/peer" commit -m "test: peer update" >/dev/null
 git -C "${TMP_ROOT}/peer" push >/dev/null 2>&1
-run_mac_sync
+run_mac_sync sync
 assert_file_contains "$TEST_MACHINES_REPO/peer.txt" "peer snapshot"
 assert_file_contains "$TEST_MACHINES_REPO/machines/target/home/.bashrc" "pending offline snapshot"
 assert_file_contains "$TEST_STATUS/target.env" "result=success"
+assert_file_contains "$TEST_STATUS/target.background.json" '"consecutiveFailures":0'
+assert_file_not_contains "$TEST_STATUS/target.background.json" '"nextAttempt"'
+run_mac_sync
+assert_file_contains "$STDOUT_FILE" "pulling latest"
 
 printf 'must not be published\n' >"$TEST_HOME/.bashrc"
 rm -rf "$TEST_REMOTE"

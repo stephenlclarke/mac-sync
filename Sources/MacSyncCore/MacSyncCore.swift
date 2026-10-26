@@ -3509,7 +3509,7 @@ public final class MacSyncApp {
                 }
             }
             if isServiceInvocation {
-                if backgroundCheckpoint.lastSecrets.map({ Date().timeIntervalSince($0) >= 86400 }) ?? true {
+                if !fm.fileExists(atPath: config.secretsArchive) || backgroundCheckpoint.lastSecrets.map({ Date().timeIntervalSince($0) >= 86400 }) ?? true {
                     try syncBackgroundSecretsArchive()
                 }
             } else {
@@ -3523,6 +3523,18 @@ public final class MacSyncApp {
             }
             captureSyncFinishMetrics()
             try commitAndPush()
+            if !isServiceInvocation {
+                var checkpoint = BackgroundCheckpoint.load(from: checkpointPath, repository: config.machinesRepoDir)
+                checkpoint.consecutiveFailures = 0
+                checkpoint.nextAttempt = nil
+                checkpoint.lastSuccess = Date()
+                checkpoint.lastInventory = Date()
+                if enabled(config.secretsSync), fm.fileExists(atPath: config.secretsArchive) {
+                    checkpoint.lastSecrets = Date()
+                }
+                checkpoint.detail = "Synced; waiting for the next scheduled run"
+                try? checkpoint.save(to: checkpointPath)
+            }
             finishSyncStatus(0)
         } catch let error as ExitError {
             finishSyncStatus(error.code)
@@ -3547,7 +3559,7 @@ public final class MacSyncApp {
         // Background priority also applies when invoked by Homebrew services.
         _ = setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)
         backgroundResources = BackgroundResources()
-        backgroundCheckpoint = BackgroundCheckpoint.load(from: checkpointPath)
+        backgroundCheckpoint = BackgroundCheckpoint.load(from: checkpointPath, repository: config.machinesRepoDir)
         defer {
             isServiceInvocation = false
             serviceLock = nil
