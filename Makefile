@@ -203,7 +203,7 @@ swift-coverage: swift-test-build
 	@find .build -maxdepth 3 -path '*/debug' -type d -exec mkdir -p '{}/codecov' \;
 	@SWIFT_TEST_RESULT_LOG="$(SWIFT_TEST_RESULT_LOG)" SWIFT_TEST_ATTEMPTS="$(SWIFT_COVERAGE_TEST_ATTEMPTS)" SWIFT_TEST_ACCEPT_SIGNAL_13=0 LLVM_PROFILE_FILE="$(abspath .build/codecov)/swift-test-%p.profraw" Tools/ci/run-swift-test.sh $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --skip-build --enable-code-coverage $(SWIFT_TEST_RUN_FLAGS)
 	@$(MAKE) coverage-shell-test
-	test_binary="$$(find .build -path '.build/sanitizers' -prune -o -path '*MacSyncCoreTests.xctest/Contents/MacOS/MacSyncCoreTests' -type f -print | while read -r file; do [[ -x "$$file" ]] && { printf '%s\n' "$$file"; break; }; done)"; \
+	test_binary="$$(find .build -path '.build/sanitizers' -prune -o -path '*.xctest/Contents/MacOS/*' -type f ! -path '*.dSYM/*' -print | while read -r file; do [[ -x "$$file" ]] && { printf '%s\n' "$$file"; break; }; done)"; \
 	profile=".build/codecov/fallback.profdata"; \
 	if [[ -z "$$test_binary" ]]; then \
 		printf 'Swift test binary is missing; run make swift-test-build before make swift-coverage\n' >&2; \
