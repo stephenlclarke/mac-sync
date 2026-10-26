@@ -366,13 +366,14 @@ final class SyncRepositoryTests: XCTestCase {
 
         let overview = SyncRepository(environment: fixture.environment).load()
 
-        XCTAssertEqual(overview.history, [record])
-        XCTAssertEqual(overview.history.first?.entries.first?.direction, .download)
-        XCTAssertEqual(overview.history.first?.entries.first?.outcome, .new)
+        XCTAssertEqual(overview.history, [record.summary])
+        XCTAssertTrue(overview.history.first?.entries.isEmpty == true)
+        let index = try LocalHistoryStore(directory: historyFile.deletingLastPathComponent().path)
+        XCTAssertEqual(try index.entries(runID: record.id), record.entries)
     }
 
     @MainActor
-    func testStoreSeedsLegacySelectionForANewDataCheckout() throws {
+    func testExplicitSetupSeedsLegacySelectionWithoutOpeningSideEffects() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
         try fileManager.createDirectory(at: fixture.data.appendingPathComponent(".git"), withIntermediateDirectories: true)
@@ -390,7 +391,8 @@ final class SyncRepositoryTests: XCTestCase {
         )
 
         let store = SyncStore(environment: fixture.environment)
-
+        XCTAssertFalse(fileManager.fileExists(atPath: fixture.data.appendingPathComponent("machines/local/config/sync-paths.txt").path))
+        store.completeSetup(with: RepositoryLocations(dataRepository: fixture.data.path))
         XCTAssertTrue(store.isSetupComplete)
         XCTAssertEqual(store.selectedPaths, [".zshrc", ".config/tool"])
         XCTAssertEqual(

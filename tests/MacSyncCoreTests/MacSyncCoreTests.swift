@@ -404,6 +404,8 @@ final class MacSyncCoreTests: XCTestCase {
             "HOME": root.appendingPathComponent("home").path,
             "TMPDIR": root.path,
             "MAC_SYNC_MACHINE": "target",
+            // Sanitized child binaries locate Apple's symbolizer through PATH.
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
         let serviceLock = try XCTUnwrap(
             MacSyncProcessLock.acquire(

@@ -30,23 +30,14 @@ final class SyncScheduleManagerTests: XCTestCase {
         XCTAssertEqual(environment["HOME"], fixture.home.path)
         XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
         XCTAssertNotNil(environment["USER"])
-        XCTAssertEqual(propertyList["ProcessType"] as? String, "Interactive")
-        let applicationData = try Data(contentsOf: manager.applicationAgentURL)
-        let applicationPropertyList = try XCTUnwrap(
-            try PropertyListSerialization.propertyList(from: applicationData, format: nil) as? [String: Any],
-        )
-        XCTAssertEqual(applicationPropertyList["Label"] as? String, SyncScheduleManager.applicationLabel)
-        XCTAssertEqual(
-            applicationPropertyList["ProgramArguments"] as? [String],
-            ["/usr/bin/open", "-g", "/tmp/MacSync.app"],
-        )
-        XCTAssertEqual(applicationPropertyList["ProcessType"] as? String, "Interactive")
-        XCTAssertEqual(applicationPropertyList["RunAtLoad"] as? Bool, true)
+        XCTAssertEqual(propertyList["ProcessType"] as? String, "Background")
+        XCTAssertEqual(propertyList["Nice"] as? Int, 10)
+        XCTAssertEqual(propertyList["LowPriorityIO"] as? Bool, true)
+        XCTAssertFalse(fileManager.fileExists(atPath: manager.applicationAgentURL.path))
         XCTAssertEqual(runner.arguments, [
             ["bootout", "gui/501", manager.agentURL.path],
             ["bootout", "gui/501", manager.applicationAgentURL.path],
             ["bootstrap", "gui/501", manager.agentURL.path],
-            ["bootstrap", "gui/501", manager.applicationAgentURL.path],
         ])
     }
 
@@ -159,24 +150,23 @@ final class SyncScheduleManagerTests: XCTestCase {
         )
     }
 
-    func testAddsApplicationLaunchAgentToAnExistingSchedule() throws {
+    func testRemovesLegacyApplicationLaunchAgentFromExistingSchedule() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
         let initialRunner = FakeLaunchdRunner()
         let initialManager = scheduleManager(fixture: fixture, runner: initialRunner)
         _ = try initialManager.configure(schedule: .interval(minutes: 60))
-        try fileManager.removeItem(at: initialManager.applicationAgentURL)
+        try Data("legacy app agent".utf8).write(to: initialManager.applicationAgentURL)
         let migrationRunner = FakeLaunchdRunner()
         let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
 
-        try migrationManager.ensureApplicationLaunchAgent()
+        try migrationManager.migrateBackgroundSchedule()
 
-        XCTAssertTrue(fileManager.fileExists(atPath: migrationManager.applicationAgentURL.path))
+        XCTAssertFalse(fileManager.fileExists(atPath: migrationManager.applicationAgentURL.path))
         XCTAssertEqual(migrationRunner.arguments, [
             ["bootout", "gui/501", migrationManager.agentURL.path],
             ["bootout", "gui/501", migrationManager.applicationAgentURL.path],
             ["bootstrap", "gui/501", migrationManager.agentURL.path],
-            ["bootstrap", "gui/501", migrationManager.applicationAgentURL.path],
         ])
     }
 
@@ -199,7 +189,7 @@ final class SyncScheduleManagerTests: XCTestCase {
         let migrationRunner = FakeLaunchdRunner()
         let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
 
-        try migrationManager.ensureApplicationLaunchAgent()
+        try migrationManager.migrateBackgroundSchedule()
 
         let repairedData = try Data(contentsOf: migrationManager.agentURL)
         let repairedValues = try XCTUnwrap(
@@ -210,7 +200,6 @@ final class SyncScheduleManagerTests: XCTestCase {
             ["bootout", "gui/501", migrationManager.agentURL.path],
             ["bootout", "gui/501", migrationManager.applicationAgentURL.path],
             ["bootstrap", "gui/501", migrationManager.agentURL.path],
-            ["bootstrap", "gui/501", migrationManager.applicationAgentURL.path],
         ])
     }
 
@@ -234,23 +223,23 @@ final class SyncScheduleManagerTests: XCTestCase {
         let migrationRunner = FakeLaunchdRunner()
         let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
 
-        try migrationManager.ensureApplicationLaunchAgent()
+        try migrationManager.migrateBackgroundSchedule()
 
         let repairedData = try Data(contentsOf: migrationManager.agentURL)
         let repairedValues = try XCTUnwrap(
             try PropertyListSerialization.propertyList(from: repairedData, format: nil) as? [String: Any],
         )
-        XCTAssertEqual(repairedValues["ProcessType"] as? String, "Interactive")
+        XCTAssertEqual(repairedValues["ProcessType"] as? String, "Background")
         let environment = try XCTUnwrap(
             repairedValues["EnvironmentVariables"] as? [String: String],
         )
         XCTAssertEqual(environment["HOME"], fixture.home.path)
         XCTAssertEqual(environment["GIT_TERMINAL_PROMPT"], "0")
-        XCTAssertEqual(environment["MAC_SYNC_SECRETS"], "0")
-        XCTAssertEqual(migrationRunner.arguments.count, 4)
+        XCTAssertEqual(environment["MAC_SYNC_SECRETS"], "1")
+        XCTAssertEqual(migrationRunner.arguments.count, 3)
     }
 
-    func testLeavesExistingApplicationLaunchAgentLoaded() throws {
+    func testLeavesUnchangedWorkerScheduleLoaded() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
         let initialManager = scheduleManager(fixture: fixture, runner: FakeLaunchdRunner())
@@ -258,15 +247,15 @@ final class SyncScheduleManagerTests: XCTestCase {
         let migrationRunner = FakeLaunchdRunner()
         let migrationManager = scheduleManager(fixture: fixture, runner: migrationRunner)
 
-        try migrationManager.ensureApplicationLaunchAgent()
+        try migrationManager.migrateBackgroundSchedule()
 
         XCTAssertTrue(migrationRunner.arguments.isEmpty)
     }
 
-    func testRemovesBothAgentsWhenApplicationLaunchFails() throws {
+    func testRemovesWorkerAgentWhenBootstrapFails() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
-        let runner = FakeLaunchdRunner(statuses: [0, 0, 0, 1, 0])
+        let runner = FakeLaunchdRunner(statuses: [0, 0, 1])
         let manager = scheduleManager(fixture: fixture, runner: runner)
 
         XCTAssertThrowsError(try manager.configure(schedule: .interval(minutes: 60))) { error in
@@ -275,7 +264,7 @@ final class SyncScheduleManagerTests: XCTestCase {
 
         XCTAssertFalse(fileManager.fileExists(atPath: manager.agentURL.path))
         XCTAssertFalse(fileManager.fileExists(atPath: manager.applicationAgentURL.path))
-        XCTAssertEqual(runner.arguments.last, ["bootout", "gui/501", manager.agentURL.path])
+        XCTAssertEqual(runner.arguments.last, ["bootstrap", "gui/501", manager.agentURL.path])
     }
 
     private func makeFixture() throws -> Fixture {

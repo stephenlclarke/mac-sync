@@ -58,6 +58,7 @@ run_mac_sync() {
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_VSCODE_EXTENSIONS=0 \
     MAC_SYNC_GITHUB_REPOS=0 \
+    MAC_SYNC_SECRETS=0 \
     MAC_SYNC_KEYCHAIN_SERVICE="mac-sync reliability test" \
     MAC_SYNC_KEYCHAIN_ACCOUNT=target \
     MAC_SYNC_RELIABILITY_REMOTE="$TEST_REMOTE" \
@@ -75,6 +76,7 @@ run_mac_sync() {
     MAC_SYNC_HOMEBREW=0 \
     MAC_SYNC_VSCODE_EXTENSIONS=0 \
     MAC_SYNC_GITHUB_REPOS=0 \
+    MAC_SYNC_SECRETS=0 \
     MAC_SYNC_KEYCHAIN_SERVICE="mac-sync reliability test" \
     MAC_SYNC_KEYCHAIN_ACCOUNT=target \
     MAC_SYNC_RELIABILITY_REMOTE="$TEST_REMOTE" \
@@ -120,7 +122,6 @@ assert_file_contains "$TEST_STATUS/target.env" "exit_status=0"
 assert_file_not_contains "$TEST_STATUS/target.conditions.json" '"code" : "encryptedSecretsIdentityMissing"'
 [[ ! -e "${TMP_ROOT}/keychain/unexpected-access" ]] \
   || fail "unattended sync accessed Keychain"
-assert_file_contains "$STDOUT_FILE" "unattended sync skips encrypted secrets"
 assert_file_contains \
   "$TEST_MACHINES_REPO/machines/target/home/.bashrc" \
   "first snapshot"
@@ -159,6 +160,37 @@ assert_file_contains "$TEST_STATUS/target.commands.json" "using SSH"
 assert_file_contains "$STDOUT_FILE" "using verified SSH access"
 rm -f "$TEST_BIN/git"
 
+# A push outage preserves the local commit. A later run rebases it over a
+# peer's update, rather than requiring a user to repair a divergent branch.
+cat >"$TEST_BIN/git" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$3" == "push" ]]; then
+  printf 'fatal: requested URL returned error: 503\n' >&2
+  exit 1
+fi
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$TEST_BIN/git"
+printf 'pending offline snapshot\n' >"$TEST_HOME/.bashrc"
+set +e
+run_mac_sync
+push_status="$?"
+set -e
+[[ "$push_status" -ne 0 ]] || fail "push outage was reported as successful"
+assert_file_contains "$TEST_STATUS/target.env" "result=deferred"
+rm -f "$TEST_BIN/git" "$TEST_STATUS/target.background.json"
+git clone "$TEST_REMOTE" "${TMP_ROOT}/peer" >/dev/null 2>&1
+git -C "${TMP_ROOT}/peer" config user.name "peer test"
+git -C "${TMP_ROOT}/peer" config user.email "peer@example.invalid"
+printf 'peer snapshot\n' >"${TMP_ROOT}/peer/peer.txt"
+git -C "${TMP_ROOT}/peer" add peer.txt
+git -C "${TMP_ROOT}/peer" commit -m "test: peer update" >/dev/null
+git -C "${TMP_ROOT}/peer" push >/dev/null 2>&1
+run_mac_sync
+assert_file_contains "$TEST_MACHINES_REPO/peer.txt" "peer snapshot"
+assert_file_contains "$TEST_MACHINES_REPO/machines/target/home/.bashrc" "pending offline snapshot"
+assert_file_contains "$TEST_STATUS/target.env" "result=success"
+
 printf 'must not be published\n' >"$TEST_HOME/.bashrc"
 rm -rf "$TEST_REMOTE"
 set +e
@@ -169,10 +201,15 @@ set -e
 [[ "$failure_status" -ne 0 ]] || fail "scheduled run unexpectedly succeeded without a verified pull"
 assert_file_contains "$TEST_STATUS/target.env" "result=failed"
 assert_file_contains "$TEST_STATUS/target.conditions.json" '"code" : "remoteRefreshFailed"'
-assert_file_contains "$TEST_STATUS/target.commands.json" '"attempt" : 3'
+assert_file_contains "$TEST_STATUS/target.commands.json" '"attempt" : 1'
 assert_file_contains "$STDERR_FILE" "sync stopped before changing snapshots"
 assert_file_contains \
   "$TEST_MACHINES_REPO/machines/target/home/.bashrc" \
-  "first snapshot"
+  "pending offline snapshot"
+
+# The next scheduled invocation honours the persisted backoff, without Git I/O.
+run_mac_sync
+assert_file_contains "$STDOUT_FILE" "Waiting to retry GitHub connectivity"
+assert_file_not_contains "$STDOUT_FILE" "pulling latest"
 
 printf 'reliability test passed\n'

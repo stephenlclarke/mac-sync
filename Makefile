@@ -10,7 +10,7 @@ MARKDOWNLINT ?= markdownlint
 COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
 MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
-MAC_SYNC_VERSION ?= 1.0.5
+MAC_SYNC_VERSION ?= 1.1.0
 MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
@@ -30,6 +30,8 @@ SWIFT_TEST_RESULT_LOG ?= .build/swift-test.log
 SWIFT_TEST_ATTEMPTS ?= 2
 SWIFT_COVERAGE_TEST_ATTEMPTS ?= 3
 SWIFT_TEST_RUN_FLAGS ?= --no-parallel
+SANITIZER ?= address
+SANITIZER_JOBS ?= 2
 SHELL_TEST_JOBS ?= 4
 DOCS_OUTPUT ?= .build/docc-site
 DOCS_BASE_PATH ?= projects/mac-sync
@@ -39,11 +41,31 @@ MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
 MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md .github/pull_request_template.md
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md .github/pull_request_template.md
 
 .PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve submodules spinner-build cli-binaries docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
 all: workflow
+
+.PHONY: sanitize sanitize-address sanitize-thread memory-check
+
+memory-check:
+	bash Tools/diagnostics/run-memory-probe.sh
+
+sanitize-address:
+	$(MAKE) sanitize SANITIZER=address
+
+sanitize-thread:
+	$(MAKE) sanitize SANITIZER=thread
+
+sanitize:
+	@case "$(SANITIZER)" in address|thread) ;; *) printf 'SANITIZER must be address or thread\n' >&2; exit 2 ;; esac
+	@mkdir -p ".build/sanitizers/$(SANITIZER)"
+	ASAN_OPTIONS=halt_on_error=1 TSAN_OPTIONS=halt_on_error=1:exitcode=66 \
+		$(SWIFT) test $(SWIFT_RESOLVED_FLAGS) \
+		--scratch-path ".build/sanitizers/$(SANITIZER)" \
+		--sanitize="$(SANITIZER)" --jobs "$(SANITIZER_JOBS)" --no-parallel \
+		2>&1 | tee ".build/sanitizers/$(SANITIZER)/test.log"
 
 workflow: ci package
 
@@ -181,19 +203,19 @@ swift-coverage: swift-test-build
 	@find .build -maxdepth 3 -path '*/debug' -type d -exec mkdir -p '{}/codecov' \;
 	@SWIFT_TEST_RESULT_LOG="$(SWIFT_TEST_RESULT_LOG)" SWIFT_TEST_ATTEMPTS="$(SWIFT_COVERAGE_TEST_ATTEMPTS)" SWIFT_TEST_ACCEPT_SIGNAL_13=0 LLVM_PROFILE_FILE="$(abspath .build/codecov)/swift-test-%p.profraw" Tools/ci/run-swift-test.sh $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --skip-build --enable-code-coverage $(SWIFT_TEST_RUN_FLAGS)
 	@$(MAKE) coverage-shell-test
-	test_binary="$$(find .build -path '*.xctest/Contents/MacOS/*' -type f ! -path '*.dSYM/*' | while read -r file; do [[ -x "$$file" ]] && { printf '%s\n' "$$file"; break; }; done)"; \
+	test_binary="$$(find .build -path '.build/sanitizers' -prune -o -path '*MacSyncCoreTests.xctest/Contents/MacOS/MacSyncCoreTests' -type f -print | while read -r file; do [[ -x "$$file" ]] && { printf '%s\n' "$$file"; break; }; done)"; \
 	profile=".build/codecov/fallback.profdata"; \
 	if [[ -z "$$test_binary" ]]; then \
 		printf 'Swift test binary is missing; run make swift-test-build before make swift-coverage\n' >&2; \
 		exit 2; \
 	fi; \
-	raw_profile_count="$$(find .build -name '*.profraw' -type f | wc -l | tr -d ' ')"; \
+	raw_profile_count="$$(find .build -path '.build/sanitizers' -prune -o -name '*.profraw' -type f -print | wc -l | tr -d ' ')"; \
 	if [[ "$$raw_profile_count" -eq 0 ]]; then \
 		printf 'Swift coverage profile is missing and no raw .profraw files were found\n' >&2; \
 		exit 2; \
 	fi; \
 	mkdir -p .build/codecov; \
-	find .build -name '*.profraw' -type f -print0 | xargs -0 "$(SWIFT_LLVM_PROFDATA)" merge -sparse -o "$$profile"; \
+	find .build -path '.build/sanitizers' -prune -o -name '*.profraw' -type f -print0 | xargs -0 "$(SWIFT_LLVM_PROFDATA)" merge -sparse -o "$$profile"; \
 	"$(SWIFT_LLVM_COV)" export \
 		-format=lcov \
 		-instr-profile="$$profile" \
@@ -203,6 +225,12 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/Support.swift \
 		--sources Sources/MacSyncCore/MacSyncUserInterface.swift \
 		--sources Sources/MacSyncCore/MacSyncProcessLock.swift \
+		--sources Sources/MacSyncCore/BoundedIO.swift \
+		--sources Sources/MacSyncCore/HistoryJournal.swift \
+		--sources Sources/MacSyncCore/LocalHistoryStore.swift \
+		--sources Sources/MacSyncCore/StreamingHistoryReader.swift \
+		--sources Sources/MacSyncCore/BackgroundPolicy.swift \
+		--sources Sources/MacSyncCore/BackgroundAgentMigration.swift \
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
 

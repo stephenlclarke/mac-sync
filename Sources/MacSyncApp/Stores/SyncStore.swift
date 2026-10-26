@@ -22,12 +22,23 @@ final class SyncStore: ObservableObject {
     @Published private(set) var syncIssues: [SyncIssue]
     @Published private(set) var requestedNavigation: NavigationItem?
     @Published var isSetupSheetPresented = false
+    @Published private(set) var historyOffset = 0
+    @Published private(set) var historyTotal = 0
+    @Published private(set) var historyEntryCounts: [String: Int] = [:]
+    @Published private(set) var backgroundDetail = ""
+    @Published private(set) var isRefreshing = false
+    private var stateObservation: LocalStateObservation?
+    private var refreshPending = false
+    private var generation = 0
 
     private var repository: SyncRepository
     private let baseEnvironment: [String: String]
     private var commandEnvironment: [String: String]
     private var issueRepository: SyncIssueRepository
     private var process: Process?
+    private var activityObservation: LocalStateObservation?
+    private var activityHandle: FileHandle?
+    private var activityURL: URL?
     private var savedSelection: [String]
     private var activeConditionCodes: Set<SyncHealthConditionCode>?
     private var healthEvaluationInProgress = false
@@ -44,19 +55,15 @@ final class SyncStore: ObservableObject {
         let setupService = RepositorySetupService(environment: appEnvironment)
         let inspections = setupService.inspect(locations)
 
-        // A newly-cloned data repository starts empty. Carry the reviewed
-        // selection from the existing command checkout forward once, before
-        // presenting the selection editor. This never overwrites a tracked
-        // machine configuration and does not create a snapshot or push.
-        if inspections.allSatisfy(\.isReady) {
-            try? repository.seedMachineConfigurationIfNeeded()
-        }
+        // Read the selection without changing snapshots or launching recovery.
         let configuredPaths = repository.configuredPaths()
 
         baseEnvironment = environment
         commandEnvironment = appEnvironment
         self.repository = repository
-        let initialOverview = repository.load()
+        let configuration = repository.configuration()
+        let initialOverview = SyncOverview(configuration: configuration, status: .empty, history: [], currentMachine: nil,
+                                           peerMachines: [], localSyncProcessID: nil, isLocalSyncActive: false)
         let initialIssueRepository = SyncIssueRepository(configuration: initialOverview.configuration)
         overview = initialOverview
         selectedPaths = configuredPaths
@@ -71,21 +78,17 @@ final class SyncStore: ObservableObject {
             environment: appEnvironment,
         )
         let initialScheduleStatus = scheduleManager.status()
-        var scheduleMigrationError: String?
-        if initialScheduleStatus.schedule != nil {
-            do {
-                try scheduleManager.ensureApplicationLaunchAgent()
-            } catch {
-                scheduleMigrationError = error.localizedDescription
-            }
-        }
         syncScheduleStatus = initialScheduleStatus
         issueRepository = initialIssueRepository
         syncIssues = initialIssueRepository.issues(for: initialOverview)
         requestedNavigation = nil
-        errorMessage = scheduleMigrationError
+        errorMessage = nil
         updateDockBadge()
-        refreshHealth(force: true)
+        // Opening the UI observes saved state; it never repairs jobs or probes
+        // GitHub/Keychain. Explicit recovery actions perform those checks.
+        activeConditionCodes = Set(initialOverview.status.conditions.map(\.code))
+        observeLocalState()
+        reload()
     }
 
     var isRunning: Bool {
@@ -135,13 +138,54 @@ final class SyncStore: ObservableObject {
     }
 
     func reload() {
-        let selectionHasChanges = hasUnsavedSelection
-        overview = repository.load()
-        reloadSyncIssues()
-        refreshHealth()
-        if !selectionHasChanges {
-            savedSelection = repository.configuredPaths()
-            selectedPaths = savedSelection
+        if isRefreshing {
+            refreshPending = true; return
+        }
+        isRefreshing = true
+        generation += 1
+        let requestedGeneration = generation
+        let repository = repository
+        let offset = historyOffset
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let snapshot = repository.load(includeSnapshotDetails: false, historyOffset: offset)
+            let path = "\(snapshot.configuration.statusDirectory)/history/\(snapshot.configuration.machineName)"
+            let history = FileManager.default.fileExists(atPath: path) ? try? LocalHistoryStore(directory: path) : nil
+            let count = (try? history?.count()) ?? 0
+            let counts = Dictionary(uniqueKeysWithValues: snapshot.history.map { ($0.id, (try? history?.entryCount(runID: $0.id)) ?? 0) })
+            let checkpoint = BackgroundCheckpoint.load(from: "\(snapshot.configuration.statusDirectory)/\(snapshot.configuration.machineName).background.json")
+            DispatchQueue.main.async {
+                guard let self, self.generation == requestedGeneration else { return }
+                self.overview = snapshot
+                self.observeLocalState()
+                self.historyTotal = count
+                self.historyEntryCounts = counts
+                self.backgroundDetail = checkpoint.detail
+                self.activeConditionCodes = Set(snapshot.status.conditions.map(\.code)
+                    + (snapshot.status.warnings + snapshot.status.errors).compactMap(SyncHealthMessage.conditionCode))
+                if checkpoint.consecutiveFailures < 3, snapshot.status.result == .deferred {
+                    self.activeConditionCodes?.remove(.remoteUnavailable)
+                }
+                self.reloadSyncIssues()
+                self.isRefreshing = false
+                if !self.hasUnsavedSelection {
+                    self.savedSelection = repository.configuredPaths()
+                    self.selectedPaths = self.savedSelection
+                }
+                if self.refreshPending {
+                    self.refreshPending = false; self.reload()
+                }
+            }
+        }
+    }
+
+    func changeHistoryPage(by pages: Int) {
+        historyOffset = max(0, historyOffset + pages * 50)
+        reload()
+    }
+
+    private func observeLocalState() {
+        stateObservation = LocalStateObservation(directory: overview.configuration.statusDirectory) { [weak self] in
+            DispatchQueue.main.async { self?.reload() }
         }
     }
 
@@ -161,6 +205,8 @@ final class SyncStore: ObservableObject {
                 return
             }
             try repository.seedMachineConfigurationIfNeeded()
+            savedSelection = repository.configuredPaths()
+            selectedPaths = savedSelection
             try repository.clearStaleLocalStatusWhenSnapshotIsMissing()
             reload()
             isSetupSheetPresented = false
@@ -467,38 +513,38 @@ final class SyncStore: ObservableObject {
         }
 
         let process = Process()
-        let standardOutput = Pipe()
-        let standardError = Pipe()
+        let directory = URL(fileURLWithPath: overview.configuration.statusDirectory).appendingPathComponent("activity")
+        let url = directory.appendingPathComponent("\(UUID().uuidString).log")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let logs = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])
+                .filter { $0.pathExtension == "log" && UUID(uuidString: $0.deletingPathExtension().lastPathComponent) != nil }
+                .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                    > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                }
+            for old in logs.dropFirst(4) {
+                try? FileManager.default.removeItem(at: old)
+            }
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            activityHandle = try FileHandle(forWritingTo: url)
+            activityURL = url
+        } catch { errorMessage = error.localizedDescription; return }
         process.executableURL = executableURL
         process.arguments = arguments
         process.environment = commandEnvironment.merging(extraEnvironment) { _, replacement in replacement }
-        process.standardOutput = standardOutput
-        process.standardError = standardError
+        process.environment?["MAC_SYNC_QUIET"] = "1"
+        process.standardOutput = activityHandle
+        process.standardError = activityHandle
 
         commandOutput = ""
         errorMessage = nil
         activeAction = action
         self.process = process
 
-        standardOutput.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            let text = String(decoding: data, as: UTF8.self)
-            DispatchQueue.main.async {
-                self?.appendOutput(text)
-            }
+        activityObservation = LocalStateObservation(directory: url.path) { [weak self] in
+            DispatchQueue.main.async { self?.readActivityTail() }
         }
-        standardError.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            let text = String(decoding: data, as: UTF8.self)
-            DispatchQueue.main.async {
-                self?.appendOutput(text)
-            }
-        }
-        process.terminationHandler = { [weak self, weak standardOutput, weak standardError] completedProcess in
-            standardOutput?.fileHandleForReading.readabilityHandler = nil
-            standardError?.fileHandleForReading.readabilityHandler = nil
+        process.terminationHandler = { [weak self] completedProcess in
             DispatchQueue.main.async {
                 self?.finish(process: completedProcess)
             }
@@ -509,18 +555,28 @@ final class SyncStore: ObservableObject {
         } catch {
             activeAction = nil
             self.process = nil
+            activityObservation = nil
+            try? activityHandle?.close()
+            activityHandle = nil
             errorMessage = error.localizedDescription
         }
     }
 
-    private func appendOutput(_ text: String) {
-        commandOutput += text
-        if commandOutput.count > 50000 {
-            commandOutput = String(commandOutput.suffix(50000))
-        }
+    private func readActivityTail() {
+        guard let activityURL, let handle = try? FileHandle(forReadingFrom: activityURL) else { return }
+        defer { try? handle.close() }
+        do {
+            let size = try handle.seekToEnd()
+            try handle.seek(toOffset: size > 50000 ? size - 50000 : 0)
+            commandOutput = try String(decoding: handle.read(upToCount: 50000) ?? Data(), as: UTF8.self)
+        } catch { /* The next status update retries a transient read failure. */ }
     }
 
     private func finish(process: Process) {
+        readActivityTail()
+        activityObservation = nil
+        try? activityHandle?.close()
+        activityHandle = nil
         let status = process.terminationStatus
         let completedAction = activeAction
         if status != 0 {
@@ -546,6 +602,9 @@ final class SyncStore: ObservableObject {
     }
 
     private func applyRepositoryLocations(_ locations: RepositoryLocations) {
+        generation += 1
+        isRefreshing = false
+        refreshPending = false
         var environment = MacSyncRuntimeEnvironment.prepared(baseEnvironment)
         environment.removeValue(forKey: "MAC_SYNC_REPO")
         environment["MAC_SYNC_MACHINES_REPO"] = locations.dataRepository
@@ -555,7 +614,7 @@ final class SyncStore: ObservableObject {
         repositoryInspections = setupService.inspect(locations)
         gitHubReports = setupService.initialGitHubReports(for: repositoryInspections)
         isSetupComplete = repositoryInspections.allSatisfy(\.isReady)
-        overview = repository.load()
+        overview = repository.load(includeSnapshotDetails: false)
         issueRepository = SyncIssueRepository(configuration: overview.configuration)
         activeConditionCodes = nil
         reloadSyncIssues()
@@ -564,6 +623,7 @@ final class SyncStore: ObservableObject {
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
         reloadSyncSchedule()
+        observeLocalState()
     }
 
     private func guardSetup() {

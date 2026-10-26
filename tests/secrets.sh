@@ -15,7 +15,7 @@ readonly FAKE_KEYCHAIN="${TMP_ROOT}/keychain"
 readonly STDOUT_FILE="${TMP_ROOT}/stdout"
 readonly STDERR_FILE="${TMP_ROOT}/stderr"
 
-trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
+trap 'test_status=$?; if [[ "$test_status" -ne 0 ]]; then tail -30 "$STDERR_FILE" >&2; fi; rm -rf "$TMP_ROOT"' EXIT INT TERM
 
 fail() {
   printf 'secrets test failed: %s\n' "$*" >&2
@@ -362,6 +362,7 @@ assert_stdout_contains "mac-sync secrets list --from target"
 # rather than leaving a secret archive readable only by its source machine.
 TEST_DATA_REPO="${TMP_ROOT}/mac-sync-data"
 mkdir -p "$TEST_DATA_REPO/machines/target/config"
+printf '.bashrc\n' >"$TEST_DATA_REPO/machines/target/config/sync-paths.txt"
 git -C "$TEST_DATA_REPO" init -b main >/dev/null
 git -C "$TEST_DATA_REPO" config user.name "mac-sync test"
 git -C "$TEST_DATA_REPO" config user.email "mac-sync@example.invalid"
@@ -388,3 +389,23 @@ assert_file_contains "$TEST_DATA_REPO/machines/_shared/config/age-recipients.txt
 assert_file_contains "$TEST_DATA_REPO/machines/target/config/secret-paths.txt" ".ssh"
 git -C "$TEST_DATA_REPO" show --format= --name-only HEAD >"${TMP_ROOT}/single-repo-commit-paths"
 assert_file_contains "${TMP_ROOT}/single-repo-commit-paths" "machines/_shared/config/age-recipients.txt"
+
+# Scheduled encryption needs public recipients, not a private Keychain read.
+mv "$FAKE_BIN/security" "$FAKE_BIN/security-interactive"
+cat >"$FAKE_BIN/security" <<'EOF'
+#!/usr/bin/env bash
+touch "${KEYCHAIN_FAKE_DIR}/unexpected-background-access"
+exit 44
+EOF
+chmod +x "$FAKE_BIN/security"
+run_single_repo_mac_sync run
+[[ ! -e "$FAKE_KEYCHAIN/unexpected-background-access" ]] || fail "background worker accessed Keychain"
+readonly BACKGROUND_ARCHIVE="$TEST_DATA_REPO/machines/target/secrets/secrets.tar.gz.age"
+[[ -f "$BACKGROUND_ARCHIVE" ]] || fail "background encryption did not create an archive"
+background_checksum="$(cksum "$BACKGROUND_ARCHIVE")"
+printf 'age1unreviewedrecipient\n' >>"$TEST_DATA_REPO/machines/_shared/config/age-recipients.txt"
+rm -f "$TEST_HOME/Library/Application Support/mac-sync/status/target.background.json"
+run_single_repo_mac_sync run
+[[ "$(cksum "$BACKGROUND_ARCHIVE")" == "$background_checksum" ]] || fail "changed recipients replaced trusted archive unattended"
+assert_file_contains "$TEST_HOME/Library/Application Support/mac-sync/status/target.conditions.json" "Encrypted backup recipients need review"
+[[ ! -e "$FAKE_KEYCHAIN/unexpected-background-access" ]] || fail "recipient review accessed Keychain unattended"

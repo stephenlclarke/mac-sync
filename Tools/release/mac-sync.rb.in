@@ -62,6 +62,8 @@ class MacSync < Formula
 
   service do
     run [opt_bin/"mac-sync", "run"]
+    process_type :background
+    nice 10
     run_type :interval
     interval 3600
     environment_variables PATH: std_service_path_env

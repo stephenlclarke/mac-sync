@@ -27,6 +27,9 @@ struct DashboardView: View {
                 }
 
                 statusCard
+                if !store.backgroundDetail.isEmpty {
+                    Text(store.backgroundDetail).font(.caption).foregroundStyle(.secondary)
+                }
 
                 if store.openIssueCount > 0 {
                     manualTriageCard
@@ -40,7 +43,7 @@ struct DashboardView: View {
                     MetricCard(
                         title: "This Mac",
                         value: store.overview.configuration.machineName,
-                        detail: "\(store.overview.currentMachine?.fileCount ?? 0) snapshot files",
+                        detail: store.overview.currentMachine?.footprintDescription ?? "No snapshot yet",
                         systemImage: "laptopcomputer",
                     )
                     MetricCard(
@@ -57,7 +60,7 @@ struct DashboardView: View {
                     )
                     MetricCard(
                         title: "Sync history",
-                        value: "\(store.overview.history.count)",
+                        value: "\(store.historyTotal)",
                         detail: "completed local runs",
                         systemImage: "clock.arrow.circlepath",
                     )
@@ -72,7 +75,7 @@ struct DashboardView: View {
                                         .foregroundStyle(.secondary)
                                     VStack(alignment: .leading) {
                                         Text(machine.computerName ?? machine.name)
-                                        Text("\(machine.fileCount) files · \(SyncFormatting.bytes(machine.totalByteCount)) · \(SyncFormatting.date(machine.modifiedAt))")
+                                        Text("\(machine.footprintDescription) · \(SyncFormatting.date(machine.modifiedAt))")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -392,6 +395,9 @@ struct DashboardView: View {
         if store.overview.status.result == .failed {
             return "The sync did not complete. Review Sync Health and the command diagnostics."
         }
+        if store.overview.status.result == .deferred {
+            return store.backgroundDetail
+        }
         if let count = store.overview.status.updatedFileCount {
             return "\(count) files updated in \(SyncFormatting.duration(store.overview.status.durationSeconds))."
         }
@@ -412,7 +418,7 @@ struct DashboardView: View {
             return store.activeHealthIssueCount == 0 ? .green : .orange
         case .failed:
             return .red
-        case .unknown:
+        case .unknown, .deferred:
             return .secondary
         }
     }

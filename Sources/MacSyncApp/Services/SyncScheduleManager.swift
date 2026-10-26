@@ -206,10 +206,6 @@ struct SyncScheduleManager {
         guard let executableURL else {
             throw SyncScheduleError.missingExecutable
         }
-        guard let applicationURL else {
-            throw SyncScheduleError.missingApplication
-        }
-
         let logsDirectory = URL(fileURLWithPath: configuration.homeDirectory)
             .appendingPathComponent("Library/Logs/mac-sync")
         try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
@@ -224,15 +220,9 @@ struct SyncScheduleManager {
             options: 0,
         )
         try data.write(to: agentURL, options: .atomic)
-        try writeApplicationLaunchAgent(applicationURL: applicationURL)
+        try removeLaunchAgent(at: applicationAgentURL)
 
         guard runner.run(arguments: ["bootstrap", launchdDomain, agentURL.path]).status == 0 else {
-            try? removeLaunchAgent(at: agentURL)
-            try? removeLaunchAgent(at: applicationAgentURL)
-            throw SyncScheduleError.launchdUnavailable
-        }
-        guard runner.run(arguments: ["bootstrap", launchdDomain, applicationAgentURL.path]).status == 0 else {
-            _ = runner.run(arguments: ["bootout", launchdDomain, agentURL.path])
             try? removeLaunchAgent(at: agentURL)
             try? removeLaunchAgent(at: applicationAgentURL)
             throw SyncScheduleError.launchdUnavailable
@@ -240,26 +230,21 @@ struct SyncScheduleManager {
         return status()
     }
 
-    /// Repairs app-owned agents after upgrades and adds launch-at-login
-    /// behavior for schedules created by older versions.
-    func ensureApplicationLaunchAgent() throws {
+    /// Explicitly repair the worker and remove the legacy UI-at-login job.
+    func migrateBackgroundSchedule() throws {
         guard let schedule = status().schedule else { return }
         guard let executableURL else {
             throw SyncScheduleError.missingExecutable
-        }
-        guard let applicationURL else {
-            throw SyncScheduleError.missingApplication
         }
 
         let syncValues = propertyListValues(at: agentURL)
         let syncArguments = syncValues?["ProgramArguments"] as? [String]
         let syncProcessType = syncValues?["ProcessType"] as? String
         let syncEnvironment = syncValues?["EnvironmentVariables"] as? [String: String]
-        let applicationArguments = propertyListValues(at: applicationAgentURL)?["ProgramArguments"] as? [String]
         guard syncArguments != [executableURL.path, "run"]
-            || syncProcessType != "Interactive"
+            || syncProcessType != "Background"
             || syncEnvironment != launchEnvironment
-            || applicationArguments != ["/usr/bin/open", "-g", applicationURL.path]
+            || fileManager.fileExists(atPath: applicationAgentURL.path)
         else { return }
 
         _ = try configure(schedule: schedule)
@@ -392,7 +377,9 @@ struct SyncScheduleManager {
         var values: [String: Any] = [
             "Label": Self.label,
             "ProgramArguments": [executableURL.path, "run"],
-            "ProcessType": "Interactive",
+            "ProcessType": "Background",
+            "Nice": 10,
+            "LowPriorityIO": true,
             "EnvironmentVariables": launchEnvironment,
             "StandardOutPath": logsDirectory.appendingPathComponent("scheduler.log").path,
             "StandardErrorPath": logsDirectory.appendingPathComponent("scheduler-error.log").path,
@@ -420,7 +407,7 @@ struct SyncScheduleManager {
             "HOME": configuration.homeDirectory,
             "USER": environment["USER"] ?? NSUserName(),
             "GIT_TERMINAL_PROMPT": "0",
-            "MAC_SYNC_SECRETS": "0",
+            "MAC_SYNC_SECRETS": environment["MAC_SYNC_SECRETS"] ?? "1",
             "MAC_SYNC_MACHINE": configuration.machineName,
             "MAC_SYNC_MACHINES_REPO": configuration.dataRepository,
             "MAC_SYNC_PATHS_FILE": configuration.pathsFile,
@@ -434,21 +421,6 @@ struct SyncScheduleManager {
             values["MAC_SYNC_KEYCHAIN_ACCOUNT"] = keychainAccount
         }
         return values
-    }
-
-    private func writeApplicationLaunchAgent(applicationURL: URL) throws {
-        let values: [String: Any] = [
-            "Label": Self.applicationLabel,
-            "ProgramArguments": ["/usr/bin/open", "-g", applicationURL.path],
-            "ProcessType": "Interactive",
-            "RunAtLoad": true,
-        ]
-        let data = try PropertyListSerialization.data(
-            fromPropertyList: values,
-            format: .xml,
-            options: 0,
-        )
-        try data.write(to: applicationAgentURL, options: .atomic)
     }
 
     private func propertyListValues(at url: URL) -> [String: Any]? {

@@ -22,26 +22,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  swift-address-sanitizer:
-    name: Swift ASan
-    if: github.event_name != 'schedule'
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - name: Checkout mac-sync
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Run Swift tests with Address Sanitizer
-        run: |
-          SWIFT_TEST_RESULT_LOG=.build/swift-asan.log \
-            SWIFT_TEST_ATTEMPTS=2 \
-            Tools/ci/run-swift-test.sh swift test --disable-automatic-resolution --sanitize=address --no-parallel
-
   swift-thread-sanitizer:
     name: Swift TSan Nightly
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule'
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -51,10 +34,16 @@ jobs:
           fetch-depth: 0
 
       - name: Run Swift tests with Thread Sanitizer
-        run: |
-          SWIFT_TEST_RESULT_LOG=.build/swift-tsan.log \
-            SWIFT_TEST_ATTEMPTS=2 \
-            Tools/ci/run-swift-test.sh swift test --disable-automatic-resolution --sanitize=thread --no-parallel
+        run: make sanitize-thread
+
+      - name: Upload sanitizer log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sanitizer-thread-nightly
+          path: .build/sanitizers/thread/test.log
+          if-no-files-found: warn
+          retention-days: 14
 
   swift-style-advisory:
     name: SwiftLint/SwiftFormat Advisory

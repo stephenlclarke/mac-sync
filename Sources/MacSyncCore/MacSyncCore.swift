@@ -205,9 +205,22 @@ public final class MacSyncApp {
     private var historySourceMachine: String?
     private var historyStartedAt = ""
     private var historyStartedEpoch = 0
-    private var historyEntries: [SyncHistoryEntry] = []
+    private var historyJournal: HistoryJournal?
+    private var historyWriteFailed = false
     private var operationLock: MacSyncProcessLock?
     private var serviceLock: MacSyncProcessLock?
+    private var backgroundResources: BackgroundResources?
+    private var backgroundCheckpoint = BackgroundCheckpoint()
+    private var backgroundDeferralReason: String?
+    private var backgroundConnectivityDeferred = false
+    private var gitHubSSHTransport = "git@github.com:"
+    private var checkpointPath: String {
+        "\(config.statusDir)/\(config.machineName).background.json"
+    }
+
+    private var networkAttempts: ClosedRange<Int> {
+        1 ... (isServiceInvocation ? 1 : 3)
+    }
 
     public convenience init() {
         self.init(arguments: CommandLine.arguments, environment: ProcessInfo.processInfo.environment)
@@ -587,8 +600,8 @@ public final class MacSyncApp {
     private func errorMessage(_ message: String) {
         errorCount += 1
         let line = "ERROR: \(message)"
-        if runActive || historyActive {
-            errorMessages.append(line)
+        if runActive || historyActive, errorMessages.count < 100 {
+            errorMessages.append(String(line.prefix(2000)))
         }
         fputs("\(line)\n", stderr)
     }
@@ -596,13 +609,16 @@ public final class MacSyncApp {
     private func warning(_ message: String) {
         warningCount += 1
         let line = "WARN: \(message)"
-        if runActive || historyActive {
-            warningMessages.append(line)
+        if runActive || historyActive, warningMessages.count < 100 {
+            warningMessages.append(String(line.prefix(2000)))
         }
         fputs("\(line)\n", stderr)
     }
 
     private func recordHealthCondition(_ condition: SyncHealthCondition) {
+        let condition = SyncHealthCondition(id: condition.id, code: condition.code, component: condition.component,
+                                            severity: condition.severity, title: String(condition.title.prefix(512)),
+                                            detail: String(condition.detail.prefix(2000)), recovery: String(condition.recovery.prefix(2000)))
         if let index = healthConditions.firstIndex(where: { $0.code == condition.code }) {
             healthConditions[index] = condition
         } else {
@@ -616,6 +632,9 @@ public final class MacSyncApp {
         attempt: Int,
         result: CommandResult,
     ) {
+        if commandDiagnostics.count >= 32 {
+            commandDiagnostics.removeFirst()
+        }
         commandDiagnostics.append(SyncCommandDiagnostic(
             step: step,
             command: command,
@@ -646,6 +665,11 @@ public final class MacSyncApp {
     }
 
     private func info(_ message: String = "") {
+        if isServiceInvocation || environment["MAC_SYNC_QUIET"] == "1" {
+            if message.contains(" -> ") || message.contains("skip missing") || message.contains("unchanged local file") {
+                return
+            }
+        }
         print(message)
     }
 
@@ -749,9 +773,9 @@ public final class MacSyncApp {
         let root = environment["TMPDIR"] ?? "/tmp"
         let path = "\(root)/\(prefix).\(UUID().uuidString)"
         if directory {
-            try ensureDirectory(path)
+            try fm.createDirectory(atPath: path, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         } else {
-            fm.createFile(atPath: path, contents: Data())
+            fm.createFile(atPath: path, contents: Data(), attributes: [.posixPermissions: 0o600])
         }
         return path
     }
@@ -977,7 +1001,11 @@ public final class MacSyncApp {
 
     private func isTextFile(_ file: String) -> Bool {
         guard fm.fileExists(atPath: file), !isDirectory(file) else { return false }
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: file)) else { return false }
+        guard let size = try? fm.attributesOfItem(atPath: file)[.size] as? NSNumber,
+              size.intValue <= 1024 * 1024,
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: file)) else { return false }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 1024) else { return false }
         return data.isEmpty || !data.prefix(1024).contains(0)
     }
 
@@ -1973,9 +2001,7 @@ public final class MacSyncApp {
         if fm.fileExists(atPath: config.secretsArchive) {
             let decrypt = runner.shell("age -d -i \(ShellQuoter.quote(identity)) \(ShellQuoter.quote(config.secretsArchive)) > \(ShellQuoter.quote(existingArchive))")
             if decrypt.status == 0,
-               let plainData = try? Data(contentsOf: URL(fileURLWithPath: plainArchive)),
-               let existingData = try? Data(contentsOf: URL(fileURLWithPath: existingArchive)),
-               plainData == existingData,
+               StreamingFileComparison.equal(plainArchive, existingArchive),
                normalizedRecipients(readConfigLines(config.secretsRecipientsFile)) == recipients
             {
                 progressDone("encrypted secrets snapshot unchanged")
@@ -2003,6 +2029,53 @@ public final class MacSyncApp {
         try writeSecretsIncludedPathsManifest(included)
         try writeSecretsRecipientsManifest(recipients)
         progressDone("updated encrypted secrets snapshot")
+    }
+
+    /// Encryption needs public recipients only. A changed recipient set must
+    /// be verified interactively before replacing an existing trusted archive.
+    private func syncBackgroundSecretsArchive() throws {
+        guard enabled(config.secretsSync), !configuredAgeRecipients().isEmpty else { return }
+        let recipients = configuredAgeRecipients()
+        if fm.fileExists(atPath: config.secretsArchive), normalizedRecipients(readConfigLines(config.secretsRecipientsFile)) != recipients {
+            recordHealthCondition(SyncHealthCondition(code: .encryptedSecretsIdentityUntrusted, component: .encryptedSecrets,
+                                                      severity: .warning, title: "Encrypted backup recipients need review",
+                                                      detail: "The public recipient set changed; the previous archive was preserved.",
+                                                      recovery: "Review recipients and run an interactive encrypted-secrets sync once."))
+            return
+        }
+        let missing = ["age", "gtar", "gzip"].filter { !runner.commandExists($0) }
+        guard missing.isEmpty else {
+            recordHealthCondition(SyncHealthCondition(code: .encryptedSecretsRuntimeUnavailable, component: .encryptedSecrets,
+                                                      severity: .warning, title: "Encrypted backup tools are unavailable", detail: missing.joined(separator: ", "),
+                                                      recovery: "Reinstall the Homebrew formula and retry."))
+            return
+        }
+        let includedPaths = secretManifestPaths().filter { pathExists(sourcePath(for: $0)) }
+        guard !includedPaths.isEmpty else { return }
+        let temporary = try tempPath(prefix: "mac-sync-background-secrets", directory: true)
+        defer { try? removePath(temporary) }
+        let included = "\(temporary)/included.txt"
+        let plain = "\(temporary)/archive.tar.gz"
+        try writeText(included, includedPaths.joined(separator: "\n") + "\n")
+        try writePlainSecretsArchive(includedFile: included, target: plain)
+        let digest = try StreamingFileFingerprint.sha256(plain)
+        let digestPath = "\(config.statusDir)/\(config.machineName).secrets.sha256"
+        if readText(digestPath).trimmed == digest, fm.fileExists(atPath: config.secretsArchive) {
+            backgroundCheckpoint.lastSecrets = Date()
+            return
+        }
+        try ensureDirectory(config.secretsDir)
+        let staged = "\(config.secretsDir)/.secrets-\(UUID().uuidString).tmp"
+        defer { try? removePath(staged) }
+        let encrypted = runner.shell("age -R \(ShellQuoter.quote(config.ageRecipientsFile)) -o \(ShellQuoter.quote(staged)) < \(ShellQuoter.quote(plain))")
+        guard encrypted.status == 0 else { try fail("background encrypted backup failed; the previous archive was preserved") }
+        guard rename(staged, config.secretsArchive) == 0 else { try fail("could not publish encrypted backup") }
+        try writeSecretsIncludedPathsManifest(included)
+        try writeSecretsRecipientsManifest(recipients)
+        try writeText(digestPath, digest + "\n")
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: digestPath)
+        backgroundCheckpoint.lastSecrets = Date()
+        progressDone("updated encrypted backup using public recipients")
     }
 
     private func safeArchiveEntry(_ entry: String) -> Bool {
@@ -2449,16 +2522,16 @@ public final class MacSyncApp {
         detail: String? = nil,
     ) {
         guard historyActive else { return }
-        historyEntries.append(
-            SyncHistoryEntry(
+        do {
+            try historyJournal?.append(SyncHistoryEntry(
                 direction: direction,
                 outcome: outcome,
                 path: path,
                 source: source,
                 destination: destination,
                 detail: detail,
-            ),
-        )
+            ))
+        } catch { historyWriteFailed = true }
     }
 
     private func syncOnePath(_ rel: String) throws {
@@ -2505,25 +2578,16 @@ public final class MacSyncApp {
         if isDirectory(src) {
             let destinationExisted = pathExists(dest)
             try ensureDirectory(dest)
-            let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"])
+            var transferCount = 0
+            let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"], onStdoutLine: { line in
+                self.printSyncedDirectoryChanges(srcRoot: src, destRoot: dest, changes: line, destinationWasNew: !destinationExisted)
+                transferCount += self.recordItemizedTransfers(line, selectionPath: rel, sourceRoot: src, destinationRoot: dest,
+                                                              direction: .upload, destinationWasNew: !destinationExisted)
+            })
             if result.status != 0 {
                 fputs(result.combinedOutput, stderr)
                 throw ExitError(code: Int(result.status))
             }
-            printSyncedDirectoryChanges(
-                srcRoot: src,
-                destRoot: dest,
-                changes: result.stdout,
-                destinationWasNew: !destinationExisted,
-            )
-            let transferCount = recordItemizedTransfers(
-                result.stdout,
-                selectionPath: rel,
-                sourceRoot: src,
-                destinationRoot: dest,
-                direction: .upload,
-                destinationWasNew: !destinationExisted,
-            )
             if transferCount == 0, !destinationExisted, treeFileCount(dest) > 0 {
                 // Some older macOS rsync builds complete the copy without
                 // emitting file-level itemisation. Preserve a useful activity
@@ -2631,18 +2695,15 @@ public final class MacSyncApp {
             if fm.fileExists(atPath: config.excludesFile) {
                 args.append("--exclude-from=\(config.excludesFile)")
             }
-            let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"])
+            var transferCount = 0
+            let result = runner.run("rsync", args + ["\(src)/", "\(dest)/"], onStdoutLine: { line in
+                transferCount += self.recordItemizedTransfers(line, selectionPath: rel, sourceRoot: src, destinationRoot: dest, direction: .download)
+            })
             if result.status != 0 {
                 fputs(result.combinedOutput, stderr)
                 throw ExitError(code: Int(result.status))
             }
-            if recordItemizedTransfers(
-                result.stdout,
-                selectionPath: rel,
-                sourceRoot: src,
-                destinationRoot: dest,
-                direction: .download,
-            ) == 0 {
+            if transferCount == 0 {
                 recordHistoryTransfer(
                     direction: .download,
                     outcome: .skipped,
@@ -2715,9 +2776,7 @@ public final class MacSyncApp {
     }
 
     private func filesEqual(_ left: String, _ right: String) -> Bool {
-        guard let leftData = try? Data(contentsOf: URL(fileURLWithPath: left)),
-              let rightData = try? Data(contentsOf: URL(fileURLWithPath: right)) else { return false }
-        return leftData == rightData
+        StreamingFileComparison.equal(left, right)
     }
 
     private func writeMachineMetadata() throws {
@@ -2726,6 +2785,8 @@ public final class MacSyncApp {
         let osName = runner.commandExists("sw_vers") ? runner.run("sw_vers", ["-productName"]).stdout.trimmed : ""
         let osVersion = runner.commandExists("sw_vers") ? runner.run("sw_vers", ["-productVersion"]).stdout.trimmed : ""
         let arch = runner.run("uname", ["-m"]).stdout.trimmed
+        let homeMetrics = treeMetrics(config.machineHomeDir)
+        let absoluteMetrics = treeMetrics(config.machineAbsoluteDir)
         try writeText(
             "\(config.machineDir)/MACHINE.md",
             """
@@ -2737,6 +2798,8 @@ public final class MacSyncApp {
             - LocalHostName: `\(localHostName.isEmpty ? "unknown" : localHostName)`
             - OS: `\(osName.isEmpty ? "unknown" : osName) \(osVersion.isEmpty ? "unknown" : osVersion)`
             - Architecture: `\(arch.isEmpty ? "unknown" : arch)`
+            - SnapshotFiles: `\(homeMetrics.count + absoluteMetrics.count)`
+            - SnapshotBytes: `\(homeMetrics.bytes + absoluteMetrics.bytes)`
             """,
         )
     }
@@ -2749,6 +2812,8 @@ public final class MacSyncApp {
             "permission denied (publickey)",
             "terminal prompts disabled",
             "repository not found",
+            "requested url returned error: 401",
+            "requested url returned error: 403",
         ]
         if authenticationPatterns.contains(where: message.contains) {
             return .authentication
@@ -2759,7 +2824,16 @@ public final class MacSyncApp {
             "connection timed out",
             "connection refused",
             "operation timed out",
+            "command timed out",
             "no route to host",
+            "could not resolve proxy",
+            "connection reset",
+            "requested url returned error: 408",
+            "requested url returned error: 429",
+            "requested url returned error: 500",
+            "requested url returned error: 502",
+            "requested url returned error: 503",
+            "requested url returned error: 504",
         ]
         if unavailablePatterns.contains(where: message.contains) {
             return .unavailable
@@ -2771,7 +2845,7 @@ public final class MacSyncApp {
         guard useSSHForGitHub else { return arguments }
         return [
             "-c",
-            "url.git@github.com:.insteadOf=https://github.com/",
+            "url.\(gitHubSSHTransport).insteadOf=https://github.com/",
         ] + arguments
     }
 
@@ -2781,6 +2855,11 @@ public final class MacSyncApp {
             "GIT_ASKPASS": "/usr/bin/false",
             "GCM_INTERACTIVE": "never",
             "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=10",
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "http.lowSpeedLimit",
+            "GIT_CONFIG_VALUE_0": "1024",
+            "GIT_CONFIG_KEY_1": "http.lowSpeedTime",
+            "GIT_CONFIG_VALUE_1": "30",
         ]
     }
 
@@ -2791,11 +2870,20 @@ public final class MacSyncApp {
         else {
             return false
         }
-        let probe = runner.run(
+        var probe = runner.run(
             "git",
             ["ls-remote", sshRemote, "HEAD"],
             extraEnvironment: gitNetworkEnvironment,
+            timeout: 30,
         )
+        if probe.status != 0, sshRemote.hasPrefix("git@github.com:") {
+            let path = String(sshRemote.dropFirst("git@github.com:".count))
+            probe = runner.run("git", ["ls-remote", "ssh://git@ssh.github.com:443/\(path)", "HEAD"],
+                               extraEnvironment: gitNetworkEnvironment, timeout: 30)
+            if probe.status == 0 {
+                gitHubSSHTransport = "ssh://git@ssh.github.com:443/"
+            }
+        }
         recordCommandDiagnostic(
             step: "Testing SSH access to the data repository",
             command: "git ls-remote <ssh-origin> HEAD",
@@ -2821,6 +2909,7 @@ public final class MacSyncApp {
             "git",
             commandArguments,
             extraEnvironment: gitNetworkEnvironment,
+            timeout: 120,
         )
         recordCommandDiagnostic(
             step: step,
@@ -2831,7 +2920,7 @@ public final class MacSyncApp {
 
         if result.status != 0,
            !useSSHForGitHub,
-           gitNetworkFailureKind(result.combinedOutput) == .authentication,
+           gitNetworkFailureKind(result.combinedOutput) != .other,
            enableSSHGitHubFallback(repo: repo, attempt: attempt)
         {
             commandArguments = gitNetworkArguments(arguments)
@@ -2839,6 +2928,7 @@ public final class MacSyncApp {
                 "git",
                 commandArguments,
                 extraEnvironment: gitNetworkEnvironment,
+                timeout: 120,
             )
             recordCommandDiagnostic(
                 step: "\(step) using SSH",
@@ -2858,6 +2948,7 @@ public final class MacSyncApp {
         title: String,
         recovery: String,
     ) {
+        backgroundConnectivityDeferred = isServiceInvocation && gitNetworkFailureKind(output) == .unavailable
         let code: SyncHealthConditionCode = switch gitNetworkFailureKind(output) {
         case .authentication:
             .remoteAuthenticationFailed
@@ -2901,7 +2992,7 @@ public final class MacSyncApp {
             warning("\(label) has local changes; skipping pre-operation git pull")
             return
         }
-        for attempt in 1 ... 3 {
+        for attempt in networkAttempts {
             if runGitNetworkOperation(
                 step: "Refreshing \(label)",
                 message: attempt == 1
@@ -2916,7 +3007,7 @@ public final class MacSyncApp {
                     : "pulled latest \(label) changes")
                 return
             }
-            if attempt < 3 {
+            if attempt < networkAttempts.upperBound {
                 usleep(useconds_t(attempt * 1_000_000))
             }
         }
@@ -2967,13 +3058,21 @@ public final class MacSyncApp {
             warning("current machine snapshot has local changes; skipping pre-operation git pull")
             return
         }
+        // An offline publish can leave a local commit while a peer advances
+        // upstream. Reconcile it before copying another generation of files.
+        if branchAheadOfUpstream(config.machinesRepoDir) {
+            guard rebaseMachinesRepoBeforePush() else {
+                try fail("pending snapshots could not be reconciled; local commits were preserved")
+            }
+            return
+        }
         let args = repoClean(config.machinesRepoDir)
             ? ["-C", config.machinesRepoDir, "pull", "--ff-only"]
             : ["-C", config.machinesRepoDir, "pull", "--ff-only", "--autostash"]
         let message = repoClean(config.machinesRepoDir)
             ? "pulling latest machines repo changes"
             : "pulling latest machines repo changes with unrelated local edits preserved"
-        for attempt in 1 ... 3 {
+        for attempt in networkAttempts {
             if runGitNetworkOperation(
                 step: "Refreshing the data repository",
                 message: attempt == 1 ? message : "retrying data repository refresh (\(attempt)/3)",
@@ -2986,7 +3085,7 @@ public final class MacSyncApp {
                     : "pulled latest machines repo changes")
                 return
             }
-            if attempt < 3 {
+            if attempt < networkAttempts.upperBound {
                 usleep(useconds_t(attempt * 1_000_000))
             }
         }
@@ -3029,6 +3128,10 @@ public final class MacSyncApp {
             progressDone("machines repo already includes upstream")
             return true
         }
+        guard !machinesRebaseInProgress() else {
+            lastCommandOutput = "A Git rebase is already in progress. Finish or abort it before syncing."
+            return false
+        }
         guard runGitNetworkOperation(
             step: "Rebasing the data repository before publish",
             message: "rebasing machines repo before push",
@@ -3036,6 +3139,9 @@ public final class MacSyncApp {
             arguments: ["-C", config.machinesRepoDir, "pull", "--rebase", "--autostash"],
             attempt: 1,
         ) else {
+            if machinesRebaseInProgress() {
+                _ = runner.run("git", ["-C", config.machinesRepoDir, "rebase", "--abort"])
+            }
             recordRemoteFailure(
                 output: lastCommandOutput,
                 title: "The data repository could not be rebased before publish",
@@ -3047,8 +3153,15 @@ public final class MacSyncApp {
         return true
     }
 
+    private func machinesRebaseInProgress() -> Bool {
+        ["rebase-merge", "rebase-apply"].contains { name in
+            let result = runner.run("git", ["-C", config.machinesRepoDir, "rev-parse", "--path-format=absolute", "--git-path", name])
+            return result.status == 0 && fm.fileExists(atPath: result.stdout.trimmed)
+        }
+    }
+
     private func pushMachinesRepoWithRetries(branch: String) -> Bool {
-        for attempt in 1 ... 3 {
+        for attempt in networkAttempts {
             guard rebaseMachinesRepoBeforePush() else { return false }
             if runGitNetworkOperation(
                 step: "Publishing the data repository",
@@ -3060,7 +3173,7 @@ public final class MacSyncApp {
                 progressDone("pushed \(branch) to origin")
                 return true
             }
-            if attempt == 3 {
+            if attempt == networkAttempts.upperBound {
                 recordRemoteFailure(
                     output: lastCommandOutput,
                     title: "The data repository could not be published",
@@ -3162,34 +3275,37 @@ public final class MacSyncApp {
     }
 
     private func treeFileCount(_ dir: String) -> Int {
-        guard let enumerator = fm.enumerator(atPath: dir) else { return 0 }
-        var count = 0
-        for case let path as String in enumerator {
-            if !isDirectory("\(dir)/\(path)") {
-                count += 1
-            }
-        }
-        return count
+        treeMetrics(dir).count
     }
 
     private func treeByteCount(_ dir: String) -> Int {
-        guard let enumerator = fm.enumerator(atPath: dir) else { return 0 }
-        var total = 0
-        for case let path as String in enumerator {
+        treeMetrics(dir).bytes
+    }
+
+    private func treeMetrics(_ dir: String) -> (count: Int, bytes: Int) {
+        guard let enumerator = fm.enumerator(atPath: dir) else { return (0, 0) }
+        var count = 0
+        var bytes = 0
+        while autoreleasepool(invoking: {
+            guard let path = enumerator.nextObject() as? String else { return false }
             let full = "\(dir)/\(path)"
-            guard !isDirectory(full), let size = try? fm.attributesOfItem(atPath: full)[.size] as? NSNumber else { continue }
-            total += size.intValue
-        }
-        return total
+            guard !isDirectory(full) else { return true }
+            count += 1
+            bytes += (try? fm.attributesOfItem(atPath: full)[.size] as? NSNumber)?.intValue ?? 0
+            return true
+        }) {}
+        return (count, bytes)
     }
 
     private func changedMachineMetrics() -> (count: Int, bytes: Int) {
         let result = runner.run("git", ["-C", config.machinesRepoDir, "ls-files", "--modified", "--deleted", "--others", "--exclude-standard", "-z", "--", "machines/\(config.machineName)"])
         let files = result.stdout.split(separator: "\0").map(String.init).filter { !$0.isEmpty }
         let bytes = files.reduce(0) { total, rel -> Int in
-            let path = "\(config.machinesRepoDir)/\(rel)"
-            guard let size = try? fm.attributesOfItem(atPath: path)[.size] as? NSNumber else { return total }
-            return total + size.intValue
+            autoreleasepool {
+                let path = "\(config.machinesRepoDir)/\(rel)"
+                guard let size = try? fm.attributesOfItem(atPath: path)[.size] as? NSNumber else { return total }
+                return total + size.intValue
+            }
         }
         return (files.count, bytes)
     }
@@ -3231,7 +3347,8 @@ public final class MacSyncApp {
         historySourceMachine = sourceMachine
         historyStartedAt = startedAt ?? statusTimestamp()
         historyStartedEpoch = startedEpoch ?? Int(Date().timeIntervalSince1970)
-        historyEntries = []
+        historyJournal = try? HistoryJournal(directory: config.syncHistoryDir)
+        historyWriteFailed = historyJournal == nil
     }
 
     private func finishHistory(_ result: SyncHistoryResult, finishedAt: String? = nil) {
@@ -3239,6 +3356,7 @@ public final class MacSyncApp {
         let completedAt = finishedAt ?? statusTimestamp()
         let duration = max(0, Int(Date().timeIntervalSince1970) - historyStartedEpoch)
         let record = SyncHistoryRecord(
+            id: historyJournal?.id ?? UUID().uuidString,
             action: action,
             sourceMachine: historySourceMachine,
             result: result,
@@ -3247,7 +3365,7 @@ public final class MacSyncApp {
                 finishedAt: completedAt,
                 durationSeconds: duration,
             ),
-            entries: historyEntries,
+            entries: [],
             diagnostics: SyncHistoryDiagnostics(
                 warningCount: warningCount,
                 errorCount: errorCount,
@@ -3262,25 +3380,29 @@ public final class MacSyncApp {
             historyActive = false
             historyAction = nil
             historySourceMachine = nil
-            historyEntries = []
+            historyJournal = nil
         }
 
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(record) else { return }
-        let milliseconds = Int64(Date().timeIntervalSince1970 * 1000)
-        let fileName = String(format: "%013lld-%@.json", milliseconds, record.id)
-        try? data.write(to: URL(fileURLWithPath: config.syncHistoryDir).appendingPathComponent(fileName), options: .atomic)
+        do {
+            if historyWriteFailed {
+                throw NSError(domain: "MacSyncHistory", code: 3)
+            }
+            try historyJournal?.finish(record)
+        } catch {
+            fputs("WARN: the local history journal could not be completed; snapshot data was preserved.\n", stderr)
+        }
     }
 
     private func captureSyncStartMetrics() {
-        startedFileCount = treeFileCount(config.machineDir)
-        startedByteCount = treeByteCount(config.machineDir)
+        let metrics = treeMetrics(config.machineDir)
+        startedFileCount = metrics.count
+        startedByteCount = metrics.bytes
     }
 
     private func captureSyncFinishMetrics() {
-        lastStorageFileCount = treeFileCount(config.machineDir)
-        lastStorageByteCount = treeByteCount(config.machineDir)
+        let footprint = treeMetrics(config.machineDir)
+        lastStorageFileCount = footprint.count
+        lastStorageByteCount = footprint.bytes
         lastNetByteChange = lastStorageByteCount - startedByteCount
         let metrics = changedMachineMetrics()
         lastUpdatedFileCount = metrics.count
@@ -3312,7 +3434,9 @@ public final class MacSyncApp {
         ).stdout.trimmed
         let remoteRepo = MacSyncPaths.normalizeGitHubRemoteURL(rawRemoteRepo)
             ?? safeDiagnosticOutput(rawRemoteRepo).ifEmpty("none")
-        let historyResult: SyncHistoryResult = if status != 0 {
+        let historyResult: SyncHistoryResult = if backgroundDeferralReason != nil || backgroundConnectivityDeferred {
+            .deferred
+        } else if status != 0 {
             .failed
         } else if healthConditions.isEmpty {
             .success
@@ -3338,8 +3462,8 @@ public final class MacSyncApp {
         remote_repo=\(remoteRepo)
         last_commit=\(lastCommit)
         """
-        try? writeText(config.syncStatusFile, text)
         finishHistory(historyResult, finishedAt: finishedAt)
+        try? writeText(config.syncStatusFile, text)
         runActive = false
     }
 
@@ -3348,6 +3472,9 @@ public final class MacSyncApp {
         try acquireLock()
         defer { releaseLock() }
         try startSyncStatus()
+        let runningPath = "\(config.statusDir)/\(config.machineName).running"
+        try writeText(runningPath, "\(getpid())\n")
+        defer { try? fm.removeItem(atPath: runningPath) }
         do {
             try pullRepoIfSafe()
             try pullMachinesRepoIfSafe()
@@ -3366,14 +3493,28 @@ public final class MacSyncApp {
             }
             progressPending("syncing configured paths")
             for rel in manifest {
-                try syncOnePath(rel)
+                try backgroundBoundary()
+                try autoreleasepool { try syncOnePath(rel) }
             }
             progressDone("synced configured paths")
             try pruneStaleDynamicPaths(currentDynamic: dynamicExtra, configured: configured)
-            try syncHomebrewPackages()
-            try syncVscodeExtensions()
-            try syncGitHubRepositories()
-            try syncSecretsArchive(mode: "auto")
+            try backgroundBoundary()
+            if !isServiceInvocation || backgroundCheckpoint.lastInventory.map({ Date().timeIntervalSince($0) >= 86400 }) ?? true {
+                try syncHomebrewPackages()
+                try backgroundBoundary()
+                try syncVscodeExtensions()
+                try syncGitHubRepositories()
+                if isServiceInvocation {
+                    backgroundCheckpoint.lastInventory = Date()
+                }
+            }
+            if isServiceInvocation {
+                if backgroundCheckpoint.lastSecrets.map({ Date().timeIntervalSince($0) >= 86400 }) ?? true {
+                    try syncBackgroundSecretsArchive()
+                }
+            } else {
+                try syncSecretsArchive(mode: "auto")
+            }
             if config.dryRun != "1" {
                 if dynamicRefsEnabled() {
                     try writeDynamicPathsManifest(dynamicExtra)
@@ -3403,14 +3544,54 @@ public final class MacSyncApp {
         }
         serviceLock = lock
         isServiceInvocation = true
+        // Background priority also applies when invoked by Homebrew services.
+        _ = setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)
+        backgroundResources = BackgroundResources()
+        backgroundCheckpoint = BackgroundCheckpoint.load(from: checkpointPath)
         defer {
             isServiceInvocation = false
             serviceLock = nil
+            backgroundResources = nil
         }
-        if enabled(config.secretsSync) {
-            info("unattended sync skips encrypted secrets; use `\(config.scriptName) sync` to update them interactively")
+        try BackgroundAgentMigration.migrate(homeDirectory: config.homeDir,
+                                             executable: Config.realpathExisting(invocationArguments.first ?? "mac-sync"), runner: runner)
+        if let reason = backgroundResources?.deferralReason {
+            backgroundCheckpoint.detail = reason
+            try backgroundCheckpoint.save(to: checkpointPath)
+            info(reason)
+            return
         }
-        try cmdSync()
+        if let next = backgroundCheckpoint.nextAttempt, next > Date() {
+            info(backgroundCheckpoint.detail)
+            return
+        }
+        do {
+            try cmdSync()
+            backgroundCheckpoint.consecutiveFailures = 0
+            backgroundCheckpoint.nextAttempt = nil
+            backgroundCheckpoint.lastSuccess = Date()
+            backgroundCheckpoint.detail = "Synced; waiting for the next scheduled run"
+            try backgroundCheckpoint.save(to: checkpointPath)
+        } catch {
+            if let reason = backgroundDeferralReason {
+                backgroundCheckpoint.detail = reason
+                backgroundCheckpoint.nextAttempt = Date().addingTimeInterval(900)
+            } else {
+                backgroundCheckpoint.failed(authentication: gitNetworkFailureKind(lastCommandOutput) == .authentication)
+            }
+            try? backgroundCheckpoint.save(to: checkpointPath)
+            throw error
+        }
+    }
+
+    private func backgroundBoundary() throws {
+        guard isServiceInvocation else { return }
+        let budgetExpired = Date().timeIntervalSince1970 - Double(runStartedEpoch) >= 900
+        if let reason = backgroundResources?.deferralReason ?? (budgetExpired ? "Background work paused after its 15-minute budget" : nil) {
+            backgroundDeferralReason = reason
+            info(reason)
+            throw ExitError(code: 75)
+        }
     }
 
     private func cmdRestore(_ arguments: [String]) throws {

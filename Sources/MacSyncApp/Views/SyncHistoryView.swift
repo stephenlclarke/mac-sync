@@ -7,6 +7,9 @@ struct SyncHistoryView: View {
     @State private var filter: HistoryFilter = .all
     @State private var conditionsExpanded = true
     @State private var diagnosticsExpanded = false
+    @State private var entries: [SyncHistoryEntry] = []
+    @State private var entryOffset = 0
+    @State private var detailError: String?
 
     private var selectedRecord: SyncHistoryRecord? {
         if let selectedRecordID,
@@ -41,6 +44,14 @@ struct SyncHistoryView: View {
                             .tag(record.id)
                     }
                     .listStyle(.inset)
+                    HStack {
+                        Button("Previous") { store.changeHistoryPage(by: -1) }
+                            .disabled(store.historyOffset == 0 || store.isRefreshing)
+                        Text("\(store.historyOffset + 1)–\(min(store.historyOffset + 50, store.historyTotal)) of \(store.historyTotal)")
+                            .font(.caption)
+                        Button("Next") { store.changeHistoryPage(by: 1) }
+                            .disabled(store.historyOffset + 50 >= store.historyTotal || store.isRefreshing)
+                    }.padding()
                 }
             }
             .frame(minWidth: 290, idealWidth: 340, maxWidth: 420)
@@ -57,6 +68,8 @@ struct SyncHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .task(id: "\(selectedRecord?.id ?? ""):\(entryOffset)") { await loadEntries() }
+        .onChange(of: selectedRecord?.id) { _ in entryOffset = 0 }
     }
 
     private func historyRow(_ record: SyncHistoryRecord) -> some View {
@@ -67,7 +80,7 @@ struct SyncHistoryView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(actionTitle(for: record))
                     .fontWeight(.medium)
-                Text("\(record.entries.count) file event\(record.entries.count == 1 ? "" : "s") · \(record.finishedAt)")
+                Text("\(store.historyEntryCounts[record.id] ?? 0) file events · \(record.finishedAt)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -76,7 +89,7 @@ struct SyncHistoryView: View {
     }
 
     private func recordDetail(_ record: SyncHistoryRecord) -> some View {
-        let entries = filteredEntries(for: record)
+        let visibleEntries = filteredEntries(for: record)
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top) {
@@ -98,7 +111,11 @@ struct SyncHistoryView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                transferSummary(record)
+                Text("Showing up to 200 file events. Filters apply to this page.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let detailError {
+                    Text(detailError).foregroundStyle(.orange)
+                }
                 if let conditions = record.conditions, !conditions.isEmpty {
                     DisclosureGroup(
                         "Health conditions (\(conditions.count))",
@@ -137,7 +154,7 @@ struct SyncHistoryView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 12)
 
-            if entries.isEmpty {
+            if visibleEntries.isEmpty {
                 historyEmptyState(
                     title: "No \(filter.title.lowercased()) events",
                     systemImage: filter.systemImage,
@@ -145,11 +162,17 @@ struct SyncHistoryView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(entries) { entry in
+                List(visibleEntries) { entry in
                     transferRow(entry)
                 }
                 .listStyle(.inset)
             }
+            HStack {
+                Button("Previous events") { entryOffset = max(0, entryOffset - 200) }.disabled(entryOffset == 0)
+                Text("Events \(entryOffset + 1)–\(entryOffset + entries.count)").font(.caption)
+                Button("Next events") { entryOffset += 200 }
+                    .disabled(entryOffset + 200 >= (store.historyEntryCounts[record.id] ?? 0))
+            }.padding()
         }
     }
 
@@ -237,6 +260,8 @@ struct SyncHistoryView: View {
             .orange
         case .failed:
             .red
+        case .deferred:
+            .secondary
         }
     }
 
@@ -248,6 +273,8 @@ struct SyncHistoryView: View {
             "Completed with warnings"
         case .failed:
             "Failed"
+        case .deferred:
+            "Deferred; will retry"
         }
     }
 
@@ -304,20 +331,34 @@ struct SyncHistoryView: View {
         record.entries.filter { $0.outcome == outcome }.count
     }
 
-    private func filteredEntries(for record: SyncHistoryRecord) -> [SyncHistoryEntry] {
+    private func filteredEntries(for _: SyncHistoryRecord) -> [SyncHistoryEntry] {
         switch filter {
         case .all:
-            record.entries
+            entries
         case .uploads:
-            record.entries.filter { $0.direction == .upload }
+            entries.filter { $0.direction == .upload }
         case .downloads:
-            record.entries.filter { $0.direction == .download }
+            entries.filter { $0.direction == .download }
         case .new:
-            record.entries.filter { $0.outcome == .new }
+            entries.filter { $0.outcome == .new }
         case .updated:
-            record.entries.filter { $0.outcome == .updated }
+            entries.filter { $0.outcome == .updated }
         case .skipped:
-            record.entries.filter { $0.outcome == .skipped }
+            entries.filter { $0.outcome == .skipped }
+        }
+    }
+
+    private func loadEntries() async {
+        guard let id = selectedRecord?.id else { entries = []; return }
+        let directory = "\(store.overview.configuration.statusDirectory)/history/\(store.overview.configuration.machineName)"
+        let offset = entryOffset
+        let result = await Task.detached(priority: .utility) {
+            Result { try LocalHistoryStore(directory: directory).entries(runID: id, offset: offset) }
+        }.value
+        guard !Task.isCancelled, id == selectedRecord?.id, offset == entryOffset else { return }
+        switch result {
+        case let .success(page): entries = page; detailError = nil
+        case .failure: entries = []; detailError = "Unable to read this history page. The JSON ledger remains on disk."
         }
     }
 

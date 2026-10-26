@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// A completed local publish or restore operation. The CLI stores these
@@ -12,6 +13,7 @@ public enum SyncHistoryResult: String, Codable, Hashable, Sendable {
     case success
     case partial
     case failed
+    case deferred
 }
 
 public enum SyncHealthComponent: String, Codable, Hashable, Sendable {
@@ -427,6 +429,9 @@ public struct ProcessRunner {
         workingDirectory: String? = nil,
         extraEnvironment: [String: String] = [:],
         capture: Bool = true,
+        timeout: TimeInterval? = nil,
+        outputLimit: Int = 8 * 1024 * 1024,
+        onStdoutLine: ((String) -> Void)? = nil,
     ) -> CommandResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -443,38 +448,56 @@ public struct ProcessRunner {
             process.standardError = stderrPipe
         }
 
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         do {
             try process.run()
         } catch {
             return CommandResult(status: 127, stdout: "", stderr: "\(error)\n")
         }
 
-        let output = ProcessOutputCapture()
+        // A separate process group lets deadlines cancel descendants too.
+        let grouped = setpgid(process.processIdentifier, process.processIdentifier) == 0
+        let output = ProcessOutputCapture(limit: outputLimit, lineHandler: onStdoutLine)
         let reads = DispatchGroup()
         if capture {
             reads.enter()
             DispatchQueue.global(qos: .utility).async {
-                output.storeStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
+                output.drain(stdoutPipe.fileHandleForReading, standardError: false)
                 reads.leave()
             }
             reads.enter()
             DispatchQueue.global(qos: .utility).async {
-                output.storeStderr(stderrPipe.fileHandleForReading.readDataToEndOfFile())
+                output.drain(stderrPipe.fileHandleForReading, standardError: true)
                 reads.leave()
+            }
+        }
+        let deadline = max(0.1, timeout ?? Double(environment["MAC_SYNC_COMMAND_TIMEOUT_SECONDS"] ?? "") ?? 300)
+        let timedOut = exited.wait(timeout: .now() + deadline) == .timedOut
+        if timedOut {
+            kill(grouped ? -process.processIdentifier : process.processIdentifier, SIGTERM)
+            if exited.wait(timeout: .now() + 2) == .timedOut {
+                kill(grouped ? -process.processIdentifier : process.processIdentifier, SIGKILL)
+                exited.wait()
             }
         }
         process.waitUntilExit()
 
         if capture {
-            reads.wait()
-            let captured = output.snapshot()
-            return CommandResult(
-                status: process.terminationStatus,
-                stdout: String(decoding: captured.stdout, as: UTF8.self),
-                stderr: String(decoding: captured.stderr, as: UTF8.self),
-            )
+            if reads.wait(timeout: .now() + 2) == .timedOut {
+                if grouped {
+                    kill(-process.processIdentifier, SIGKILL)
+                }
+                output.cancel()
+                reads.wait()
+                return CommandResult(status: 124, stdout: "", stderr: "Command output did not close before its deadline.\n")
+            }
+            let result = output.result(status: timedOut ? 124 : process.terminationStatus)
+            return timedOut
+                ? CommandResult(status: 124, stdout: result.stdout, stderr: result.stderr + "Command timed out.\n")
+                : result
         }
-        return CommandResult(status: process.terminationStatus, stdout: "", stderr: "")
+        return CommandResult(status: timedOut ? 124 : process.terminationStatus, stdout: "", stderr: "")
     }
 
     public func shell(
@@ -485,7 +508,7 @@ public struct ProcessRunner {
     ) -> CommandResult {
         run(
             "/bin/bash",
-            ["-c", script],
+            ["-o", "pipefail", "-c", script],
             workingDirectory: workingDirectory,
             extraEnvironment: extraEnvironment,
             capture: capture,
@@ -494,29 +517,5 @@ public struct ProcessRunner {
 
     public func commandExists(_ command: String) -> Bool {
         shell("command -v \(ShellQuoter.quote(command)) >/dev/null 2>&1").status == 0
-    }
-}
-
-private final class ProcessOutputCapture: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stdout = Data()
-    private var stderr = Data()
-
-    func storeStdout(_ data: Data) {
-        lock.lock()
-        stdout = data
-        lock.unlock()
-    }
-
-    func storeStderr(_ data: Data) {
-        lock.lock()
-        stderr = data
-        lock.unlock()
-    }
-
-    func snapshot() -> (stdout: Data, stderr: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        return (stdout, stderr)
     }
 }

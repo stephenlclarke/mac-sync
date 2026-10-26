@@ -16,7 +16,7 @@ enum SyncArchiveRemovalError: LocalizedError {
     }
 }
 
-struct SyncRepository {
+struct SyncRepository: @unchecked Sendable {
     private let environment: [String: String]
     private let fileManager: FileManager
     private let machineName: String
@@ -31,12 +31,12 @@ struct SyncRepository {
         machineName = Self.resolveMachineName(environment: resolvedEnvironment)
     }
 
-    func load() -> SyncOverview {
+    func load(includeSnapshotDetails: Bool = true, historyOffset: Int = 0) -> SyncOverview {
         let configuration = configuration()
         let currentStatus = readStatus(configuration: configuration)
-        let history = readHistory(configuration: configuration)
+        let history = readHistory(configuration: configuration, offset: historyOffset)
         let processID = activeSyncProcessID(machine: configuration.machineName)
-        let snapshots = machineSnapshots(configuration: configuration)
+        let snapshots = machineSnapshots(configuration: configuration, includeDetails: includeSnapshotDetails)
         let currentMachine = snapshots.first { $0.name == configuration.machineName }
         let peerMachines = snapshots.filter { $0.name != configuration.machineName }
 
@@ -266,6 +266,8 @@ struct SyncRepository {
             .partial
         case "failed":
             .failed
+        case "deferred":
+            .deferred
         default:
             .unknown
         }
@@ -356,26 +358,14 @@ struct SyncRepository {
             .filter { !$0.isEmpty }
     }
 
-    private func readHistory(configuration: SyncConfiguration) -> [SyncHistoryRecord] {
+    private func readHistory(configuration: SyncConfiguration, offset: Int) -> [SyncHistoryRecord] {
         let directory = URL(fileURLWithPath: configuration.statusDirectory)
             .appendingPathComponent("history")
             .appendingPathComponent(configuration.machineName)
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles],
-        ) else {
-            return []
-        }
-
-        let decoder = JSONDecoder()
-        return files
-            .filter { $0.pathExtension == "json" }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
-            .compactMap { url in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(SyncHistoryRecord.self, from: data)
-            }
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        guard let store = try? LocalHistoryStore(directory: directory.path) else { return [] }
+        try? store.importLegacy(directory: directory.path)
+        return (try? store.page(offset: offset)) ?? []
     }
 
     private func activeSyncProcessID(machine: String) -> Int32? {
@@ -389,7 +379,7 @@ struct SyncRepository {
         return processID
     }
 
-    private func machineSnapshots(configuration: SyncConfiguration) -> [MachineSnapshot] {
+    private func machineSnapshots(configuration: SyncConfiguration, includeDetails: Bool) -> [MachineSnapshot] {
         let root = URL(fileURLWithPath: configuration.dataRepository).appendingPathComponent("machines")
         guard let names = try? fileManager.contentsOfDirectory(atPath: root.path) else {
             return []
@@ -400,12 +390,13 @@ struct SyncRepository {
             .filter { $0 != "_shared" }
             .filter(MacSyncPaths.safeMachineName)
             .filter { isDirectory(root.appendingPathComponent($0).path) }
-            .map { snapshot(named: $0, root: root) }
+            .map { snapshot(named: $0, root: root, includeDetails: includeDetails) }
     }
 
     private func snapshot(
         named name: String,
         root: URL,
+        includeDetails: Bool,
     ) -> MachineSnapshot {
         let machineRoot = root.appendingPathComponent(name)
         let metadata = machineMetadata(machineRoot.appendingPathComponent("MACHINE.md").path)
@@ -415,14 +406,14 @@ struct SyncRepository {
             configuredPath(
                 path,
                 isDynamic: !configured.contains(path),
-                machineRoot: machineRoot,
+                machineRoot: machineRoot, inspectContents: includeDetails,
             )
         }
-        let files = snapshotFiles(machineRoot: machineRoot)
+        let files = includeDetails ? snapshotFiles(machineRoot: machineRoot) : []
         let latestFileDate = files.compactMap(\.modifiedAt).max()
         let metadataDate = modificationDate(machineRoot.appendingPathComponent("MACHINE.md").path)
 
-        return MachineSnapshot(
+        var result = MachineSnapshot(
             name: name,
             computerName: metadata["ComputerName"],
             operatingSystem: metadata["OS"],
@@ -442,12 +433,17 @@ struct SyncRepository {
                 machineRoot.appendingPathComponent("github-repositories/repositories.txt").path,
             ).count,
         )
+        result.detailsLoaded = includeDetails
+        result.summaryFileCount = Int(metadata["SnapshotFiles"] ?? "")
+        result.summaryByteCount = Int(metadata["SnapshotBytes"] ?? "")
+        return result
     }
 
     private func configuredPath(
         _ path: String,
         isDynamic: Bool,
         machineRoot: URL,
+        inspectContents: Bool,
     ) -> ConfiguredPath {
         let snapshotPath: URL = if path.hasPrefix("/") {
             machineRoot
@@ -468,8 +464,8 @@ struct SyncRepository {
             isDynamic: isDynamic,
             snapshotState: .present(
                 directory ? .folder : .file,
-                directory ? recursiveFileCount(snapshotPath) : 1,
-                directory ? recursiveByteCount(snapshotPath) : fileSize(snapshotPath.path),
+                directory ? (inspectContents ? recursiveFileCount(snapshotPath) : 0) : 1,
+                directory ? (inspectContents ? recursiveByteCount(snapshotPath) : 0) : fileSize(snapshotPath.path),
             ),
         )
     }

@@ -202,7 +202,7 @@ jobs:
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
             label="current"
             title="Current build"
-            app_version="1.0.5"
+            app_version="1.1.0"
           fi
           {
             printf 'app_version=%s\n' "$app_version"
@@ -268,6 +268,7 @@ jobs:
       - name: Write release notes
         id: notes
         env:
+          GH_TOKEN: ${{ github.token }}
           ASSET: ${{ steps.metadata.outputs.asset }}
           CI_URL: ${{ steps.ci.outputs.url }}
           CODEQL_URL: ${{ steps.codeql.outputs.url }}
@@ -294,13 +295,17 @@ jobs:
             printf '## Quality snapshot\n\n'
             printf -- '- Commit: [`%s`](https://github.com/%s/commit/%s)\n' \
               "$RELEASE_COMMIT" "$GITHUB_REPOSITORY" "$RELEASE_COMMIT"
-            printf -- '- [CI passed](%s), including the 85%% coverage gate and Sonar quality gate.\n' "$CI_URL"
+            printf -- '- [CI passed](%s), including ASan, TSan, the 85%% coverage gate and Sonar quality gate.\n' "$CI_URL"
             printf -- '- [CodeQL passed](%s) for the same commit.\n' "$CODEQL_URL"
             printf -- '- The packaged CLI, spinner, app bundle, plist metadata, provenance, and checksum passed release validation.\n\n'
             if [[ "$SIGNING_STATUS" == "developer-id-signed" ]]; then
               printf -- '- The app bundle is Developer ID signed. It is not notarised.\n\n'
             else
               printf -- '- The app bundle is not Developer ID signed because no release certificate is configured.\n\n'
+            fi
+            if [[ -f CHANGELOG.md ]]; then
+              printf '## Release summary\n\n'
+              awk '/^## / { if (section) exit; section=1; next } section { print }' CHANGELOG.md
             fi
             printf '## Install\n\n'
             if [[ "$RELEASE_MODE" == "stable" ]]; then
@@ -314,7 +319,13 @@ jobs:
             printf -- '- `%s.sha256`\n' "$ASSET"
             printf -- '- SHA-256: `%s`\n\n' "$checksum"
             printf '## Included changes\n\n'
-            git log --no-merges --pretty='format:- %s (`%h`)' -12
+            previous_tag="$(gh release view --json tagName --jq '.tagName' 2>/dev/null || true)"
+            if [[ "$RELEASE_MODE" == "stable" && "$previous_tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && \
+               git rev-parse --verify "refs/tags/${previous_tag}" >/dev/null 2>&1; then
+              git log --no-merges --pretty='format:- %s (`%h`)' "${previous_tag}..${RELEASE_COMMIT}"
+            else
+              git log --no-merges --pretty='format:- %s (`%h`)' -12
+            fi
             printf '\n'
           } > "$notes"
           printf 'path=%s\n' "$notes" >> "$GITHUB_OUTPUT"

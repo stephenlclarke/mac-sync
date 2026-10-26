@@ -29,11 +29,19 @@ jobs:
     name: Analyze Swift
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      # Swift traced extraction is not supported with Xcode 27 / Swift 6.4.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Verify supported Swift toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

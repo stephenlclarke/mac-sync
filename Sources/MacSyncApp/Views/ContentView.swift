@@ -49,7 +49,7 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             store.reload()
         }
         .onAppear {

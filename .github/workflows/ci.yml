@@ -22,6 +22,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sanitizers:
+    name: Sanitizer (${{ matrix.sanitizer }})
+    runs-on: macos-26
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address, thread]
+    steps:
+      - name: Checkout mac-sync
+        uses: actions/checkout@v7
+
+      - name: Print toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run instrumented Swift tests
+        env:
+          SANITIZER: ${{ matrix.sanitizer }}
+        run: make sanitize SANITIZER="$SANITIZER"
+
+      - name: Upload sanitizer log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sanitizer-${{ matrix.sanitizer }}
+          path: .build/sanitizers/${{ matrix.sanitizer }}/test.log
+          if-no-files-found: warn
+          retention-days: 14
+
   validate:
     name: Validate
     runs-on: macos-26

@@ -5,28 +5,20 @@ struct MachineDetailView: View {
     let machine: MachineSnapshot
     let isCurrentMachine: Bool
     @ObservedObject var store: SyncStore
-    @State private var searchText = ""
     @State private var selectedConfiguredPaths = Set<String>()
     @State private var expandedConfiguredPaths = Set<String>()
     @State private var selectedSnapshotPaths = Set<String>()
-    @State private var expandedSnapshotPaths = Set<String>()
-    @State private var snapshotScrollTarget: String?
     @State private var showRestoreSheet = false
     @State private var restorePaths: [String]?
     @State private var showEncryptedSecretsSheet = false
     @State private var previewRequest: SnapshotFilePreviewRequest?
     @State private var fileActionError: String?
     @State private var archiveRemovalRequest: ConfiguredPath?
-
-    private var visibleSnapshotNodes: [SnapshotContentNode] {
-        guard !searchText.isEmpty else { return flattenedSnapshotNodes }
-        return flattenedSnapshotNodes.filter {
-            $0.file.displayPath.localizedCaseInsensitiveContains(searchText)
-        }
-    }
+    @State private var browseDirectory = "~/"
+    @State private var pageFiles: [SnapshotFile] = []
 
     private var snapshotTree: [SnapshotContentNode] {
-        SnapshotContentsTree.nodes(for: machine.files)
+        SnapshotContentsTree.nodes(for: pageFiles)
     }
 
     private var flattenedSnapshotNodes: [SnapshotContentNode] {
@@ -92,7 +84,7 @@ struct MachineDetailView: View {
                 machine: machine,
                 store: store,
                 isPresented: $showRestoreSheet,
-                initialPaths: restorePaths
+                initialPaths: restorePaths,
             )
         }
         .sheet(isPresented: $showEncryptedSecretsSheet) {
@@ -104,7 +96,7 @@ struct MachineDetailView: View {
                 file: request.file,
                 displaysTextPreview: request.mode == .preview,
                 inspector: snapshotFileInspector,
-                revealInFinder: { revealInFinder(request.file) }
+                revealInFinder: { revealInFinder(request.file) },
             )
         }
         .alert("Unable to show file", isPresented: Binding(
@@ -113,7 +105,7 @@ struct MachineDetailView: View {
                 if !isPresented {
                     fileActionError = nil
                 }
-            }
+            },
         )) {
             Button("OK") {
                 fileActionError = nil
@@ -127,7 +119,7 @@ struct MachineDetailView: View {
                 if !isPresented {
                     archiveRemovalRequest = nil
                 }
-            }
+            },
         )) {
             Button("Cancel", role: .cancel) {
                 archiveRemovalRequest = nil
@@ -218,7 +210,7 @@ struct MachineDetailView: View {
                 PathOutlineRows(
                     nodes: configuredPathTree,
                     expandedPaths: $expandedConfiguredPaths,
-                    row: configuredPathRow
+                    row: configuredPathRow,
                 )
             }
             .listStyle(.inset)
@@ -253,31 +245,10 @@ struct MachineDetailView: View {
             }
             .padding()
 
-            ScrollViewReader { proxy in
-                List(selection: $selectedSnapshotPaths) {
-                    if searchText.isEmpty {
-                        SnapshotTreeRows(
-                            nodes: snapshotTree,
-                            expandedPaths: $expandedSnapshotPaths,
-                            row: snapshotContentRow
-                        )
-                    } else {
-                        ForEach(visibleSnapshotNodes) { node in
-                            snapshotContentRow(node)
-                                .tag(node.id)
-                                .id(node.id)
-                        }
-                    }
-                }
-                .listStyle(.inset)
-                .searchable(text: $searchText, prompt: "Filter snapshot files")
-                .onChange(of: snapshotScrollTarget) { path in
-                    guard let path else { return }
-                    withAnimation {
-                        proxy.scrollTo(path, anchor: .center)
-                    }
-                }
-            }
+            SnapshotDirectoryBrowser(machineName: machine.name,
+                                     dataRepository: store.overview.configuration.dataRepository,
+                                     directory: $browseDirectory, selectedPaths: $selectedSnapshotPaths, pageFiles: $pageFiles,
+                                     row: { file in snapshotContentRow(file) })
         }
     }
 
@@ -308,7 +279,10 @@ struct MachineDetailView: View {
     }
 
     private var snapshotBrowserDescription: String {
-        let archiveSummary = "\(machine.fileCount) files, \(SyncFormatting.bytes(machine.totalByteCount)). Secret archive entries are available separately with a trusted Keychain identity."
+        let totals = machine.summaryFileCount == nil && !machine.detailsLoaded
+            ? "Browse folders to inspect this older snapshot."
+            : "\(machine.fileCount) files, \(SyncFormatting.bytes(machine.totalByteCount))."
+        let archiveSummary = "\(totals) Secret archive entries are available separately with a trusted Keychain identity."
         guard !isCurrentMachine else { return archiveSummary }
         return "\(archiveSummary) Select files or folders, then choose Copy to This Mac; the source archive is unchanged."
     }
@@ -354,16 +328,7 @@ struct MachineDetailView: View {
             }
 
             Divider()
-            Button("Expand All Folders") {
-                expandedSnapshotPaths = Set(
-                    flattenedSnapshotNodes
-                        .filter { $0.file.kind == .folder }
-                        .map(\.id)
-                )
-            }
-            Button("Collapse All Folders") {
-                expandedSnapshotPaths.removeAll()
-            }
+            Button("Open Snapshot Home") { browseDirectory = "~/" }
         } label: {
             Label("Snapshot actions", systemImage: "ellipsis.circle")
         }
@@ -379,7 +344,7 @@ struct MachineDetailView: View {
     private func snapshotContentRow(
         _ file: SnapshotFile,
         title: String? = nil,
-        folderContents: SnapshotFolderContents? = nil
+        folderContents: SnapshotFolderContents? = nil,
     ) -> some View {
         if file.kind == .file {
             snapshotContentRowLayout(file, title: title, folderContents: folderContents)
@@ -423,7 +388,7 @@ struct MachineDetailView: View {
     private func snapshotContentRowLayout(
         _ file: SnapshotFile,
         title: String? = nil,
-        folderContents: SnapshotFolderContents? = nil
+        folderContents: SnapshotFolderContents? = nil,
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: file.kind.systemImage)
@@ -496,7 +461,7 @@ struct MachineDetailView: View {
             Button("Preview Copy to This Mac") {
                 store.previewRestore(
                     from: machine.name,
-                    paths: SnapshotContentsTree.restorePaths(for: [file.displayPath])
+                    paths: SnapshotContentsTree.restorePaths(for: [file.displayPath]),
                 )
             }
             .disabled(store.isRunning)
@@ -510,14 +475,9 @@ struct MachineDetailView: View {
 
     private func revealSnapshotItem(forConfiguredPath path: String) {
         let snapshotPath = snapshotDisplayPath(forConfiguredPath: path)
-        guard flattenedSnapshotNodes.contains(where: { $0.id == snapshotPath }) else {
-            return
-        }
-
-        searchText = ""
-        expandedSnapshotPaths.formUnion(SnapshotContentsTree.ancestorPaths(for: snapshotPath))
+        let parent = (snapshotPath as NSString).deletingLastPathComponent
+        browseDirectory = parent == "~" ? "~/" : parent + "/"
         selectedSnapshotPaths = [snapshotPath]
-        snapshotScrollTarget = snapshotPath
     }
 
     private func snapshotDisplayPath(forConfiguredPath path: String) -> String {
@@ -630,8 +590,12 @@ struct MachineDetailView: View {
 
     private func detail(for path: ConfiguredPath) -> String {
         switch path.snapshotState {
-        case let .present(_, fileCount, byteCount):
-            "\(fileCount) file\(fileCount == 1 ? "" : "s") · \(SyncFormatting.bytes(byteCount))"
+        case let .present(kind, fileCount, byteCount):
+            if kind == .folder, !machine.detailsLoaded {
+                "Folder · open to browse"
+            } else {
+                "\(fileCount) file\(fileCount == 1 ? "" : "s") · \(SyncFormatting.bytes(byteCount))"
+            }
         case .missing:
             "Not present in this snapshot"
         }
@@ -692,43 +656,6 @@ private struct SnapshotFilePreviewRequest: Identifiable {
     }
 }
 
-private struct SnapshotTreeRows<Row: View>: View {
-    let nodes: [SnapshotContentNode]
-    @Binding var expandedPaths: Set<String>
-    let row: (SnapshotContentNode) -> Row
-
-    var body: some View {
-        ForEach(nodes) { node in
-            if let children = node.children {
-                DisclosureGroup(isExpanded: expansionBinding(for: node.id)) {
-                    SnapshotTreeRows(nodes: children, expandedPaths: $expandedPaths, row: row)
-                } label: {
-                    row(node)
-                }
-                .tag(node.id)
-                .id(node.id)
-            } else {
-                row(node)
-                    .tag(node.id)
-                    .id(node.id)
-            }
-        }
-    }
-
-    private func expansionBinding(for path: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedPaths.contains(path) },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedPaths.insert(path)
-                } else {
-                    expandedPaths.remove(path)
-                }
-            }
-        )
-    }
-}
-
 private struct PathOutlineRows<Row: View>: View {
     let nodes: [PathOutlineNode]
     @Binding var expandedPaths: Set<String>
@@ -759,7 +686,7 @@ private struct PathOutlineRows<Row: View>: View {
                 } else {
                     expandedPaths.remove(path)
                 }
-            }
+            },
         )
     }
 }
@@ -803,7 +730,7 @@ private struct EncryptedSecretsSheet: View {
         .confirmationDialog(
             "Publish this Mac's encrypted-secrets access?",
             isPresented: $showAccessSetupConfirmation,
-            titleVisibility: .visible
+            titleVisibility: .visible,
         ) {
             Button("Set Up and Publish Access") {
                 store.prepareEncryptedSecretsAccess()
@@ -856,7 +783,7 @@ private struct EncryptedSecretsSheet: View {
                 archiveEmptyState(
                     title: "No entries",
                     systemImage: "lock.slash",
-                    detail: "This archive did not contain any viewable paths."
+                    detail: "This archive did not contain any viewable paths.",
                 )
             } else {
                 List(entries, id: \.self) { entry in
@@ -869,7 +796,7 @@ private struct EncryptedSecretsSheet: View {
             archiveEmptyState(
                 title: "Ready to inspect",
                 systemImage: "lock",
-                detail: "Select Refresh to unlock and list this archive."
+                detail: "Select Refresh to unlock and list this archive.",
             )
         }
     }
@@ -904,7 +831,7 @@ private struct RestoreSheet: View {
         machine: MachineSnapshot,
         store: SyncStore,
         isPresented: Binding<Bool>,
-        initialPaths: [String]? = nil
+        initialPaths: [String]? = nil,
     ) {
         self.machine = machine
         self.store = store
@@ -981,7 +908,7 @@ private struct RestoreSheet: View {
         .confirmationDialog(
             "How should existing local files be handled?",
             isPresented: $showConflictDecision,
-            titleVisibility: .visible
+            titleVisibility: .visible,
         ) {
             Button("Keep Existing Local Files") {
                 copy(force: false)

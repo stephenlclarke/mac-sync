@@ -15,6 +15,7 @@ enum SyncResult: String, Equatable {
     case success
     case partial
     case failed
+    case deferred
 
     var title: String {
         switch self {
@@ -26,6 +27,8 @@ enum SyncResult: String, Equatable {
             "Partially synced"
         case .failed:
             "Needs attention"
+        case .deferred:
+            "Waiting to retry"
         }
     }
 
@@ -39,6 +42,8 @@ enum SyncResult: String, Equatable {
             "exclamationmark.circle.fill"
         case .failed:
             "exclamationmark.triangle.fill"
+        case .deferred:
+            "clock"
         }
     }
 }
@@ -87,8 +92,8 @@ struct SyncStatus: Equatable {
     )
 }
 
-struct SnapshotFile: Identifiable, Hashable {
-    enum Kind: String, Hashable {
+struct SnapshotFile: Identifiable, Hashable, Sendable {
+    enum Kind: String, Hashable, Sendable {
         case file
         case folder
 
@@ -292,17 +297,27 @@ struct MachineSnapshot: Identifiable, Hashable {
     let packageCount: Int
     let editorExtensionCount: Int
     let repositoryCount: Int
+    var detailsLoaded = true
+    var summaryFileCount: Int?
+    var summaryByteCount: Int?
 
     var id: String {
         name
     }
 
     var fileCount: Int {
-        files.filter { $0.kind == .file }.count
+        summaryFileCount ?? files.filter { $0.kind == .file }.count
     }
 
     var totalByteCount: Int {
-        files.reduce(0) { $0 + $1.byteCount }
+        summaryByteCount ?? files.reduce(0) { $0 + $1.byteCount }
+    }
+
+    var footprintDescription: String {
+        if !detailsLoaded, summaryFileCount == nil {
+            return "Browse to inspect this older snapshot"
+        }
+        return "\(fileCount) files · \(SyncFormatting.bytes(totalByteCount))"
     }
 }
 
@@ -396,7 +411,7 @@ struct GitHubConnectionReport: Identifiable, Equatable, Sendable {
     }
 }
 
-struct SyncOverview {
+struct SyncOverview: @unchecked Sendable {
     let configuration: SyncConfiguration
     let status: SyncStatus
     let history: [SyncHistoryRecord]

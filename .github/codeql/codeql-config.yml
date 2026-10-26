@@ -1,5 +1,8 @@
 name: mac-sync-codeql
 
+queries:
+  - uses: security-and-quality
+
 paths:
   - Sources
 
@@ -7,5 +10,5 @@ paths-ignore:
   - .build/**
   - .swiftpm/**
   - dist/**
-  - Tests/**
+  - tests/**
   - Tools/**

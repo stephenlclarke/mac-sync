@@ -155,7 +155,7 @@ struct SettingsView: View {
                     .disabled(store.syncScheduleStatus.state == .disabled)
                 }
 
-                Text("This creates a per-user Mac Sync launchd agent and opens the app when you sign in while the schedule is enabled. If you have started the Homebrew mac-sync service, stop it first so there is only one automatic sync schedule.")
+                Text("Automatic sync runs in the background even when this app is closed. It does not open a window at login. Use either this schedule or the Homebrew service; both share the same worker lock.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
