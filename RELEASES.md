@@ -17,7 +17,7 @@ The formula version is `current.<workflow-run>.<commit>`.
 
 Both lanes require successful CI and CodeQL runs for the exact commit. CI runs
 the local `make ci` contract, including the 85% coverage floor and the Sonar
-quality gate. Release packaging then checks the checksum, archive paths,
+quality gate, plus separate ASan and TSan test jobs. Release packaging then checks the checksum, archive paths,
 executables, CLI smoke tests, app plist version/build values, icon, and
 `build-info.json` provenance.
 
@@ -60,18 +60,23 @@ until its replacement has been uploaded.
 
 ## Stable Release
 
+For 1.1.0, use the changes and compatibility notes in [CHANGELOG.md](CHANGELOG.md)
+and [Architecture](docs/architecture.md). Include the resource-probe result and
+the uncompleted multi-day soak limit in release notes. The standard release
+gate is not a claim of long-term memory stability.
+
 Prepare a release only from a clean, published `main` commit:
 
 ```sh
 make ci
 git fetch --all --prune --no-tags
 git status --short --branch
-git tag --no-sign 0.1.0
-git push origin refs/tags/0.1.0
-gh workflow run prebuilt-binaries.yml --ref main -f ref=0.1.0
+git tag --no-sign 1.1.0
+git push origin refs/tags/1.1.0
+gh workflow run prebuilt-binaries.yml --ref main -f ref=1.1.0
 ```
 
-Replace `0.1.0` with the intended semantic version. Never move or recreate a
+Replace `1.1.0` with the intended semantic version. Never move or recreate a
 published semantic tag. The workflow refuses to overwrite an existing stable
 release or mismatched assets.
 
@@ -97,9 +102,9 @@ After publication, verify the actual published heads and assets:
 
 ```sh
 git fetch --all --prune --no-tags
-git ls-remote origin refs/heads/main refs/tags/current refs/tags/0.1.0
+git ls-remote origin refs/heads/main refs/tags/current refs/tags/1.1.0
 gh release view current --json tagName,targetCommitish,isPrerelease,assets,url
-gh release view 0.1.0 --json tagName,targetCommitish,isLatest,assets,url
+gh release view 1.1.0 --json tagName,targetCommitish,assets,url
 gh run list --workflow prebuilt-binaries.yml --limit 5
 brew update
 brew info stephenlclarke/tap/mac-sync

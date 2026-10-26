@@ -9,3 +9,13 @@ The project maintainer will do their best to acknowledge receiving security repo
 Do not include credentials, tokens, certificates, SSH keys, API keys, personal data, private hostnames, or proprietary files in public issues, tests, examples, logs, or screenshots.
 
 Known, publicly disclosed CVEs can usually be submitted as normal issues. Output from automated scanners should include enough context to show why the finding is exploitable in this project.
+
+Scheduled sync uses public encryption recipients and never reads a private
+Keychain identity. Recipient changes require a reviewed interactive sync before
+replacing an existing archive. Git operations disable credential prompts and
+retain SSH host-key verification, including verified port-443 fallback.
+
+Local status/history contains paths and redacted diagnostics, not decrypted
+secret contents. Treat paths as potentially sensitive when sharing logs. See
+[Architecture](docs/architecture.md) for temporary-file permissions, bounded
+capture, failure handling and the limits of unattended encryption.

@@ -233,9 +233,12 @@ mac-sync status
 The status output shows the `mac-sync` version SHA, data repository, last sync
 result, storage totals, warnings, errors, remote repo, and commit. Explicit
 legacy CLI mode reports its separate local and machines repositories. Results
-are `success`, `partial` when optional work was skipped, or `failed` when Mac
-Sync stopped. A configured remote is retried three times and must be refreshed
-before managed snapshot writes begin.
+are `success`, `partial` when optional work was skipped, `deferred` when a
+background run waits for resources/connectivity, or `failed` when Mac Sync
+stopped for another reason. Manual runs try the remote up to three times;
+scheduled runs make one attempt and save a backoff. Remote refresh must pass
+before managed snapshot writes begin. A failed push keeps its local commit;
+the next run reconciles it with peer changes before copying new files.
 
 ## Automatic Sync
 
@@ -245,10 +248,22 @@ installs a per-user `launchd` job and uses the same local repository
 configuration as the CLI. It also supports preset intervals from every 30
 minutes to daily and custom intervals from 15 minutes to 31 days.
 
-Unattended runs skip encrypted secrets so legacy Keychain permissions cannot
-present a password window. Use **Sync Now** or `mac-sync sync` when the
-encrypted snapshot needs updating; those explicit actions may request Keychain
-access.
+Unattended runs use public recipients to encrypt secrets without reading
+Keychain identities. Inventories and encrypted archives are checked at most
+daily, while regular paths follow the chosen schedule. Changed recipients
+cannot replace an existing archive unattended: review the recipient list and
+run **Sync Now** or `mac-sync sync` once. Explicit actions may request Keychain
+access. Existing schedules with `MAC_SYNC_SECRETS=0` keep that choice; saving a
+new schedule enables public-recipient encryption.
+
+The worker uses background CPU/I/O priority and exits between runs. It waits
+during Low Power Mode, serious thermal pressure or memory-pressure warnings.
+Between configured paths it checks resources and a 15-minute work budget. It
+does not interrupt a file copy halfway through. Retrying is idempotent through
+rsync/Git; this is not an all-or-nothing filesystem transaction. The desktop UI
+does not launch at login and can remain closed. Legacy app-owned worker jobs
+are migrated when the worker next runs; save the schedule once to migrate it
+immediately. Restart an existing Homebrew service after upgrading.
 
 If you choose the app-managed schedule, stop the optional Homebrew hourly
 service first so only one job runs:
@@ -278,19 +293,31 @@ Local sync status is written outside git:
 
 Each completed real publish or restore also writes a local JSON history record
 under `~/Library/Application Support/mac-sync/status/history/<machine-name>/`.
+Entries stream to a local SQLite index and the JSON export, not an in-memory
+array. The UI reads 50 summaries and 200 transfer entries per page. Legacy
+history is streamed into the index once. Snapshot folders load 100 direct
+children per page, without recursively scanning their descendants.
 The SwiftUI app presents these records as uploads, downloads, new or updated
 files, skipped items, typed health conditions, and redacted command diagnostics.
 Preview runs and decrypted secret contents are never recorded there.
 
 Warnings and errors from completed runs also feed local **Sync Health** under
-`status/issues/`. Mac Sync rechecks GitHub and encrypted-secrets conditions,
-removes recovered conditions from the attention count, and retains their
+`status/issues/`. Mac Sync checks saved conditions on open without network or
+Keychain probes. Explicit tests and sync actions recheck health, remove
+recovered conditions from the attention count, and retain their
 occurrences under **All**. Active conditions provide direct tests and recovery
 actions. Acknowledging an active item clears its Dock badge count. Notes and
-triage decisions are never synced. Automatic health checks use a metadata-only
-Keychain lookup without password-return flags, so they neither read the private
-identity nor present an authentication prompt; a user-initiated
+triage decisions are never synced. Explicit health checks can use a metadata-only
+Keychain lookup without password-return flags; a user-initiated
 encrypted-secrets test performs the access and decryption checks.
+
+Transient GitHub failures wait 15 minutes, then 30 minutes, then double to a
+six-hour cap. Authentication failures wait 12 hours and remain actionable.
+Retry times are checked when the schedule next fires, so a daily schedule may
+retry later. HTTPS failures can fall back to verified SSH on port 22, then
+`ssh.github.com:443`. This does not change `origin`, disable host-key checking
+or show credential prompts. Git operations have a two-minute deadline and
+low-speed limits. Conflicts are preserved for review, not force-pushed away.
 
 ## Restore
 

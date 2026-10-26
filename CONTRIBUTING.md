@@ -51,6 +51,22 @@ serially. Coverage is written to `coverage.lcov` and `coverage.xml`; CI passes
 static-analysis findings and applies coverage only to the instrumented core
 files.
 
+Run the Swift tests with runtime instrumentation when changing process handling, concurrency, or memory ownership:
+
+```sh
+make sanitize-address
+make sanitize-thread
+make memory-check
+```
+
+CI runs ASan and TSan as separate jobs; both must succeed for the workflow to pass. They use isolated build directories, two build workers, serial tests, and retained logs. Sanitizer failures fail the job directly, without the normal test runner's toolchain-failure exception. ASan checks invalid memory access; TSan checks data races. Neither proves that a long-running app has bounded memory use or no retained objects. Use Instruments Allocations/Leaks and a representative sustained workload for that assessment. The existing CodeQL workflow scans Swift with the security-and-quality suite on macOS 26 and Xcode 26.6, since Swift traced extraction does not support Xcode 27 / Swift 6.4.
+
 Only maintainers publish releases. The exact stable/current contract, validation
 gates, Homebrew update sequence, retention policy, and rollback commands are in
 [RELEASES.md](RELEASES.md).
+
+Read [Architecture](docs/architecture.md) before changing worker lifetimes,
+history, refresh triggers or process capture. Do not replace streamed reads with
+whole-file Data loads, unbounded arrays or per-chunk main-queue callbacks.
+Retain explicit overflow failures for structured output. The memory probe is a
+short synthetic regression check, not a substitute for a multi-day app soak.

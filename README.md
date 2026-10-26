@@ -50,6 +50,12 @@ See [WORKFLOW.md](WORKFLOW.md) for the full download, setup, install, sync, and
 restore runbook. Maintainers should use [RELEASES.md](RELEASES.md) for the
 stable and current publication contract.
 
+Version 1.1 makes the desktop app optional for automatic sync. The worker runs
+at background CPU/I/O priority, then exits. Opening the app reads saved local
+state; it does not start remediation, probe GitHub or read Keychain identities.
+History and folders load in bounded pages. See [Architecture](docs/architecture.md)
+for resource limits, retry behaviour and migration details.
+
 ## Install
 
 Install with Homebrew:
@@ -114,17 +120,17 @@ origin explicitly.
 Use **Settings → Automatic sync** in Mac Sync to run at one or more chosen
 times on specific days, choose a preset interval, or enter a custom interval from
 15 minutes to 31 days. The app installs a per-user `launchd` agent using the
-same local configuration as the CLI and repairs its executable and application
-paths, interactive process type, and unattended environment after a Homebrew
-upgrade. The agent supplies `HOME`, `USER`, a deterministic `PATH`, and
-non-interactive Git settings. Unattended runs deliberately skip encrypted
-secrets so a legacy Keychain ACL cannot present a password window; use **Sync
-Now** or `mac-sync sync` to update them interactively. While the schedule is
-enabled, Mac Sync also
-opens when you sign in so its menu-bar controls remain available. Mac Sync does
+same local configuration as the CLI. Its worker migrates app-owned legacy jobs
+to background priority and removes the old UI-at-login job. The agent supplies
+`HOME`, `USER`, a deterministic `PATH`, and non-interactive Git settings.
+Unattended encryption uses public recipients only, at most daily. It never
+reads a private Keychain identity. Changes to recipients require an interactive
+sync before an existing archive can be replaced. An explicit legacy
+`MAC_SYNC_SECRETS=0` remains disabled until you save a new schedule.
+Automatic sync does not open the app at login. Mac Sync does
 not show an additional Dock icon by default; enable **Show app icon in the
 Dock** under **Settings → App appearance** if you prefer regular-app behaviour.
-Disabling automatic sync removes that launch-at-login registration. If you use
+The app can be closed while the worker syncs. If you use
 the app-managed schedule, stop the optional Homebrew service first so there is
 only one automatic sync job:
 
@@ -155,7 +161,8 @@ For local development, build and launch the native app:
 
 Mac Sync is a regular macOS app with a status item in the system menu bar. It
 uses the existing CLI and the same configuration and snapshot repositories, so
-there is no separate sync implementation or additional state store.
+there is no separate sync implementation. A local SQLite index pages the
+portable JSON history; neither index nor history is pushed to GitHub.
 
 - **Overview** shows the last completed sync, live activity, warnings, errors,
   the snapshot footprint for this Mac, and the available peer snapshots. It
@@ -168,7 +175,7 @@ there is no separate sync implementation or additional state store.
 - **This Mac** lists the configured snapshot roots and every regular file and
   folder currently stored for the local machine. The configurable outline and
   archive browser behave like purpose-built file managers: expand or collapse
-  folders, select one or more items, copy paths, reveal archived copies in
+  configured roots and open archive folders on demand, select items, copy paths, reveal archived copies in
   Finder, and use the contextual actions to preview or inspect files. Both
   retain the exact selected roots in `sync-paths.txt`. A saved root can be
   removed from both the archive and Sync Selection after confirmation; the
@@ -196,20 +203,23 @@ there is no separate sync implementation or additional state store.
 - **Sync Health** separates active health from history. It checks recorded
   GitHub and encrypted-secrets conditions again, automatically marks conditions
   as recovered when the underlying check passes, and retains old occurrences
-  under **All**. Active conditions offer relevant actions such as testing
+  under **All**. Checks run after explicit actions, not each time you open the
+  app. Temporary network failures wait for a saved retry; repeated outages
+  become actionable after three failed attempts. Active conditions offer actions such as testing
   GitHub, switching the data repository to verified SSH, testing encrypted
   secrets, opening Keychain Access, or retrying sync. Notes and acknowledgements
-  remain local under `status/issues/` and are never synced. Automatic checks
-  verify that the Keychain item exists through a metadata-only lookup without
-  requesting password data or presenting authentication UI; conditions that
+  remain local under `status/issues/` and are never synced. Explicit health checks
+  can verify that the Keychain item exists through a metadata-only lookup;
+  conditions that
   require decryption stay active until the user explicitly runs **Test
   Encrypted Secrets**.
 - **Automatic sync** in Settings installs a per-user `launchd` schedule. Add one
   or more day-and-time entries, including multiple times on the same day, choose
   a preset interval, or use a custom interval; Mac
-  Sync keeps the schedule local, opens the app at login while the schedule is
-  enabled, and never stores credentials in the launch agents. Scheduled runs
-  skip encrypted secrets; use **Sync Now** when those need updating.
+  Sync keeps the schedule local and never stores credentials in launch agents.
+  The UI need not run. The worker defers during Low Power Mode, serious thermal
+  pressure or a memory-pressure warning. Manual **Sync Now** still performs a
+  full inventory and the interactive encrypted-archive checks.
 
 The menu-bar item gives quick access to the dashboard, current status, sync,
 stop, refresh, About, and repository setup actions. By default the running app
@@ -295,6 +305,7 @@ sanitizer jobs, Homebrew formula checks, and release publication to the Homebrew
 tap. Successful exact-commit CI and CodeQL runs gate both the rolling
 Current build and immutable semantic releases. The generated Sonar-compatible
 report is `coverage.xml`.
+Run the same ASan and TSan tests locally with `make sanitize-address` and `make sanitize-thread`. These use separate build directories and fail on sanitizer findings. See [Contributing](CONTRIBUTING.md#validation) for the scope and limits of these checks.
 SonarCloud scans all maintained source for static-analysis findings and applies
 coverage only to the two instrumented core files.
 
