@@ -16,11 +16,11 @@ For the opt-in Current build, use `mac-sync-current` instead. Uninstall one chan
 
 ## Use
 
-> Desktop build 63 has a [memory-growth defect](SUPPORT.md#desktop-ui-memory-growth). The fix is in development, not yet released. Keep that installed build closed while syncing; use the CLI or background worker.
+> Desktop build 63 has a [memory-growth defect](SUPPORT.md#desktop-ui-memory-growth). Upgrade to a Current build containing the fix before syncing with the desktop app. Until then, keep the app closed and use the CLI or background worker.
 
 1. Open `mac-sync ui` and choose or clone your private data repository. The default location is `~/github/mac-sync-data`.
 2. In **Sync Selection**, choose the files and folders to back up, then save the selection.
-3. Close the app and run a sync in Terminal:
+3. Click **Sync Now** in Overview, or run a sync in Terminal:
 
    ```sh
    mac-sync sync

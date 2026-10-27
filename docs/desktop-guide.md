@@ -4,7 +4,7 @@
 
 [Quick start](../README.md) · [Setup and workflow](../WORKFLOW.md) · [CLI reference](cli-reference.md)
 
-> Desktop build 63 can freeze with rapid memory growth during sync. The [fix](../SUPPORT.md#desktop-ui-memory-growth) is in development, not yet released. Keep that installed build closed while syncing.
+> Desktop build 63 can freeze with rapid memory growth during sync. Upgrade to a Current build containing the [menu-bar fix](../SUPPORT.md#desktop-ui-memory-growth) before syncing with the app open.
 
 ## Screens and actions
 

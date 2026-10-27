@@ -4,7 +4,7 @@
 
 [Quick start](../README.md) · [Setup and workflow](../WORKFLOW.md) · [Configuration](configuration.md)
 
-The CLI and desktop app use the same data repository and local configuration. Keep desktop build 63 closed while syncing; the [UI memory-growth fix](../SUPPORT.md#desktop-ui-memory-growth) is in development, not yet released.
+The CLI and desktop app use the same data repository and local configuration. If desktop build 63 is installed, keep it closed while syncing until you upgrade to a Current build containing the [UI memory-growth fix](../SUPPORT.md#desktop-ui-memory-growth).
 
 ## Commands
 
