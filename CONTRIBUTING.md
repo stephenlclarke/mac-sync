@@ -76,9 +76,12 @@ Run the Swift tests with runtime instrumentation when changing process handling,
 make sanitize-address
 make sanitize-thread
 make memory-check
+make menu-bar-memory-check
 ```
 
 CI runs ASan and TSan as separate jobs; both must succeed for the workflow to pass. They use isolated build directories, two build workers, serial tests, and retained logs. Sanitizer failures fail the job directly, without the normal test runner's toolchain-failure exception. ASan checks invalid memory access; TSan checks data races. Neither proves that a long-running app has bounded memory use or no retained objects. Use Instruments Allocations/Leaks and a representative sustained workload for that assessment. The existing CodeQL workflow scans Swift with the security-and-quality suite on macOS 26 and Xcode 26.6, since Swift traced extraction does not support Xcode 27 / Swift 6.4.
+
+The menu-bar memory check runs a real SwiftUI status item using the production label and dashboard animation. It needs a logged-in desktop session, but no screen-recording or Accessibility access. It uses only synthetic state, never real files or a sync worker. A separate watchdog enforces memory, CPU and main-loop responsiveness budgets; a hosting-view unit test alone does not cover this boundary. CI runs this check as well as the core memory probe. See [Architecture](docs/architecture.md#validation-and-remaining-limits) for limits and longer runs.
 
 CodeQL resolves SwiftPM dependencies before enabling tracing and explicitly
 targets ARM64 on the ARM64 runner. LLVM coverage-tool discovery is lazy, so it

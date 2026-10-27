@@ -6,7 +6,7 @@ This workflow describes how to download, configure, install, sync, restore, and 
 
 Use the [README](README.md) for the quick start, the [desktop guide](docs/desktop-guide.md) for screen-by-screen help, the [CLI reference](docs/cli-reference.md) for command details, and [Configuration](docs/configuration.md) for paths and environment overrides.
 
-> The desktop app has an unresolved [memory-growth issue during sync](SUPPORT.md#desktop-ui-memory-growth). Keep it closed during manual and scheduled syncs until the issue is fixed.
+> Desktop build 63 has a [memory-growth defect during sync](SUPPORT.md#desktop-ui-memory-growth). The fix is in development, not yet released. Keep that installed build closed during manual and scheduled syncs.
 
 mac-sync is implemented as a SwiftPM package with a CLI and a native SwiftUI
 macOS app. Homebrew owns the installed executables and app bundle. Automatic

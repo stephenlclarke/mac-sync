@@ -108,6 +108,11 @@ jobs:
         run: make memory-check
         working-directory: mac-sync
 
+      - name: Check desktop menu-bar memory and responsiveness
+        timeout-minutes: 5
+        run: make menu-bar-memory-check
+        working-directory: mac-sync
+
       - name: Check SonarQube token
         id: sonar-token
         if: >

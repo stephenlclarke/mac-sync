@@ -31,6 +31,8 @@ Overview and health queues drain an autorelease pool after each work item;
 folder reads also drain one per page. They do not rely on a global queue to
 release Foundation's temporary objects.
 
+The system menu-bar label is a static image, updated only on status changes. Do not put `TimelineView`, repeating animation or a frame timer in a `MenuBarExtra` label: its SwiftUI-to-AppKit image/layout path reproduced runaway allocation and main-loop starvation on macOS 27.0.1. Dashboard animation is separate and respects Reduce Motion.
+
 Activity uses the shared status PID marker, not just a temporary-directory
 path which may differ between Finder and launchd. A PID must identify a real
 `mac-sync` worker. Stop rechecks that identity; invalid, reused or process-group
@@ -146,12 +148,15 @@ Run `make ci`, `make sanitize-address`, `make sanitize-thread`, and:
 
 ```sh
 bash Tools/diagnostics/run-memory-probe.sh
+make menu-bar-memory-check
 ```
 
 The probe uses production core APIs with synthetic 512 MiB file pairs, 64 MiB
 command output, 500 history summaries/100,000 entries and 1,000 repeated page
 reads. Its budgets are below 128 MiB peak RSS and less than 32 MiB growth after
 warm-up. It does not read user files or exercise the entire SwiftUI process.
+
+The menu-bar check requires a logged-in macOS desktop session. It compiles the production status label and dashboard animation into an isolated SwiftUI app, holds synthetic syncing state, and exercises idle, syncing and warning transitions for two minutes. A watchdog outside the main run loop fails on a three-second UI stall, a footprint above 512 MiB, growth above 32 MiB after ten seconds, or steady CPU above 25% of one core. It measures physical footprint, including compressed memory, rather than RSS alone. It opens no repository and starts no sync worker. To run a longer synthetic check, use `bash Tools/diagnostics/run-menu-bar-memory-probe.sh 600` (30–3,600 seconds).
 
 The review found allocation amplification, not a proven ARC retain cycle or a
 reproduction of the historical MBP crash. ASan/TSan do not prove long-term leak

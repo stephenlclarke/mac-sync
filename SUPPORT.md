@@ -6,9 +6,11 @@
 
 A user-triggered sync in desktop version 1.1.0 (build 63) produced a frozen UI, nearly one CPU core of activity and a sampled memory footprint of 27.1 GB on a 32 GB Mac. The captured main thread repeatedly updated the menu-bar image and AppKit layout. No CLI worker was active when the sample was taken.
 
-The animated menu-bar icon is a leading suspect, not a confirmed root cause. This observation does not establish the cause of earlier memory-exhaustion incidents. Passing ASan, TSan or the synthetic core memory probe does not cover this desktop interaction.
+An isolated desktop reproduction on macOS 27.0.1 confirms that the animated SwiftUI `MenuBarExtra` label is sufficient to cause the failure. The original label reached a 671 MiB physical footprint in five seconds and starved the main run loop. An independent watchdog stopped the fixture before it could exhaust RAM. No sync worker, repository or user files were involved.
 
-Until the issue is fixed, keep the desktop app closed while running CLI or scheduled syncs. If the app becomes unresponsive and its memory grows, stop the desktop UI to contain the growth; check worker status separately rather than starting another sync. Preserve a process sample and the app version for diagnosis. Do not delete snapshots or reset the data repository as a workaround.
+The fix replaces the menu-bar animation with a static status image. Idle, syncing and warning states remain visible and accessible. The final two-minute check, with the fixed production label and a visible dashboard animation, peaked at 26 MiB and used 2.5% of one CPU core after warm-up, with no main-loop stall. A separate full-app test with a temporary repository and a 45-second fake worker peaked at 51 MB; Sync Health repainted during the run and the controls returned to idle afterwards. No real files were synced. Run `make menu-bar-memory-check` in a logged-in macOS desktop session to repeat the check. CI is configured to run it too. This is a regression check, not proof of multi-day leak freedom or the cause of earlier memory-exhaustion incidents.
+
+The fix is in development, not yet released or installed. Keep desktop build 63 closed while running CLI or scheduled syncs. If an affected app becomes unresponsive and its memory grows, stop the desktop UI to contain the growth; check worker status separately rather than starting another sync. Preserve a process sample and the app version for diagnosis. Do not delete snapshots or reset the data repository as a workaround.
 
 ## Reporting issues
 

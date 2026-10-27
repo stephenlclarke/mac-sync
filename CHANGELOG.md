@@ -2,6 +2,7 @@
 
 ## Current (after 1.1.0)
 
+- Stop animating the system menu-bar label during sync. The original SwiftUI status-image update loop reproduced rapid memory growth and a frozen main thread on macOS 27.0.1. Keep static idle/syncing/warning indicators and accessible labels; retain the separate dashboard animation. Add a real menu-bar memory/responsiveness check to CI.
 - Keep Sync Health's panes full-height and top-aligned when there are no active conditions, including after resizing the window.
 - Distinguish a failed Git branch lookup from a confirmed detached HEAD. Stop before changing snapshots when the initial branch check fails, check again before committing, and retain the command's exit status and output in diagnostics.
 - Use neutral sync and restore history headings: an attempted run is not proof that a snapshot was published. Preserve existing historical records and local repository changes.

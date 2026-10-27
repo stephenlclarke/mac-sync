@@ -24,7 +24,7 @@ enum MacSyncAboutPanel {
                 .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
                 .foregroundColor: NSColor.secondaryLabelColor,
                 .paragraphStyle: paragraphStyle,
-            ]
+            ],
         )
     }
 
@@ -42,7 +42,7 @@ final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_: Notification) {
         do {
             guard let lock = try MacSyncProcessLock.acquire(
-                at: MacSyncProcessLock.userInterfaceLockURL()
+                at: MacSyncProcessLock.userInterfaceLockURL(),
             ) else {
                 activateRunningApplication()
                 NSApp.terminate(nil)
@@ -129,25 +129,14 @@ struct MacSyncDesktopApp: App {
         MenuBarExtra {
             MenuBarStatusView(store: store)
         } label: {
-            SyncActivityIcon(
-                systemName: menuBarImage,
-                isAnimating: store.isRunning,
+            SyncMenuBarIcon(
+                isRunning: store.isRunning,
+                needsAttention: store.openIssueCount > 0,
             )
-            .accessibilityLabel(store.isRunning ? "Mac Sync is syncing" : "Mac Sync")
         }
 
         Settings {
             SettingsView(store: store)
         }
-    }
-
-    private var menuBarImage: String {
-        if store.isRunning {
-            return "arrow.triangle.2.circlepath.circle.fill"
-        }
-        if store.openIssueCount > 0 {
-            return "exclamationmark.triangle.fill"
-        }
-        return "arrow.triangle.2.circlepath"
     }
 }

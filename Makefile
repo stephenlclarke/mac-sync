@@ -47,10 +47,13 @@ MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECUR
 
 all: workflow
 
-.PHONY: sanitize sanitize-address sanitize-thread memory-check
+.PHONY: sanitize sanitize-address sanitize-thread memory-check menu-bar-memory-check
 
 memory-check:
 	bash Tools/diagnostics/run-memory-probe.sh
+
+menu-bar-memory-check:
+	bash Tools/diagnostics/run-menu-bar-memory-probe.sh
 
 sanitize-address:
 	$(MAKE) sanitize SANITIZER=address
