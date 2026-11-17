@@ -19,7 +19,7 @@ service lock rejects duplicate workers. An operation lock prevents scheduled,
 manual and app-started syncs from overlapping. The worker sets Darwin
 background scheduling priority. New app-owned jobs also set Background,
 Nice=10 and LowPriorityIO. The Homebrew service sets background priority and
-Nice=10. There is no permanent synchronisation daemon or polling UI process.
+Nice=10. Timed mode exits between runs. Opt-in watch mode keeps one idle FSEvents observer in the same CLI executable and starts the existing short-lived worker after coalesced changes. There is no polling UI process or helper per folder. See [sync and transfer](sync-and-transfer.md) for observer timing, provider adapters and delivery boundaries.
 
 Opening the app reads local state without a remote health probe, Keychain
 identity read, automatic repair or sync. A filesystem watcher coalesces status
@@ -63,13 +63,10 @@ The worker does not stop a file copy halfway through on resource pressure.
 Individual commands have deadlines. Filesystem copies are incremental, not a
 transaction across all selected paths. A deferred run can leave unpublished
 snapshot changes; rsync and Git make the next attempt incremental. Local source
-files remain authoritative. Neither restore nor conflict resolution is started
-automatically.
+files are checked against per-file causal versions before incoming application. Non-conflicting selected home-relative files can be applied automatically; explicit restore, conflicts and deletion decisions remain user-controlled. Targeted replacements check expected local hashes and retain Undo copies.
 
 The Git object ID already identifies a stored blob. It cannot establish that a
-source file outside the repository is unchanged. rsync uses size/mtime checks
-first; Git uses its index/stat cache for snapshot changes. Exact content checks
-stream bytes. The encrypted backup caches a streaming SHA-256 fingerprint of
+source file outside the repository is unchanged. rsync uses checksum comparison, including rapid same-size saves; Git uses its index/stat cache for snapshot changes. Exact checks stream bytes. The encrypted backup caches a streaming SHA-256 fingerprint of
 the deterministic compressed plaintext so unchanged data need not be encrypted
 again. No plain secret data or private identity is stored in the checkpoint.
 

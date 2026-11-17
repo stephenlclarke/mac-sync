@@ -1,5 +1,7 @@
 # Security Disclosure Process
 
+Ordinary synced files, Inbox deliveries and Undo copies are not end-to-end encrypted. Do not send credentials as ordinary file replacements. Causal metadata and expected hashes prevent accidental stale overwrites; they are not authentication against another writer with access to the same shared repository or provider folder. Use private, trusted destinations and separate encrypted-secret recovery. Cloud manifests verify integrity, not the provider's upload completion. See [sync and transfer safety](docs/sync-and-transfer.md) and the [data-loss disclaimer](NOTICE.md#data-loss-disclaimer).
+
 If you believe that you have discovered a security or privacy vulnerability in this open source project, please report it using the [GitHub private vulnerability reporting feature](https://github.com/stephenlclarke/mac-sync/security/advisories/new).
 
 Reports should include the product and software versions that you believe are affected, a technical description of the behaviour that you observed and expected, the steps required to reproduce the issue, and a proof of concept or exploit when available.

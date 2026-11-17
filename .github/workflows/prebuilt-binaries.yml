@@ -119,6 +119,7 @@ jobs:
       - resolve
     if: needs.resolve.outputs.publish == 'true'
     runs-on: macos-26
+    environment: release-signing
     timeout-minutes: 75
     steps:
       - name: Checkout mac-sync
@@ -202,7 +203,7 @@ jobs:
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
             label="current"
             title="Current build"
-            app_version="1.1.0"
+            app_version="1.2.0"
           fi
           {
             printf 'app_version=%s\n' "$app_version"
@@ -235,6 +236,9 @@ jobs:
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
         shell: bash
         working-directory: mac-sync
         run: |
@@ -247,6 +251,17 @@ jobs:
             package_build="$(tar -xOf "${RUNNER_TEMP}/${ASSET}" mac-sync/resources/build-info.json | jq -er '.build')"
             [[ "$package_build" =~ ^[0-9]+$ ]]
           else
+            if [[ -z "$APPLE_NOTARY_KEY_P8" || -z "$APPLE_NOTARY_KEY_ID" || -z "$APPLE_NOTARY_ISSUER_ID" ]]; then
+              printf 'Release notarisation requires the APPLE_NOTARY_KEY_P8 secret and APPLE_NOTARY_KEY_ID / APPLE_NOTARY_ISSUER_ID variables. No unsigned or unnotarised fallback will be published.\n' >&2
+              exit 2
+            fi
+            umask 077
+            notary_key="$(mktemp "${RUNNER_TEMP}/mac-sync-notary.XXXXXX")"
+            trap 'rm -f "$notary_key"' EXIT
+            printf '%s' "$APPLE_NOTARY_KEY_P8" > "$notary_key"
+            xcrun notarytool store-credentials mac-sync-release \
+              --key "$notary_key" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" >/dev/null
+            rm -f "$notary_key"
             make package-release \
               MAC_SYNC_ARCHIVE="${RUNNER_TEMP}/${ASSET}" \
               MAC_SYNC_BRANCH="${RELEASE_TAG}" \
@@ -254,7 +269,9 @@ jobs:
               MAC_SYNC_COMMIT="${RELEASE_COMMIT}" \
               MAC_SYNC_CODESIGN_IDENTITY="${{ steps.signing.outputs.identity }}" \
               MAC_SYNC_LANE="${RELEASE_MODE}" \
-              MAC_SYNC_REQUIRE_DEVELOPER_ID="${{ steps.signing.outputs.require_developer_id }}" \
+              MAC_SYNC_REQUIRE_DEVELOPER_ID=1 \
+              MAC_SYNC_REQUIRE_NOTARIZATION=1 \
+              MAC_SYNC_NOTARY_PROFILE=mac-sync-release \
               MAC_SYNC_VERSION="${APP_VERSION}"
           fi
           printf 'build=%s\n' "$package_build" >> "$GITHUB_OUTPUT"
@@ -266,7 +283,8 @@ jobs:
           APP_VERSION: ${{ steps.metadata.outputs.app_version }}
           RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
           RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
-          MAC_SYNC_REQUIRE_DEVELOPER_ID: ${{ steps.signing.outputs.require_developer_id }}
+          MAC_SYNC_REQUIRE_DEVELOPER_ID: "1"
+          MAC_SYNC_REQUIRE_NOTARIZATION: "1"
         shell: bash
         working-directory: mac-sync
         run: |
@@ -311,11 +329,7 @@ jobs:
             printf -- '- [CI passed](%s), including ASan, TSan, the 85%% coverage gate and Sonar quality gate.\n' "$CI_URL"
             printf -- '- [CodeQL passed](%s) for the same commit.\n' "$CODEQL_URL"
             printf -- '- The packaged CLI, spinner, app bundle, plist metadata, provenance, and checksum passed release validation.\n\n'
-            if [[ "$SIGNING_STATUS" == "developer-id-signed" ]]; then
-              printf -- '- The app bundle is Developer ID signed. It is not notarised.\n\n'
-            else
-              printf -- '- The app bundle is not Developer ID signed because no release certificate is configured.\n\n'
-            fi
+            printf -- '- The app is Developer ID signed, accepted by Apple notarisation, stapled, and verified by Gatekeeper after extraction.\n\n'
             if [[ -f CHANGELOG.md ]]; then
               printf '## Release summary\n\n'
               awk '/^## / { if (section) exit; section=1; next } section { print }' CHANGELOG.md

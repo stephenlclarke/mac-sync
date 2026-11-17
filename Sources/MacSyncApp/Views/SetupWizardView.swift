@@ -14,113 +14,145 @@ struct SetupWizardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        ScrollView { VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Label("Set up Mac Sync", systemImage: "arrow.triangle.2.circlepath.circle.fill")
                     .font(.title.bold())
-                Text("One private repository holds every Mac's snapshots and its own Mac Sync configuration. dot-files is not changed.")
+                Text("Use your own private Git repository. GitHub, GitLab, Bitbucket and other HTTPS/SSH Git servers are supported.")
                     .foregroundStyle(.secondary)
             }
 
             GroupBox("1. mac-sync data repository") {
                 VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Label("mac-sync-data", systemImage: "externaldrive.connected.to.line.below")
-                            .font(.headline)
-                        Spacer()
-                        RepositoryStateLabel(state: model.inspection(for: .syncData)?.state)
-                    }
-                    HStack(spacing: 8) {
-                        TextField("Local folder", text: model.pathBinding(for: .syncData))
-                            .textFieldStyle(.roundedBorder)
-                        Button("Choose…") {
-                            chooseDirectory()
-                        }
-                    }
-                    Text("Choose a checkout or an empty local folder. Clone imports the private data repository; the first sync writes its initial snapshot.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 2)
-            }
-
-            GroupBox("2. Create or validate") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        Button("Refresh") {
-                            model.refresh()
-                        }
+                    Picker("Backup destination", selection: $model.storageKind) {
+                        ForEach(BackupStorageKind.allCases) { kind in Text(kind.title).tag(kind) }
+                    }.pickerStyle(.segmented)
                         .disabled(model.isWorking)
-
-                        if let plan = model.recoveryPlan() {
-                            Button("Back Up Legacy Folder and Clone…") {
-                                recoveryPlan = plan
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.isWorking)
-                        } else {
-                            Button("Clone mac-sync-data Repository") {
-                                model.cloneMissingRepositories()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.isWorking || model.hasAllRepositories)
+                        .onChange(of: model.storageKind) { model.changeStorageKind($0) }
+                    if model.storageKind == .cloudFolder {
+                        Text("Choose a private folder already synced by iCloud Drive, OneDrive, Dropbox or another provider. Mac Sync saves independent versions there; only that provider can confirm their upload.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            TextField("Cloud-synced folder", text: $model.cloudFolder).textFieldStyle(.roundedBorder)
+                            Button("Choose Folder…") { chooseCloudFolder() }
                         }
-
-                        if model.isWorking, model.activeProgress == nil {
-                            ProgressView()
-                                .controlSize(.small)
+                        Button("Prepare Folder Destination") { model.prepareCloudFolder() }
+                            .disabled(model.isWorking || model.cloudFolder.isEmpty)
+                        Text("The live working repository stays outside the synced folder. Existing unrelated files will not be changed.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Picker("Git host", selection: $model.provider) {
+                            ForEach(GitHostingProvider.allCases) { provider in Text(provider.title).tag(provider) }
                         }
-                    }
-
-                    if let progress = model.activeProgress {
-                        SetupProgressRow(progress: progress)
-                    } else if let message = model.messages.last {
-                        Label(message, systemImage: message.hasPrefix("Unable") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(message.hasPrefix("Unable") ? .orange : .secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .padding(.vertical, 2)
-            }
-
-            GroupBox("3. GitHub access") {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text("Checks read access and a dry-run push without opening a credential prompt.")
+                        if let creationURL = model.provider.creationURL {
+                            Link("Create a private repository on \(model.provider.title)…", destination: creationURL)
+                        }
+                        Text("Create the repository in your browser, choose Private, then paste its HTTPS or SSH clone URL below. Mac Sync does not create accounts or store provider tokens.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Link("Repository setup instructions", destination: model.provider.instructionsURL)
+                        TextField("Your repository clone URL", text: $model.remoteURL)
+                            .textFieldStyle(.roundedBorder)
+                        Toggle("I confirmed that this repository is private", isOn: $model.confirmedPrivate)
+                        HStack {
+                            Label("mac-sync-data", systemImage: "externaldrive.connected.to.line.below")
+                                .font(.headline)
+                            Spacer()
+                            RepositoryStateLabel(state: model.inspection(for: .syncData)?.state)
+                        }
+                        HStack(spacing: 8) {
+                            TextField("Local folder", text: model.pathBinding(for: .syncData))
+                                .textFieldStyle(.roundedBorder)
+                            Button("Choose…") {
+                                chooseDirectory()
+                            }
+                        }
+                        Text("Choose a checkout or an empty local folder. Clone imports the private data repository; the first sync writes its initial snapshot.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Spacer(minLength: 12)
-                        Button(model.isCheckingGitHubAccess ? "Checking…" : "Test GitHub Access") {
-                            model.checkGitHubAccess()
-                        }
-                        .disabled(!model.hasAllRepositories || model.isWorking || model.isCheckingGitHubAccess)
-                    }
-                    if let report = model.gitHubReports.first {
-                        CompactGitHubConnectionRow(report: report)
                     }
                 }
                 .padding(.vertical, 2)
+            }
+
+            if model.storageKind == .git {
+                GroupBox("2. Create or validate") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            Button("Refresh") {
+                                model.refresh()
+                            }
+                            .disabled(model.isWorking)
+
+                            if let plan = model.recoveryPlan() {
+                                Button("Back Up Legacy Folder and Clone…") {
+                                    recoveryPlan = plan
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isWorking)
+                            } else {
+                                Button("Clone mac-sync-data Repository") {
+                                    model.cloneMissingRepositories()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isWorking || model.hasAllRepositories || !model.canClone)
+                            }
+
+                            if model.isWorking, model.activeProgress == nil {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+
+                        if let progress = model.activeProgress {
+                            SetupProgressRow(progress: progress)
+                        } else if let message = model.messages.last {
+                            Label(message, systemImage: message.hasPrefix("Unable") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(message.hasPrefix("Unable") ? .orange : .secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            if model.storageKind == .git {
+                GroupBox("3. Repository access") {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text("Checks read access and a dry-run push without opening a credential prompt.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Button(model.isCheckingRepositoryAccess ? "Checking…" : "Test Repository Access") {
+                                model.checkRepositoryAccess()
+                            }
+                            .disabled(!model.hasAllRepositories || model.isWorking || model.isCheckingRepositoryAccess)
+                        }
+                        if let report = model.repositoryReports.first {
+                            CompactRepositoryConnectionRow(report: report)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
             }
 
             HStack(alignment: .bottom) {
-                Text("The Homebrew CLI uses this local, credential-free setting. Git credentials remain in Git and Keychain.")
+                Text("Finish saves this destination and updates any Mac Sync-managed schedule. Git credentials stay in Git and Keychain. Background Homebrew services remain a separate scheduling choice.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Finish Setup") {
-                    store.completeSetup(with: model.locations)
-                    if store.isSetupComplete {
+                    if store.completeSetup(with: model.locations) {
                         dismiss()
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.hasAllRepositories || model.isWorking)
             }
-        }
+        } }
         .padding(20)
-        .frame(minWidth: 760, idealWidth: 900, maxWidth: 980, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(minWidth: 760, idealWidth: 900, maxWidth: 980, minHeight: 560, idealHeight: 720, maxHeight: 800, alignment: .topLeading)
         .task {
             model.refresh()
         }
@@ -130,7 +162,7 @@ struct SetupWizardView: View {
                 if !$0 {
                     model.dismissError()
                 }
-            }
+            },
         )) {
             Button("OK") {
                 model.dismissError()
@@ -146,9 +178,9 @@ struct SetupWizardView: View {
                     if !$0 {
                         recoveryPlan = nil
                     }
-                }
+                },
             ),
-            presenting: recoveryPlan
+            presenting: recoveryPlan,
         ) { plan in
             Button("Back Up and Clone", role: .destructive) {
                 model.backUpAndClone(plan)
@@ -171,6 +203,17 @@ struct SetupWizardView: View {
         panel.message = "Choose the mac-sync-data checkout or an empty folder to clone into."
         if panel.runModal() == .OK, let url = panel.url {
             model.setPath(url.standardizedFileURL.path, for: .syncData)
+        }
+    }
+
+    private func chooseCloudFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            model.cloudFolder = url.path
         }
     }
 }
@@ -240,8 +283,8 @@ private struct RepositoryStateLabel: View {
     }
 }
 
-private struct CompactGitHubConnectionRow: View {
-    let report: GitHubConnectionReport
+private struct CompactRepositoryConnectionRow: View {
+    let report: RepositoryConnectionReport
 
     var body: some View {
         Label(report.detail, systemImage: systemImage)
@@ -258,7 +301,7 @@ private struct CompactGitHubConnectionRow: View {
             "arrow.triangle.2.circlepath"
         case .notChecked, .noOrigin:
             "questionmark.circle"
-        case .readAccessReady, .notGitHubRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
+        case .readAccessReady, .unsupportedRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
             "exclamationmark.triangle.fill"
         }
     }
@@ -269,14 +312,14 @@ private struct CompactGitHubConnectionRow: View {
             .green
         case .checking, .notChecked, .noOrigin:
             .secondary
-        case .readAccessReady, .notGitHubRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
+        case .readAccessReady, .unsupportedRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
             .orange
         }
     }
 }
 
-struct GitHubConnectionRow: View {
-    let report: GitHubConnectionReport
+struct RepositoryConnectionRow: View {
+    let report: RepositoryConnectionReport
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -315,14 +358,14 @@ struct GitHubConnectionRow: View {
             "Read and write access ready"
         case .noOrigin:
             "No origin remote"
-        case .notGitHubRemote:
-            "Not a GitHub remote"
+        case .unsupportedRemote:
+            "Unsupported Git remote"
         case .authenticationRequired:
             "Authentication required"
         case .writeAccessDenied:
             "Write access unavailable"
         case .unavailable:
-            "GitHub unavailable"
+            "Repository unavailable"
         case .failed:
             "Needs attention"
         }
@@ -336,7 +379,7 @@ struct GitHubConnectionRow: View {
             "arrow.triangle.2.circlepath"
         case .notChecked, .noOrigin:
             "questionmark.circle"
-        case .notGitHubRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
+        case .unsupportedRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
             "exclamationmark.triangle.fill"
         }
     }
@@ -347,7 +390,7 @@ struct GitHubConnectionRow: View {
             .green
         case .notChecked, .checking, .noOrigin:
             .secondary
-        case .notGitHubRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
+        case .unsupportedRemote, .authenticationRequired, .writeAccessDenied, .unavailable, .failed:
             .orange
         }
     }
@@ -355,27 +398,55 @@ struct GitHubConnectionRow: View {
 
 @MainActor
 final class SetupWizardModel: ObservableObject {
+    @Published var storageKind: BackupStorageKind
+    @Published var cloudFolder: String
+    @Published var provider = GitHostingProvider.github
+    @Published var remoteURL = ""
+    @Published var confirmedPrivate = false
     @Published private(set) var locations: RepositoryLocations
     @Published private(set) var inspections: [LocalRepositoryInspection] = []
-    @Published private(set) var gitHubReports: [GitHubConnectionReport] = []
+    @Published private(set) var repositoryReports: [RepositoryConnectionReport] = []
     @Published private(set) var messages: [String] = []
     @Published private(set) var isWorking = false
-    @Published private(set) var isCheckingGitHubAccess = false
+    @Published private(set) var isCheckingRepositoryAccess = false
     @Published private(set) var errorMessage: String?
     @Published fileprivate var activeProgress: SetupProgress?
 
     private let environment: [String: String]
+    private var gitLocation: String
 
     init(
         locations: RepositoryLocations,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
     ) {
         self.locations = locations
+        gitLocation = locations.storageKind == .git ? locations.dataRepository : (environment["HOME"] ?? NSHomeDirectory()) + "/github/mac-sync-data"
+        storageKind = locations.storageKind
+        cloudFolder = locations.cloudFolder ?? ""
         self.environment = MacSyncUserConfiguration.resolvedEnvironment(environment)
     }
 
     var hasAllRepositories: Bool {
         inspections.count == LocalRepositoryKind.allCases.count && inspections.allSatisfy(\.isReady)
+            && locations.storageKind == storageKind && (storageKind == .git || locations.cloudFolder == cloudFolder)
+    }
+
+    var canClone: Bool {
+        guard let remote = GitRemote(remoteURL) else { return false }
+        return confirmedPrivate && (remote.isSSH || remote.user == nil)
+    }
+
+    func changeStorageKind(_ kind: BackupStorageKind) {
+        if kind == .git {
+            locations = RepositoryLocations(dataRepository: gitLocation)
+            refresh()
+        } else {
+            if locations.storageKind == .git {
+                gitLocation = locations.dataRepository
+            }
+            inspections = []
+            repositoryReports = []
+        }
     }
 
     func inspection(for kind: LocalRepositoryKind) -> LocalRepositoryInspection? {
@@ -387,7 +458,7 @@ final class SetupWizardModel: ObservableObject {
             get: { self.locations.dataRepository },
             set: { path in
                 self.setPath(path, for: kind, refresh: false)
-            }
+            },
         )
     }
 
@@ -399,40 +470,63 @@ final class SetupWizardModel: ObservableObject {
         runInspection(showProgress: true)
     }
 
+    func prepareCloudFolder() {
+        guard !isWorking else { return }
+        isWorking = true
+        let folder = cloudFolder
+        let environment = environment
+        let home = environment["HOME"] ?? NSHomeDirectory()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try RepositorySetupService(environment: environment).prepareCloudFolder(folder, home: home) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isWorking = false
+                switch result {
+                case let .success(locations): self.locations = locations; self.refresh()
+                case let .failure(error): self.errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     func recoveryPlan() -> RepositoryRecoveryPlan? {
         RepositorySetupService(environment: environment).recoveryPlan(for: .syncData, locations: locations)
     }
 
     func cloneMissingRepositories() {
+        guard canClone else { return }
+        let remote = remoteURL
         runClone(
             title: "Cloning mac-sync-data",
-            detail: "Downloading the private snapshot repository into \(locations.dataRepository)"
+            detail: "Downloading the private snapshot repository into \(locations.dataRepository)",
         ) { service, locations in
-            service.cloneMissing(locations)
+            service.cloneMissing(locations, remoteURL: remote)
         }
     }
 
     func backUpAndClone(_ plan: RepositoryRecoveryPlan) {
+        guard canClone else { return }
+        let remote = remoteURL
         runClone(
             title: "Backing up and cloning mac-sync-data",
-            detail: "Moving the legacy folder aside, then cloning a fresh repository"
+            detail: "Moving the legacy folder aside, then cloning a fresh repository",
         ) { service, locations in
-            service.backUpAndClone(plan, locations: locations)
+            service.backUpAndClone(plan, locations: locations, remoteURL: remote)
         }
     }
 
-    func checkGitHubAccess() {
-        guard hasAllRepositories, !isCheckingGitHubAccess else { return }
-        isCheckingGitHubAccess = true
+    func checkRepositoryAccess() {
+        guard hasAllRepositories, !isCheckingRepositoryAccess else { return }
+        isCheckingRepositoryAccess = true
         let locations = locations
         let environment = environment
-        gitHubReports = RepositorySetupService(environment: environment).checkingGitHubReports(for: inspections)
+        repositoryReports = RepositorySetupService(environment: environment).checkingRepositoryReports(for: inspections)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let reports = RepositorySetupService(environment: environment).checkGitHubAccess(for: locations)
+            let reports = RepositorySetupService(environment: environment).checkRepositoryAccess(for: locations)
             DispatchQueue.main.async {
                 self?.inspections = reports.map(\.repository)
-                self?.gitHubReports = reports
-                self?.isCheckingGitHubAccess = false
+                self?.repositoryReports = reports
+                self?.isCheckingRepositoryAccess = false
             }
         }
     }
@@ -442,9 +536,10 @@ final class SetupWizardModel: ObservableObject {
     }
 
     private func setPath(_ path: String, for _: LocalRepositoryKind, refresh: Bool) {
-        locations = RepositoryLocations(dataRepository: path.trimmingCharacters(in: .whitespacesAndNewlines))
+        locations = RepositoryLocations(dataRepository: path.trimmingCharacters(in: .whitespacesAndNewlines), storageKind: storageKind,
+                                        cloudFolder: storageKind == .cloudFolder ? cloudFolder : nil)
         messages = []
-        gitHubReports = []
+        repositoryReports = []
         activeProgress = nil
         if refresh {
             runInspection(showProgress: false)
@@ -454,7 +549,7 @@ final class SetupWizardModel: ObservableObject {
     private func runClone(
         title: String,
         detail: String,
-        _ operation: @escaping @Sendable (RepositorySetupService, RepositoryLocations) -> RepositoryCloneResult
+        _ operation: @escaping @Sendable (RepositorySetupService, RepositoryLocations) -> RepositoryCloneResult,
     ) {
         guard !isWorking else { return }
         isWorking = true
@@ -466,7 +561,7 @@ final class SetupWizardModel: ObservableObject {
             let result = operation(service, locations)
             DispatchQueue.main.async {
                 self?.inspections = result.inspections
-                self?.gitHubReports = service.initialGitHubReports(for: result.inspections)
+                self?.repositoryReports = service.initialRepositoryReports(for: result.inspections)
                 self?.messages = result.messages
                 self?.isWorking = false
                 self?.activeProgress = nil
@@ -483,10 +578,10 @@ final class SetupWizardModel: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let service = RepositorySetupService(environment: environment)
             let inspections = service.inspect(locations)
-            let reports = service.initialGitHubReports(for: inspections)
+            let reports = service.initialRepositoryReports(for: inspections)
             DispatchQueue.main.async {
                 self?.inspections = inspections
-                self?.gitHubReports = reports
+                self?.repositoryReports = reports
                 self?.isWorking = false
             }
         }

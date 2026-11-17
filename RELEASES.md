@@ -26,14 +26,13 @@ executables, CLI smoke tests, app plist version/build values, icon, and
 
 The workflow signs an archive with Developer ID when the repository secrets
 `MAC_SYNC_DEVELOPER_ID_CERTIFICATE_P12` (a base64-encoded `.p12`) and
-`MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD` are configured. If either secret
-is absent, it publishes the archive unsigned and reports that fact in the
-release notes. The workflow validates the certificate authority when signing is
-enabled.
+`MAC_SYNC_DEVELOPER_ID_CERTIFICATE_PASSWORD` are configured. Both certificate material and its password are required for a public release. If either is absent, the release fails rather than publishing an unsigned archive. The workflow validates the certificate authority.
 
-Developer ID signing does not notarise an app. Notarisation is not currently
-part of the release workflow, so no archive is presented as a notarised
-direct-download application.
+New releases now require Developer ID signing, Apple notarisation acceptance, a stapled ticket and a successful Gatekeeper assessment. There is no unsigned or unnotarised release fallback. Existing historical releases are not retroactively notarised.
+
+The hosted `release-signing` environment also requires the `APPLE_NOTARY_KEY_P8` App Store Connect team API-key secret and the non-secret `APPLE_NOTARY_KEY_ID` / `APPLE_NOTARY_ISSUER_ID` variables. The build imports a temporary owner-only key into its Keychain profile, then removes that file. Credentials never enter app files, release notes or build metadata. Users of the packaged app need no Apple credentials. Do not paste passwords or private keys into issues or chat.
+
+For local packaging, first store credentials interactively with `xcrun notarytool store-credentials mac-sync-notary --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID`. The tool prompts for the app-specific password locally. Then use `make package-signed MAC_SYNC_CODESIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' MAC_SYNC_NOTARY_PROFILE=mac-sync-notary MAC_SYNC_REQUIRE_NOTARIZATION=1`. The helper waits for `Accepted`, staples, validates and assesses the actual bundle. A timeout or rejection stops packaging; inspect the submission ID with `notarytool info` or `notarytool log` before retrying.
 
 To enable signing, export the Developer ID Application certificate and private
 key from Keychain Access as a password-protected `.p12`. Store its base64 value
@@ -62,7 +61,7 @@ make package-signed \
   MAC_SYNC_CODESIGN_TEAM_ID='TEAMID'
 ```
 
-`make package-release` remains available for local development without a certificate. An explicitly requested Developer ID build never falls back to ad hoc signing. Keep certificate material and passwords out of the repository. Signing does not notarise an archive; the hosted signing contract is described above.
+`make package-release` remains available for local development without a certificate when notarisation is not requested. An explicitly requested signed/notarised build never falls back to ad hoc signing. Keep certificate material and passwords out of the repository.
 
 ## Current Build
 

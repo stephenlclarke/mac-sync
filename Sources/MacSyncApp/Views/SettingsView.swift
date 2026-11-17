@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var customIntervalMinutes = ""
     @State private var calendarRules = [CalendarScheduleRule.standard]
     @State private var scheduleValidationMessage: String?
+    @State private var showSetupAssistant = false
 
     var body: some View {
         Form {
@@ -25,8 +26,14 @@ struct SettingsView: View {
                     Text(store.overview.configuration.statusDirectory)
                         .textSelection(.enabled)
                 }
-                Button("Configure Data Repository…") {
-                    store.requestSetup()
+                LabeledContent("Destination type", value: store.overview.configuration.storageKind.title)
+                if let folder = store.overview.configuration.cloudFolder, store.overview.configuration.storageKind == .cloudFolder {
+                    LabeledContent("Cloud-synced folder", value: folder)
+                    Text("A local save does not confirm upload. Check your provider for upload status and keep this folder available offline.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Sync Setup Assistant…") {
+                    showSetupAssistant = true
                 }
             }
 
@@ -37,36 +44,41 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("GitHub access") {
-                Text("Mac Sync uses SSH or Keychain-backed Git credentials already configured on this Mac. It never stores a GitHub token.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if store.isSetupComplete {
-                    ForEach(store.gitHubReports) { report in
-                        GitHubConnectionRow(report: report)
-                    }
-                    HStack {
-                        Button(store.isCheckingGitHubAccess ? "Checking GitHub Access…" : "Test GitHub Access") {
-                            store.checkGitHubAccess()
-                        }
-                        Button("Use SSH for Data Repository") {
-                            store.useSSHForDataRepository()
-                        }
-                    }
-                    .disabled(store.isCheckingGitHubAccess)
-                } else {
-                    Label("Finish local repository setup before testing GitHub access.", systemImage: "exclamationmark.triangle.fill")
+            if store.overview.configuration.storageKind == .git {
+                Section("Repository access") {
+                    Text("Mac Sync uses SSH or Git credentials already configured on this Mac. It never stores provider passwords or tokens.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
-                }
+                        .foregroundStyle(.secondary)
 
-                Link(
-                    "Set up SSH or Git credential access",
-                    destination: URL(string: "https://docs.github.com/authentication/keeping-your-account-and-data-secure/about-authentication-to-github")!,
-                )
-                .font(.caption)
+                    if store.isSetupComplete {
+                        ForEach(store.repositoryReports) { report in
+                            RepositoryConnectionRow(report: report)
+                        }
+                        HStack {
+                            Button(store.isCheckingRepositoryAccess ? "Checking Repository Access…" : "Test Repository Access") {
+                                store.checkRepositoryAccess()
+                            }
+                            Button("Use SSH for Data Repository") {
+                                store.useSSHForDataRepository()
+                            }
+                        }
+                        .disabled(store.isCheckingRepositoryAccess)
+                    } else {
+                        Label("Finish local repository setup before testing Repository access.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
+                    Link(
+                        "Set up SSH or Git credential access",
+                        destination: URL(string: "https://docs.github.com/authentication/keeping-your-account-and-data-secure/about-authentication-to-github")!,
+                    )
+                    .font(.caption)
+                }
             }
+
+            Section("Quiet sync controls") { SyncPreferencesControls(store: store) }
+            Section("Recovery safeguards") { RecoverySettingsControls(store: store) }
 
             Section("Homebrew integration") {
                 Text("The setup assistant saves only repository locations to \(MacSyncUserConfiguration.configurationFilePath()). The Homebrew CLI and automatic sync agent use the same locations; credentials remain in Git and Keychain.")
@@ -162,12 +174,18 @@ struct SettingsView: View {
 
             Section("Legal") {
                 Text("Mac Sync by xyzzy.tools is licensed under AGPL-3.0-or-later. It is provided without warranty.")
+                Text("Use at your own risk. Files can be lost, corrupted, overwritten or deleted. Keep an independent verified backup. Stephen Clarke and contributors disclaim liability to the extent permitted by law.")
+                    .font(.caption)
                 Link("View the source and licence", destination: URL(string: "https://github.com/stephenlclarke/mac-sync")!)
+                Link("Data-loss disclaimer", destination: URL(string: "https://github.com/stephenlclarke/mac-sync/blob/main/NOTICE.md#data-loss-disclaimer")!)
             }
         }
         .formStyle(.grouped)
         .padding()
         .frame(width: 760)
+        .sheet(isPresented: $showSetupAssistant) {
+            SetupWizardView(store: store).frame(minWidth: 760, idealWidth: 900, minHeight: 650)
+        }
         .onAppear {
             store.reloadSyncSchedule()
             updateScheduleControls(from: store.syncScheduleStatus)
@@ -185,6 +203,8 @@ struct SettingsView: View {
         switch scheduleChoice {
         case .disabled:
             schedule = nil
+        case .watch:
+            schedule = .watch
         case .custom:
             guard let minutes = Int(customIntervalMinutes),
                   (SyncScheduleManager.minimumIntervalMinutes ... SyncScheduleManager.maximumIntervalMinutes).contains(minutes)
@@ -223,6 +243,8 @@ struct SettingsView: View {
         }
 
         switch schedule {
+        case .watch:
+            scheduleChoice = .watch
         case let .interval(minutes):
             if let choice = SyncScheduleChoice.preset(for: minutes) {
                 scheduleChoice = choice
@@ -277,6 +299,7 @@ private struct CalendarScheduleRule: Identifiable {
 
 private enum SyncScheduleChoice: String, CaseIterable, Identifiable {
     case disabled
+    case watch
     case everyThirtyMinutes
     case hourly
     case everyFourHours
@@ -293,6 +316,8 @@ private enum SyncScheduleChoice: String, CaseIterable, Identifiable {
         switch self {
         case .disabled:
             "Disabled"
+        case .watch:
+            "When files change (hourly safety check)"
         case .everyThirtyMinutes:
             "Every 30 minutes"
         case .hourly:
@@ -312,7 +337,7 @@ private enum SyncScheduleChoice: String, CaseIterable, Identifiable {
 
     var intervalMinutes: Int? {
         switch self {
-        case .disabled, .daysAndTime, .custom:
+        case .disabled, .watch, .daysAndTime, .custom:
             nil
         case .everyThirtyMinutes:
             30

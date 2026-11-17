@@ -7,6 +7,53 @@ import XCTest
 final class SyncScheduleManagerTests: XCTestCase {
     private let fileManager = FileManager.default
 
+    func testPreparationFailureDoesNotStopThePreviousJob() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let original = scheduleManager(fixture: fixture, runner: FakeLaunchdRunner())
+        _ = try original.configure(schedule: .interval(minutes: 60))
+        let before = try Data(contentsOf: original.agentURL)
+        let logs = fixture.home.appendingPathComponent("Library/Logs/mac-sync")
+        try fileManager.removeItem(at: logs)
+        try Data("not a folder".utf8).write(to: logs)
+        let runner = FakeLaunchdRunner()
+        let manager = scheduleManager(fixture: fixture, runner: runner)
+        XCTAssertThrowsError(try manager.configure(schedule: .watch))
+        XCTAssertTrue(runner.arguments.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manager.agentURL), before)
+    }
+
+    func testWatchModeReusesAgentAndMigrationPreservesIt() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let runner = FakeLaunchdRunner()
+        let manager = scheduleManager(fixture: fixture, runner: runner)
+        XCTAssertEqual(try manager.configure(schedule: .watch).schedule, .watch)
+        let values = try XCTUnwrap(try PropertyListSerialization.propertyList(from: Data(contentsOf: manager.agentURL), format: nil) as? [String: Any])
+        XCTAssertEqual(values["ProgramArguments"] as? [String], ["/tmp/mac-sync", "watch"])
+        XCTAssertEqual(values["KeepAlive"] as? Bool, true)
+        XCTAssertEqual(values["RunAtLoad"] as? Bool, true)
+        XCTAssertNil(values["StartInterval"])
+        try manager.migrateBackgroundSchedule()
+        XCTAssertEqual(runner.arguments.count, 3)
+        try BackgroundAgentMigration.migrate(homeDirectory: fixture.home.path, executable: "/tmp/mac-sync", runner: ProcessRunner())
+        XCTAssertEqual(manager.status().schedule, .watch)
+    }
+
+    func testFailedUpdateRestoresPreviousSchedule() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let original = scheduleManager(fixture: fixture, runner: FakeLaunchdRunner())
+        _ = try original.configure(schedule: .interval(minutes: 60))
+        let before = try Data(contentsOf: original.agentURL)
+        let runner = FakeLaunchdRunner(statuses: [0, 0, 1, 0])
+        let manager = scheduleManager(fixture: fixture, runner: runner)
+        XCTAssertThrowsError(try manager.configure(schedule: .watch))
+        XCTAssertEqual(try Data(contentsOf: manager.agentURL), before)
+        XCTAssertEqual(manager.status().schedule, .interval(minutes: 60))
+        XCTAssertEqual(runner.arguments.count, 4)
+    }
+
     func testCreatesLaunchAgentForSelectedInterval() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }

@@ -1,6 +1,10 @@
 # Support
 
+For the current Git/cloud setup helper, selected-folder upload limits, watch mode, per-Mac file transfers and recovery, see [Sync, transfer and recovery](docs/sync-and-transfer.md). A queued replacement waits for the receiving Mac to sync. A conflicting local edit is deliberately not overwritten; inspect that Mac's Inbox. Do not resend after a push failure: the queued payload and local commit are retained for retry.
+
 <!-- markdownlint-disable MD013 -->
+
+Read the [data-loss disclaimer](NOTICE.md#data-loss-disclaimer) before use. Do not use Mac Sync as your only backup; keep an independent copy and verify recovery before working with important files.
 
 ## Desktop UI memory growth
 

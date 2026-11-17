@@ -223,16 +223,41 @@ public enum ShellQuoter {
 }
 
 public enum MacSyncPaths {
+    /// Resolve the existing ancestor with POSIX realpath, then append missing
+    /// components. Foundation can shorten aliases only for existing paths,
+    /// making a new child falsely appear outside its own storage root.
+    public static func canonicalPath(_ path: String) -> String? {
+        guard !path.contains("\0") else { return nil }
+        var candidate = path.hasPrefix("/") ? path : FileManager.default.currentDirectoryPath + "/" + path
+        var missing: [String] = []
+        while true {
+            var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+            if realpath(candidate, &buffer) != nil {
+                let root = String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                let suffix = missing.reversed().joined(separator: "/")
+                return suffix.isEmpty ? root : (root == "/" ? root : root + "/") + suffix
+            }
+            guard errno == ENOENT, candidate != "/" else { return nil }
+            let component = (candidate as NSString).lastPathComponent
+            guard !component.isEmpty, component != ".", component != ".." else { return nil }
+            missing.append(component)
+            candidate = (candidate as NSString).deletingLastPathComponent
+        }
+    }
+
     public static func safeMachineName(_ machine: String) -> Bool {
         !machine.isEmpty
             && machine != "."
             && machine != ".."
+            && machine != "_shared"
             && !machine.hasPrefix("-")
             && machine.range(of: #"[^A-Za-z0-9._-]"#, options: .regularExpression) == nil
     }
 
     public static func safeSyncPath(_ path: String) -> Bool {
-        if path.isEmpty || path == "." || path == "/" || path.contains("\n") || path.contains("\r") {
+        if path.isEmpty || path == "." || path == "/" || path.contains("\n") || path.contains("\r") || path.contains("\0")
+            || path.split(separator: "/", omittingEmptySubsequences: true).isEmpty
+        {
             return false
         }
         return path.split(separator: "/", omittingEmptySubsequences: true).allSatisfy { part in
@@ -329,6 +354,9 @@ public enum MacSyncPaths {
 public enum MacSyncUserConfiguration {
     private static let managedKeys = [
         "MAC_SYNC_DATA_REPOSITORY",
+        "MAC_SYNC_STORAGE_KIND",
+        "MAC_SYNC_CLOUD_FOLDER",
+        "MAC_SYNC_MACHINE",
     ]
 
     public static func configurationFilePath(
@@ -355,7 +383,16 @@ public enum MacSyncUserConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
     ) throws {
-        guard !dataRepository.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        try saveDestination(BackupDestinationSettings(workspace: dataRepository), environment: environment, fileManager: fileManager)
+    }
+
+    public static func saveDestination(
+        _ destination: BackupDestinationSettings,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default,
+    ) throws {
+        let dataRepository = destination.workspace
+        guard dataRepository.hasPrefix("/"), !dataRepository.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !dataRepository.contains("\n"),
               !dataRepository.contains("\r")
         else {
@@ -363,11 +400,23 @@ public enum MacSyncUserConfiguration {
         }
 
         let filePath = configurationFilePath(environment: environment)
-        let output = [
-            "# Managed by Mac Sync. Data repository only; credentials remain in Git/Keychain.",
+        var lines = [
+            "# Managed by Mac Sync. No credentials are stored here.",
             "MAC_SYNC_DATA_REPOSITORY=\(dataRepository)",
-            "",
-        ].joined(separator: "\n")
+            "MAC_SYNC_STORAGE_KIND=\(destination.kind.rawValue)",
+        ]
+        if let machine = environment["MAC_SYNC_MACHINE"] ?? values(in: filePath)["MAC_SYNC_MACHINE"] {
+            guard MacSyncPaths.safeMachineName(machine) else { throw BackupStorageError.invalidDestination }
+            lines.append("MAC_SYNC_MACHINE=\(machine)")
+        }
+        if destination.kind == .cloudFolder {
+            guard let folder = destination.cloudFolder, folder.hasPrefix("/"), !folder.contains("\n"), !folder.contains("\r"),
+                  !BackupDestinationSettings.isInside(dataRepository, directory: folder),
+                  !BackupDestinationSettings.isInside(folder, directory: dataRepository)
+            else { throw BackupStorageError.invalidDestination }
+            lines.append("MAC_SYNC_CLOUD_FOLDER=\(folder)")
+        }
+        let output = (lines + [""]).joined(separator: "\n")
         let url = URL(fileURLWithPath: filePath)
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try output.write(to: url, atomically: true, encoding: .utf8)
@@ -375,7 +424,9 @@ public enum MacSyncUserConfiguration {
     }
 
     private static func values(in path: String) -> [String: String] {
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+        guard let size = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 64 * 1024,
+              let text = try? String(contentsOfFile: path, encoding: .utf8)
+        else {
             return [:]
         }
         return text.split(separator: "\n").reduce(into: [:]) { values, line in
@@ -433,6 +484,9 @@ public struct ProcessRunner {
         outputLimit: Int = 8 * 1024 * 1024,
         onStdoutLine: ((String) -> Void)? = nil,
     ) -> CommandResult {
+        if WorkerCancellation.shared.isCancelled {
+            return CommandResult(status: 130, stdout: "", stderr: "Worker stopped.\n")
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = [executable] + arguments
@@ -473,7 +527,13 @@ public struct ProcessRunner {
             }
         }
         let deadline = max(0.1, timeout ?? Double(environment["MAC_SYNC_COMMAND_TIMEOUT_SECONDS"] ?? "") ?? 300)
-        let timedOut = exited.wait(timeout: .now() + deadline) == .timedOut
+        let end = Date().addingTimeInterval(deadline)
+        var timedOut = false
+        while exited.wait(timeout: .now() + min(0.25, max(0, end.timeIntervalSinceNow))) == .timedOut {
+            if WorkerCancellation.shared.isCancelled || Date() >= end {
+                timedOut = true; break
+            }
+        }
         if timedOut {
             kill(grouped ? -process.processIdentifier : process.processIdentifier, SIGTERM)
             if exited.wait(timeout: .now() + 2) == .timedOut {

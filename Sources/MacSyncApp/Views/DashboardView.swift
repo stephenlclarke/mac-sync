@@ -4,6 +4,7 @@ struct DashboardView: View {
     @ObservedObject var store: SyncStore
     let openManualTriage: () -> Void
     @State private var localChangesExpanded = false
+    @State private var showIncoming = false
 
     var body: some View {
         ScrollView {
@@ -27,6 +28,10 @@ struct DashboardView: View {
                 }
 
                 statusCard
+                protectionCard
+                if !store.incomingChanges.isEmpty {
+                    Button("Review incoming conflicts and deletions (\(store.incomingChanges.count)\(store.incomingChanges.count == 100 ? "+" : ""))…") { showIncoming = true }
+                }
                 if !store.backgroundDetail.isEmpty {
                     Text(store.backgroundDetail).font(.caption).foregroundStyle(.secondary)
                 }
@@ -106,6 +111,26 @@ struct DashboardView: View {
             }
             .padding(24)
             .frame(maxWidth: 1000, alignment: .leading)
+        }
+        .sheet(isPresented: $showIncoming) { IncomingChangesView(store: store) }
+    }
+
+    private var protectionCard: some View {
+        GroupBox("Where your files are saved") {
+            VStack(alignment: .leading, spacing: 6) {
+                if let protection = store.protection {
+                    Text(protection.result == .uploaded ? "Git upload verified" : protection.result == .savedToFolder ? "Saved to selected folder; cloud upload not verified" : "Saved on this Mac only; upload needs attention")
+                        .font(.headline)
+                    Text("Recorded \(protection.savedAt.formatted())").font(.caption)
+                    if let verified = protection.verifiedGitAt, protection.result != .uploaded {
+                        Text("Last verified Git upload: \(verified.formatted())").font(.caption)
+                    }
+                } else {
+                    Text("No saved protection record for this destination yet.")
+                }
+                Text("Sync status is not an independent backup guarantee. Keep a separate verified backup of important files.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

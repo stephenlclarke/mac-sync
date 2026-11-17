@@ -10,7 +10,7 @@ MARKDOWNLINT ?= markdownlint
 COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
 MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
-MAC_SYNC_VERSION ?= 1.1.0
+MAC_SYNC_VERSION ?= 1.2.0
 MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
@@ -20,6 +20,8 @@ MAC_SYNC_CODESIGN ?= codesign
 MAC_SYNC_CODESIGN_IDENTITY ?=
 MAC_SYNC_CODESIGN_TEAM_ID ?=
 MAC_SYNC_REQUIRE_DEVELOPER_ID ?= 0
+MAC_SYNC_NOTARY_PROFILE ?=
+MAC_SYNC_REQUIRE_NOTARIZATION ?= 0
 SONAR_QUALITYGATE_WAIT ?= false
 SONAR_SCAN_ATTEMPTS ?= 3
 SWIFT_RUNTIME_RESOURCE_PATH ?= $(shell $(SWIFT) -print-target-info 2>/dev/null | $(PYTHON) -c 'import json, sys; print(json.load(sys.stdin).get("paths", {}).get("runtimeResourcePath", ""))' 2>/dev/null || true)
@@ -41,7 +43,7 @@ MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
 MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/desktop-guide.md docs/cli-reference.md docs/configuration.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md .github/pull_request_template.md
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/desktop-guide.md docs/cli-reference.md docs/configuration.md docs/sync-and-transfer.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md docs/reviews/reliability-review-2026-11-17.md .github/pull_request_template.md
 
 .PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve submodules spinner-build cli-binaries docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
@@ -122,6 +124,7 @@ app-built:
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(MAC_SYNC_VERSION)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(MAC_SYNC_BUILD)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	cp "Sources/MacSyncApp/Resources/MacSync.icns" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/MacSync.icns"
+	cp LICENSE.md NOTICE.md "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/"
 	chmod +x "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
 	$(MAKE) sign-app \
 		MAC_SYNC_APP_BUNDLE="$(MAC_SYNC_APP_BUNDLE)" \
@@ -137,6 +140,10 @@ signing-identities:
 	else \
 		printf '%s\n' "$$identities"; \
 	fi
+
+.PHONY: notarize-app
+notarize-app:
+	$(PYTHON) Tools/release/notarize_app.py --app "$(MAC_SYNC_APP_BUNDLE)" --keychain-profile "$(MAC_SYNC_NOTARY_PROFILE)"
 
 sign-app:
 	@test -d "$(MAC_SYNC_APP_BUNDLE)" || { \
@@ -234,6 +241,19 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/StreamingHistoryReader.swift \
 		--sources Sources/MacSyncCore/BackgroundPolicy.swift \
 		--sources Sources/MacSyncCore/BackgroundAgentMigration.swift \
+		--sources Sources/MacSyncCore/BackupDestination.swift \
+		--sources Sources/MacSyncCore/BackupPreferences.swift \
+		--sources Sources/MacSyncCore/BackupRecovery.swift \
+		--sources Sources/MacSyncCore/BackgroundFileWatcher.swift \
+		--sources Sources/MacSyncCore/FolderSnapshotStore.swift \
+		--sources Sources/MacSyncCore/GitRemote.swift \
+		--sources Sources/MacSyncCore/IncomingSync.swift \
+		--sources Sources/MacSyncCore/MachineFileDelivery.swift \
+		--sources Sources/MacSyncCore/NewestDiskPage.swift \
+		--sources Sources/MacSyncCore/SnapshotReadWorkspace.swift \
+		--sources Sources/MacSyncCore/SyncStateDatabase.swift \
+		--sources Sources/MacSyncCore/SyncPathExclusions.swift \
+		--sources Sources/MacSyncCore/WorkerCancellation.swift \
 		> coverage.lcov; \
 	$(PYTHON) Tools/coverage/lcov-to-sonarqube-generic.py coverage.lcov coverage.xml
 
@@ -351,6 +371,12 @@ package-built:
 		MAC_SYNC_CODESIGN="$(MAC_SYNC_CODESIGN)" \
 		MAC_SYNC_CODESIGN_IDENTITY="$(MAC_SYNC_CODESIGN_IDENTITY)" \
 		MAC_SYNC_REQUIRE_DEVELOPER_ID="$(MAC_SYNC_REQUIRE_DEVELOPER_ID)"
+	@if [[ "$(MAC_SYNC_REQUIRE_NOTARIZATION)" == "1" || -n "$(MAC_SYNC_NOTARY_PROFILE)" ]]; then \
+		$(MAKE) notarize-app MAC_SYNC_NOTARY_PROFILE="$(MAC_SYNC_NOTARY_PROFILE)"; \
+	fi
+	@if [[ -n "$(MAC_SYNC_CODESIGN_IDENTITY)" ]]; then \
+		cp "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync" "$(DIST_DIR)/mac-sync/bin/mac-sync"; \
+	fi
 	$(PYTHON) Tools/release/write-build-info.py \
 		--output "$(DIST_DIR)/mac-sync/resources/build-info.json" \
 		--version "$(MAC_SYNC_VERSION)" \

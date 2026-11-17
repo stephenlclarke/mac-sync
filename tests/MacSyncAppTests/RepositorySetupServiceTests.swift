@@ -28,7 +28,7 @@ final class RepositorySetupServiceTests: XCTestCase {
         }
         let service = RepositorySetupService(fileManager: fileManager, runner: runner)
 
-        let reports = service.checkGitHubAccess(for: fixture.locations)
+        let reports = service.checkRepositoryAccess(for: fixture.locations)
 
         XCTAssertEqual(reports.map(\.state), [.syncAccessReady])
         XCTAssertEqual(reports[0].repository.remoteURL, "https://github.com/example/mac-sync-data.git")
@@ -58,7 +58,7 @@ final class RepositorySetupServiceTests: XCTestCase {
                 GitCommandResult(status: 1, stdout: "", stderr: "unexpected command")
             }
         }
-        let reports = RepositorySetupService(fileManager: fileManager, runner: runner).checkGitHubAccess(for: fixture.locations)
+        let reports = RepositorySetupService(fileManager: fileManager, runner: runner).checkRepositoryAccess(for: fixture.locations)
 
         XCTAssertEqual(reports[0].state, .authenticationRequired)
         XCTAssertFalse(reports[0].detail.contains("token-value"))
@@ -84,7 +84,7 @@ final class RepositorySetupServiceTests: XCTestCase {
             }
         }
 
-        let reports = RepositorySetupService(fileManager: fileManager, runner: runner).checkGitHubAccess(for: fixture.locations)
+        let reports = RepositorySetupService(fileManager: fileManager, runner: runner).checkRepositoryAccess(for: fixture.locations)
 
         XCTAssertEqual(reports[0].state, .readAccessReady)
         XCTAssertTrue(reports[0].detail.contains("first sync"))
@@ -174,7 +174,7 @@ final class RepositorySetupServiceTests: XCTestCase {
             )
         }
 
-        let result = RepositorySetupService(fileManager: fileManager, runner: runner).cloneMissing(fixture.locations)
+        let result = RepositorySetupService(fileManager: fileManager, runner: runner).cloneMissing(fixture.locations, remoteURL: "https://github.com/example/mac-sync-data.git")
 
         XCTAssertEqual(
             result.messages,
@@ -197,7 +197,7 @@ final class RepositorySetupServiceTests: XCTestCase {
         }
         let service = RepositorySetupService(fileManager: fileManager, runner: runner)
 
-        let result = service.cloneMissing(fixture.locations)
+        let result = service.cloneMissing(fixture.locations, remoteURL: "https://gitlab.com/team/data.git")
 
         XCTAssertTrue(result.succeeded)
         XCTAssertEqual(result.messages, ["Cloned mac-sync data."])
@@ -207,11 +207,11 @@ final class RepositorySetupServiceTests: XCTestCase {
         try fileManager.createDirectory(at: legacy, withIntermediateDirectories: true)
         try "keep".write(to: legacy.appendingPathComponent("file"), atomically: true, encoding: .utf8)
         let legacyLocations = RepositoryLocations(dataRepository: legacy.path)
-        let rejected = service.cloneMissing(legacyLocations)
+        let rejected = service.cloneMissing(legacyLocations, remoteURL: "https://gitlab.com/team/data.git")
         XCTAssertEqual(rejected.messages.first, "Unable to clone mac-sync data: choose an empty folder, a different location, or back up this legacy folder first.")
 
         let plan = try XCTUnwrap(service.recoveryPlan(for: .syncData, locations: legacyLocations))
-        let repaired = service.backUpAndClone(plan, locations: legacyLocations)
+        let repaired = service.backUpAndClone(plan, locations: legacyLocations, remoteURL: "https://gitlab.com/team/data.git")
         XCTAssertTrue(repaired.succeeded)
         XCTAssertTrue(fileManager.fileExists(atPath: legacy.appendingPathComponent(".git").path))
         XCTAssertEqual(try String(contentsOf: URL(fileURLWithPath: plan.backupPath).appendingPathComponent("file")), "keep")
@@ -258,7 +258,7 @@ private final class FakeGitRunner: GitCommandRunning {
     }
 }
 
-private extension [GitHubConnectionReport] {
+private extension [RepositoryConnectionReport] {
     var joinedDescription: String {
         map { "\($0.repository.remoteURL ?? "") \($0.detail)" }.joined(separator: "\n")
     }

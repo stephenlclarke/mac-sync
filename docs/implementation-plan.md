@@ -1,5 +1,28 @@
 # Quiet background sync implementation
 
+## Multi-Mac sync delivery — 16–17 November 2026
+
+Approved scope: fix all confirmed review defects; provide guided GitHub, GitLab and Bitbucket setup; support a Finder-selected cloud-synced folder; add versioned restore with undo, reviewed presets and credential warnings, honest protection status, pause/resource controls, and test recovery/key-recovery guidance. Do not change the maintainer's installed destination or sync real files during development. Folder mode must never claim that a provider has uploaded a locally saved backup. Direct cloud APIs and App Store submission are not part of this delivery.
+
+The primary purpose is syncing important files between Macs. Each Mac owns its canonical storage. Automatically apply only non-conflicting selected home-relative files; review conflicts and deletions. Reuse the existing helper for opt-in filesystem observation. Provide peer browsing/pull, drag-and-drop sending, exact-path replacement deliveries and receiving receipts. Final delivery must be Developer ID signed, accepted by Apple, stapled, released through GitHub/Homebrew and verified on this Mac. Notarisation reuses the authorised Apple credentials used by AWS Auto Approve.
+
+- [x] Fix file/directory replacement, preview side effects, restore locking and personal-repository assumptions, with regressions.
+- [x] Add host-neutral Git setup and a Settings setup helper, with browser-based private-repository creation and user-supplied clone URLs.
+- [x] Add immutable, verified folder backups while keeping live working repositories out of cloud-synced folders.
+- [x] Add version selection, recovery preview, undo copies, and a non-destructive test-recovery workflow.
+- [x] Add reviewed settings presets, credential-path warnings and encryption recovery guidance.
+- [x] Add truthful destination/protection status and pause/resource preferences.
+- [x] Add causal incoming sync, review decisions, per-Mac Inboxes and expected-hash replacements, including real Git and shared-folder round trips.
+- [x] Add a single idle observer with debounce, periodic checks, pause/backoff and graceful cancellation; verify that it does not schedule itself from its own status writes.
+- [x] Update user, CLI, architecture, contributor, licence and release documentation.
+- [x] Run full local tests, sanitizers, desktop/resource checks and a fresh review; resolve the new safety findings. See [review evidence](reviews/reliability-review-2026-11-17.md).
+
+Public completion is established by the exact-commit CI/CodeQL and release workflow records, Apple's accepted submission and stapled ticket, and the installed Homebrew asset. A source checklist is not proof of a published or installed release.
+
+Implementation uses Conventional Commits. Validate provider adapters with local remotes and generated folders; live account creation, cloud upload completion and a multi-day soak require separate evidence and must not be claimed from mocks.
+
+## Original 1.1 delivery
+
 Started 26 October 2026. Delivery target: stable 1.1.0 and the existing `stephenlclarke/tap` Homebrew formulae.
 
 ## Scope and acceptance

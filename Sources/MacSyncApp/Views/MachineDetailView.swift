@@ -16,6 +16,11 @@ struct MachineDetailView: View {
     @State private var archiveRemovalRequest: ConfiguredPath?
     @State private var browseDirectory = "~/"
     @State private var pageFiles: [SnapshotFile] = []
+    @State private var showVersions = false
+    @State private var sendFiles: [URL] = []
+    @State private var showSendFiles = false
+    @State private var replacementPath: String?
+    @State private var showInbox = false
 
     private var snapshotTree: [SnapshotContentNode] {
         SnapshotContentsTree.nodes(for: pageFiles)
@@ -77,6 +82,16 @@ struct MachineDetailView: View {
                     .frame(minWidth: 440)
             }
         }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !isCurrentMachine, !store.isRunning else { return false }
+            queueFiles(urls, replacing: nil)
+            return true
+        }
+        .sheet(isPresented: $showSendFiles) {
+            SendMachineFilesView(store: store, machine: machine.name, files: sendFiles, replacementPath: replacementPath,
+                                 destinationFolder: browseDirectory.hasPrefix("~/") ? String(browseDirectory.dropFirst(2)) : "")
+        }
+        .sheet(isPresented: $showInbox) { MachineInboxView(store: store, machine: machine.name, isCurrent: isCurrentMachine) }
         .sheet(isPresented: $showRestoreSheet, onDismiss: {
             restorePaths = nil
         }) {
@@ -89,6 +104,9 @@ struct MachineDetailView: View {
         }
         .sheet(isPresented: $showEncryptedSecretsSheet) {
             EncryptedSecretsSheet(machine: machine, store: store, isPresented: $showEncryptedSecretsSheet)
+        }
+        .sheet(isPresented: $showVersions) {
+            VersionRecoveryView(store: store, machine: machine.name, paths: selectedSnapshotRestorePaths)
         }
         .sheet(item: $previewRequest) { request in
             SnapshotFilePreviewSheet(
@@ -173,6 +191,16 @@ struct MachineDetailView: View {
                 }
                 .disabled(store.isRunning)
             }
+            Button("Versions & Recovery…") { showVersions = true }.disabled(store.isRunning)
+            Button("Inbox…") { showInbox = true }
+            if !isCurrentMachine {
+                Menu("Send Files…") {
+                    Button("Choose files to send…") { chooseDeliveryFiles(replacing: nil) }
+                    if let file = selectedSnapshotFile, file.kind == .file, file.displayPath.hasPrefix("~/") {
+                        Button("Replace selected file on \(machine.name)…") { chooseDeliveryFiles(replacing: String(file.displayPath.dropFirst(2))) }
+                    }
+                }.disabled(store.isRunning)
+            }
             if machine.hasEncryptedSecrets {
                 Button("View Encrypted Secrets…") {
                     showEncryptedSecretsSheet = true
@@ -181,6 +209,25 @@ struct MachineDetailView: View {
             }
         }
         .padding(20)
+    }
+
+    private func chooseDeliveryFiles(replacing path: String?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = path == nil
+        panel.message = path == nil ? "Choose regular files to send. You will confirm the destination before uploading." : "Choose the replacement for ~/\(path!). The other Mac applies it on its next sync unless it has local edits."
+        if panel.runModal() == .OK {
+            queueFiles(panel.urls, replacing: path)
+        }
+    }
+
+    private func queueFiles(_ urls: [URL], replacing path: String?) {
+        guard !urls.isEmpty, urls.count <= 100, urls.allSatisfy({ url in
+            guard url.isFileURL, let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { return false }
+            return values.isRegularFile == true && values.isSymbolicLink != true
+        }) else { fileActionError = "Choose between 1 and 100 regular files. Folders and symbolic links are not sent; archive a folder first."; return }
+        sendFiles = urls
+        replacementPath = path
+        showSendFiles = true
     }
 
     private var configuredPaths: some View {

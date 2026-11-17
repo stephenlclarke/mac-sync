@@ -11,9 +11,9 @@ final class SyncStore: ObservableObject {
     @Published private(set) var commandOutput = ""
     @Published private(set) var errorMessage: String?
     @Published private(set) var repositoryInspections: [LocalRepositoryInspection]
-    @Published private(set) var gitHubReports: [GitHubConnectionReport]
+    @Published private(set) var repositoryReports: [RepositoryConnectionReport]
     @Published private(set) var isSetupComplete: Bool
-    @Published private(set) var isCheckingGitHubAccess = false
+    @Published private(set) var isCheckingRepositoryAccess = false
     @Published private(set) var encryptedSecretEntries: [String: [String]] = [:]
     @Published private(set) var encryptedSecretErrors: [String: String] = [:]
     @Published private(set) var encryptedSecretFailures: [String: EncryptedSecretsInspectionError] = [:]
@@ -27,6 +27,9 @@ final class SyncStore: ObservableObject {
     @Published private(set) var historyEntryCounts: [String: Int] = [:]
     @Published private(set) var backgroundDetail = ""
     @Published private(set) var isRefreshing = false
+    @Published private(set) var backupPreferences = BackupPreferences()
+    @Published private(set) var protection: BackupProtectionRecord?
+    @Published private(set) var incomingChanges: [IncomingSyncChange] = []
     private var stateObservation: LocalStateObservation?
     // Global queues do not guarantee a per-work-item autorelease pool.
     private let readQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.overview", qos: .utility, autoreleaseFrequency: .workItem)
@@ -72,7 +75,7 @@ final class SyncStore: ObservableObject {
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
         repositoryInspections = inspections
-        gitHubReports = setupService.initialGitHubReports(for: inspections)
+        repositoryReports = setupService.initialRepositoryReports(for: inspections)
         isSetupComplete = inspections.allSatisfy(\.isReady)
         let scheduleManager = SyncScheduleManager(
             configuration: initialOverview.configuration,
@@ -92,6 +95,7 @@ final class SyncStore: ObservableObject {
         activeConditionCodes = Set(initialOverview.status.conditions.map(\.code))
         observeLocalState()
         reload()
+        reloadPreferences()
     }
 
     var isRunning: Bool {
@@ -156,6 +160,9 @@ final class SyncStore: ObservableObject {
             let count = (try? history?.count()) ?? 0
             let counts = Dictionary(uniqueKeysWithValues: snapshot.history.map { ($0.id, (try? history?.entryCount(runID: $0.id)) ?? 0) })
             let checkpoint = BackgroundCheckpoint.load(from: "\(snapshot.configuration.statusDirectory)/\(snapshot.configuration.machineName).background.json", repository: snapshot.configuration.dataRepository)
+            let protection = BackupProtectionRecord.load(directory: snapshot.configuration.statusDirectory, machine: snapshot.configuration.machineName)
+            let incoming = try? IncomingSyncEngine.pendingChanges(repository: snapshot.configuration.dataRepository,
+                                                                  status: snapshot.configuration.statusDirectory, machine: snapshot.configuration.machineName)
             DispatchQueue.main.async {
                 guard let self, self.generation == requestedGeneration else { return }
                 self.overview = snapshot
@@ -163,6 +170,13 @@ final class SyncStore: ObservableObject {
                 self.historyTotal = count
                 self.historyEntryCounts = counts
                 self.backgroundDetail = checkpoint.detail
+                let expected = snapshot.configuration.storageKind == .cloudFolder
+                    ? "folder:\(snapshot.configuration.cloudFolder ?? "")"
+                    : "git:\(self.repositoryInspections.first?.remoteURL ?? "local-only")"
+                self.protection = protection?.destination == expected ? protection : nil
+                if let incoming {
+                    self.incomingChanges = incoming
+                }
                 self.activeConditionCodes = Set(snapshot.status.conditions.map(\.code)
                     + (snapshot.status.warnings + snapshot.status.errors).compactMap(SyncHealthMessage.conditionCode))
                 if checkpoint.consecutiveFailures < 3, snapshot.status.result == .deferred {
@@ -196,43 +210,75 @@ final class SyncStore: ObservableObject {
         isSetupSheetPresented = true
     }
 
-    func completeSetup(with locations: RepositoryLocations) {
+    @discardableResult
+    func completeSetup(with locations: RepositoryLocations, machineIdentifier: String? = nil) -> Bool {
+        guard !isRunning else { errorMessage = "Wait for the current operation before changing the destination."; return false }
+        guard RepositorySetupService(environment: commandEnvironment).inspect(locations).allSatisfy(\.isReady) else {
+            errorMessage = "The selected folder must be a Git repository before setup can finish."
+            return false
+        }
+        let previousSchedule = syncScheduleStatus.schedule
+        let previousLocations = repositoryLocations
+        let previousEnvironment = commandEnvironment
+        let previousSelection = savedSelection
+        var setupEnvironment = baseEnvironment
+        setupEnvironment["MAC_SYNC_MACHINE"] = machineIdentifier ?? commandEnvironment["MAC_SYNC_MACHINE"]
+        let configURL = URL(fileURLWithPath: MacSyncUserConfiguration.configurationFilePath(environment: baseEnvironment))
+        let previousConfig = try? Data(contentsOf: configURL)
         do {
-            try MacSyncUserConfiguration.saveDataRepository(
-                locations.dataRepository,
-                environment: baseEnvironment,
+            try MacSyncUserConfiguration.saveDestination(
+                BackupDestinationSettings(workspace: locations.dataRepository, kind: locations.storageKind, cloudFolder: locations.cloudFolder),
+                environment: setupEnvironment,
             )
+            commandEnvironment["MAC_SYNC_MACHINE"] = setupEnvironment["MAC_SYNC_MACHINE"]
             applyRepositoryLocations(locations)
             guard isSetupComplete else {
-                errorMessage = "The selected folder must be a Git repository before setup can finish."
-                return
+                throw SyncConfigurationError.setupRequired
             }
             try repository.seedMachineConfigurationIfNeeded()
+            if !FileManager.default.fileExists(atPath: repository.configuration().pathsFile) {
+                try repository.saveConfiguredPaths(machineIdentifier == nil ? [] : previousSelection)
+            }
             savedSelection = repository.configuredPaths()
             selectedPaths = savedSelection
             try repository.clearStaleLocalStatusWhenSnapshotIsMissing()
             reload()
+            if let previousSchedule {
+                _ = try scheduleManager().configure(schedule: previousSchedule); reloadSyncSchedule()
+            }
             isSetupSheetPresented = false
             errorMessage = nil
+            if locations.storageKind == .cloudFolder {
+                refreshAvailableBackups()
+            }
+            return true
         } catch {
+            if let previousConfig {
+                try? previousConfig.write(to: configURL, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: configURL.path) {
+                try? FileManager.default.removeItem(at: configURL)
+            }
+            commandEnvironment = previousEnvironment
+            applyRepositoryLocations(previousLocations)
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
-    func checkGitHubAccess() {
-        guard isSetupComplete, !isCheckingGitHubAccess else { return }
+    func checkRepositoryAccess() {
+        guard isSetupComplete, !isCheckingRepositoryAccess else { return }
         let locations = repositoryLocations
         let environment = commandEnvironment
         let service = RepositorySetupService(environment: environment)
-        gitHubReports = service.checkingGitHubReports(for: repositoryInspections)
-        isCheckingGitHubAccess = true
+        repositoryReports = service.checkingRepositoryReports(for: repositoryInspections)
+        isCheckingRepositoryAccess = true
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let reports = RepositorySetupService(environment: environment).checkGitHubAccess(for: locations)
+            let reports = RepositorySetupService(environment: environment).checkRepositoryAccess(for: locations)
             DispatchQueue.main.async {
                 self?.repositoryInspections = reports.map(\.repository)
-                self?.gitHubReports = reports
-                self?.isCheckingGitHubAccess = false
+                self?.repositoryReports = reports
+                self?.isCheckingRepositoryAccess = false
                 self?.refreshHealth(force: true)
             }
         }
@@ -257,8 +303,7 @@ final class SyncStore: ObservableObject {
 
     func removeArchivedConfiguredRoot(_ path: String) {
         guardSetup()
-        guard isSetupComplete else { return }
-        guard !isRunning else { return }
+        guard isSetupComplete, !isRunning else { return }
         guard !hasUnsavedSelection else {
             errorMessage = "Save or discard Sync Selection changes before removing an archived root."
             return
@@ -384,6 +429,7 @@ final class SyncStore: ObservableObject {
     func configureSyncSchedule(schedule: SyncSchedule?) {
         guardSetup()
         guard isSetupComplete else { return }
+        guard !isRunning else { errorMessage = "Wait for the current sync to finish before changing its background schedule."; return }
 
         do {
             syncScheduleStatus = try scheduleManager().configure(schedule: schedule)
@@ -452,12 +498,114 @@ final class SyncStore: ObservableObject {
         run(arguments: ["secrets", "test"], action: .testingEncryptedSecretsAccess)
     }
 
+    var recoveryService: BackupRecoveryService {
+        let config = overview.configuration
+        return BackupRecoveryService(repository: config.dataRepository, statusDirectory: config.statusDirectory,
+                                     home: config.homeDirectory, environment: commandEnvironment)
+    }
+
+    func verifyRecovery(machine: String, revision: String) {
+        run(arguments: ["verify", "--from", machine, "--revision", revision], action: .testingRecovery(machine))
+    }
+
+    func refreshAvailableBackups() {
+        run(arguments: ["refresh"], action: .refreshingBackups)
+    }
+
+    func restoreVersion(machine: String, revision: String, paths: [String], force: Bool = false, preview: Bool = false, output: String? = nil) {
+        var arguments = ["restore", "--from", machine, "--revision", revision]
+        for path in paths {
+            arguments += ["--path", path]
+        }
+        if force {
+            arguments.append("--force")
+        }
+        if let output {
+            arguments += ["--output", output]
+        }
+        run(arguments: arguments, action: preview ? .previewingRestore(machine) : .restoring(machine),
+            extraEnvironment: preview ? ["MAC_SYNC_DRY_RUN": "1"] : [:])
+    }
+
+    func undoRestore(id: String, preview: Bool) {
+        run(arguments: ["undo-restore", id, preview ? "--preview" : "--force"], action: .undoingRestore)
+    }
+
+    func exportRecoveryKey(to url: URL) {
+        run(arguments: ["secrets", "export-key", "--output", url.path, "--confirm-sensitive-export"], action: .exportingRecoveryKey)
+    }
+
+    func loadIncomingChanges(offset: Int) async throws -> [IncomingSyncChange] {
+        let configuration = overview.configuration
+        return try await Task.detached(priority: .utility) {
+            try IncomingSyncEngine.pendingChanges(repository: configuration.dataRepository, status: configuration.statusDirectory,
+                                                  machine: configuration.machineName, limit: 100, offset: offset)
+        }.value
+    }
+
+    func resolveIncoming(_ change: IncomingSyncChange, choice: String) {
+        run(arguments: ["incoming", "resolve", change.id, choice], action: .restoring(change.machine))
+    }
+
+    func sendFiles(_ files: [URL], to machine: String, paths: [String]) {
+        guard !files.isEmpty, files.count == paths.count, files.count <= 100 else { errorMessage = "Choose between 1 and 100 regular files per delivery."; return }
+        var arguments = ["deliver", "--to", machine]
+        for (file, path) in zip(files, paths) {
+            arguments += ["--path", path, "--file", file.path]
+        }
+        run(arguments: arguments, action: .restoring(machine))
+    }
+
+    func loadDeliveries(target: String, offset: Int) async throws -> [(MachineFileDelivery, MachineDeliveryReceipt?)] {
+        let repository = overview.configuration.dataRepository
+        let environment = commandEnvironment
+        return try await Task.detached(priority: .utility) {
+            let store = MachineFileDeliveryStore(repository: repository, environment: environment)
+            return try store.deliveries(target: target, offset: offset).map { ($0, store.receipt($0)) }
+        }.value
+    }
+
+    func resolveDelivery(_ record: MachineFileDelivery, apply: Bool) {
+        run(arguments: ["deliveries", "resolve", record.id, apply ? "--apply" : "--keep-local"], action: .restoring(record.sender))
+    }
+
+    func savePreferences(_ preferences: BackupPreferences) {
+        do {
+            try preferences.save(directory: overview.configuration.statusDirectory, machine: overview.configuration.machineName)
+            backupPreferences = preferences
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func setMachineIdentifier(_ identifier: String) {
+        let value = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isRunning, MacSyncPaths.safeMachineName(value) else { errorMessage = "Choose a unique name containing letters, numbers, dots, dashes or underscores. Wait for any active sync first."; return }
+        guard value != overview.configuration.machineName else { return }
+        guard !FileManager.default.fileExists(atPath: repositoryLocations.dataRepository + "/machines/" + value) else {
+            errorMessage = "That identifier already has a snapshot. Choose a new unique identifier so it cannot overwrite another Mac."
+            return
+        }
+        completeSetup(with: repositoryLocations, machineIdentifier: value)
+    }
+
+    func pauseBackup(until: Date? = nil, indefinitely: Bool = false) {
+        var preferences = backupPreferences
+        preferences.pausedUntil = until
+        preferences.pauseIndefinitely = indefinitely
+        savePreferences(preferences)
+    }
+
+    private func reloadPreferences() {
+        do { backupPreferences = try BackupPreferences.load(directory: overview.configuration.statusDirectory, machine: overview.configuration.machineName) }
+        catch { errorMessage = "Backup preferences could not be read. Save them again in Settings before automatic backup can resume." }
+    }
+
     func useSSHForDataRepository() {
         guardSetup()
-        guard isSetupComplete, !isCheckingGitHubAccess else { return }
+        guard isSetupComplete, !isCheckingRepositoryAccess else { return }
         let locations = repositoryLocations
         let environment = commandEnvironment
-        isCheckingGitHubAccess = true
+        isCheckingRepositoryAccess = true
         errorMessage = nil
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -466,11 +614,11 @@ final class SyncStore: ObservableObject {
                     .useSSHRemote(for: locations)
             }
             let reports = RepositorySetupService(environment: environment)
-                .checkGitHubAccess(for: locations)
+                .checkRepositoryAccess(for: locations)
             DispatchQueue.main.async {
                 self?.repositoryInspections = reports.map(\.repository)
-                self?.gitHubReports = reports
-                self?.isCheckingGitHubAccess = false
+                self?.repositoryReports = reports
+                self?.isCheckingRepositoryAccess = false
                 if case let .failure(error) = result {
                     self?.errorMessage = error.localizedDescription
                 }
@@ -484,7 +632,7 @@ final class SyncStore: ObservableObject {
         case .retrySync:
             syncSelection()
         case .testGitHubAccess:
-            checkGitHubAccess()
+            checkRepositoryAccess()
         case .useSSH:
             useSSHForDataRepository()
         case .testEncryptedSecrets:
@@ -613,11 +761,14 @@ final class SyncStore: ObservableObject {
         var environment = MacSyncRuntimeEnvironment.prepared(baseEnvironment)
         environment.removeValue(forKey: "MAC_SYNC_REPO")
         environment["MAC_SYNC_MACHINES_REPO"] = locations.dataRepository
+        environment["MAC_SYNC_STORAGE_KIND"] = locations.storageKind.rawValue
+        environment["MAC_SYNC_CLOUD_FOLDER"] = locations.cloudFolder
+        environment["MAC_SYNC_MACHINE"] = commandEnvironment["MAC_SYNC_MACHINE"]
         commandEnvironment = environment
         repository = SyncRepository(environment: environment)
         let setupService = RepositorySetupService(environment: environment)
         repositoryInspections = setupService.inspect(locations)
-        gitHubReports = setupService.initialGitHubReports(for: repositoryInspections)
+        repositoryReports = setupService.initialRepositoryReports(for: repositoryInspections)
         isSetupComplete = repositoryInspections.allSatisfy(\.isReady)
         overview = repository.load(includeSnapshotDetails: false)
         issueRepository = SyncIssueRepository(configuration: overview.configuration)
@@ -628,6 +779,7 @@ final class SyncStore: ObservableObject {
         selectedPaths = configuredPaths
         savedSelection = configuredPaths
         reloadSyncSchedule()
+        reloadPreferences()
         observeLocalState()
     }
 
@@ -650,6 +802,8 @@ final class SyncStore: ObservableObject {
         let defaults = RepositoryLocations.defaults(homeDirectory: home)
         return RepositoryLocations(
             dataRepository: environment["MAC_SYNC_MACHINES_REPO"] ?? defaults.dataRepository,
+            storageKind: BackupStorageKind(rawValue: environment["MAC_SYNC_STORAGE_KIND"] ?? "") ?? .git,
+            cloudFolder: environment["MAC_SYNC_CLOUD_FOLDER"],
         )
     }
 

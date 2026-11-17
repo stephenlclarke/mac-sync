@@ -1,5 +1,5 @@
 class MacSync < Formula
-  desc "Curated Mac dotfile, package, secret, and repository snapshot sync tool"
+  desc "Quiet file and settings sync between Macs"
   homepage "https://github.com/stephenlclarke/mac-sync"
   url "https://github.com/stephenlclarke/mac-sync/releases/download/0.0.0/mac-sync-release-arm64.tar.gz"
   version "0.0.0"
@@ -43,14 +43,18 @@ class MacSync < Formula
       age, GNU tar, Git, mac-spinner, and rsync. Apple-provided macOS tools
       cover Keychain access and the remaining POSIX utilities.
 
-      On first launch, Mac Sync guides you to choose or clone a mac-sync-data
-      checkout. It saves only that path for the CLI/service; Git credentials
-      remain in SSH or Keychain. The default installed workflow does not use
-      the legacy dot-files checkout.
+      On first launch, choose your private Git repository or a folder already
+      synced by a cloud provider. Use the same destination on each Mac and
+      give each Mac a unique identifier. Git credentials remain in Git/Keychain.
+      A folder save is not proof that the cloud provider has uploaded it.
       The CLI remains available as:
         mac-sync --help
 
-      For a custom app-managed schedule, use Settings > Automatic sync.
+      Browse Other Macs to pull files, send files or queue exact-path replacements.
+      The receiving Mac applies safe selected changes on its next sync; conflicts
+      and deletions require review. Keep an independent verified backup.
+
+      For watch mode or a timed schedule, use Settings > Automatic sync.
       Stop the Homebrew service first so only one automatic sync job runs.
 
       The Homebrew service remains an hourly alternative:

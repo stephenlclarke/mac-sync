@@ -68,7 +68,7 @@ enum SyncIssueRecoveryAction: String, CaseIterable, Hashable, Identifiable {
         case .retrySync:
             "Retry Sync"
         case .testGitHubAccess:
-            "Test GitHub Access"
+            "Test Repository Access"
         case .useSSH:
             "Use SSH"
         case .testEncryptedSecrets:

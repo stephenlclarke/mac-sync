@@ -6,6 +6,8 @@ This workflow describes how to download, configure, install, sync, restore, and 
 
 Use the [README](README.md) for the quick start, the [desktop guide](docs/desktop-guide.md) for screen-by-screen help, the [CLI reference](docs/cli-reference.md) for command details, and [Configuration](docs/configuration.md) for paths and environment overrides.
 
+For shared Git/cloud-folder setup, per-Mac storage, automatic incoming changes, conflict review, file drops/replacements, watch mode and versioned recovery, use [Sync, transfer and recovery](docs/sync-and-transfer.md). GitHub-specific examples below also apply to GitLab, Bitbucket and other configured Git remotes, except the optional GitHub clone inventory. Folder mode uses an app-owned local cache rather than pushing that cache to a Git host.
+
 > If you use desktop build 63, upgrade to a Current build containing the [menu-bar memory fix](SUPPORT.md#desktop-ui-memory-growth) before syncing with the app open. The CLI and background worker can run with the affected desktop build closed.
 
 mac-sync is implemented as a SwiftPM package with a CLI and a native SwiftUI
@@ -243,6 +245,8 @@ before managed snapshot writes begin. A failed push keeps its local commit;
 the next run reconciles it with peer changes before copying new files.
 
 ## Automatic Sync
+
+Choose **When files change** in Settings to run an idle observer using the same helper, with debounced saves and hourly safety/remote checks. `mac-sync watch` runs this mode in the foreground; `--interval-minutes` changes its safety interval (15–44,640 minutes). Existing timed jobs continue to use `mac-sync run`. Do not run a second Homebrew service alongside the app-managed watcher. See [watch mode](docs/sync-and-transfer.md#quiet-background-operation).
 
 In the Mac Sync app, open **Settings → Automatic sync** and choose **Days and
 time** to select any days of the week and the local time to run. The app

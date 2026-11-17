@@ -63,6 +63,10 @@ final class BackgroundResources: @unchecked Sendable {
     deinit { source.cancel() }
 
     var deferralReason: String? {
+        reason(allowLowPowerMode: false)
+    }
+
+    func reason(allowLowPowerMode: Bool) -> String? {
         lock.lock()
         let pressured = memoryPressure
         lock.unlock()
@@ -72,7 +76,7 @@ final class BackgroundResources: @unchecked Sendable {
         if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
             return "Waiting for this Mac to cool down"
         }
-        if ProcessInfo.processInfo.isLowPowerModeEnabled {
+        if !allowLowPowerMode, ProcessInfo.processInfo.isLowPowerModeEnabled {
             return "Waiting while Low Power Mode is enabled"
         }
         return nil

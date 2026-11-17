@@ -4,6 +4,8 @@
 
 ## Local development
 
+Use generated temporary HOME/repository/cloud directories for sync and recovery tests. Do not point development fixtures at a real selection or installed schedule. New core files must be included in the coverage export. The [sync and transfer guide](docs/sync-and-transfer.md) describes causal versions, Inbox ownership and storage-provider boundaries. Preserve the static menu-bar label; use the real desktop memory check before releasing UI status changes.
+
 Clone with `--recurse-submodules`, or initialise the pinned standalone `mac-spinner` submodule in an existing checkout:
 
 ```sh

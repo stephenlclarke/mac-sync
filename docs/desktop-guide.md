@@ -8,6 +8,12 @@
 
 ## Screens and actions
 
+The setup helper now supports private GitHub/GitLab/Bitbucket/custom Git repositories and selected cloud-synced folders. Each Mac has a unique storage area. Overview reports a verified Git upload, a local-only save, or a folder save whose cloud upload is not verified. See [Sync, transfer and recovery](sync-and-transfer.md) for these flows.
+
+In a peer Mac's view, **Copy to This Mac** pulls selected stored files. Drop regular files onto that view to queue them for the selected Mac, or select one stored file and choose **Send Files → Replace selected file**. The receiver applies selected, unchanged files on its next sync. Conflicts and unselected destinations remain in **Inbox**; receipts show the last published decision. **Versions & Recovery** supports older versions, comparison, export, test recovery and Undo.
+
+Settings includes **Incoming Changes**, automatic versus review-only incoming policy, a unique Mac identifier, presets/credential warnings in Sync Selection, pause and resource controls, and offline recovery-key export guidance. **When files change** in Automatic sync reuses the existing helper as an idle observer. This is opt-in. Timed schedules still work and the main app can stay closed.
+
 Mac Sync is a regular macOS app with a status item in the system menu bar. It uses the existing CLI and the same configuration and snapshot repositories, so there is no separate sync implementation. A local SQLite index pages the portable JSON history; neither index nor history is pushed to GitHub.
 
 - **Overview** shows the last completed sync, live activity, warnings, errors, the snapshot footprint for this Mac, and the available peer snapshots. It distinguishes a complete sync, a usable partial sync with a skipped optional subsystem, and a failed sync that stopped before unsafe writes. An active warning or error appears in the Sync Health card instead of being repeated on the dashboard. While live health checks run, recorded conditions are shown as neutral rather than requesting remediation; recovered warnings remain visible as green history under Last sync health.

@@ -51,9 +51,13 @@ private struct Config {
     let syncConditionsFile: String
     let syncCommandsFile: String
     let syncHistoryDir: String
+    let storageKind: BackupStorageKind
+    let cloudFolder: String?
 
     init(environment originalEnvironment: [String: String], originalArgs: [String], runner: ProcessRunner) {
         let env = MacSyncUserConfiguration.resolvedEnvironment(originalEnvironment)
+        storageKind = BackupStorageKind(rawValue: env["MAC_SYNC_STORAGE_KIND"] ?? "") ?? .git
+        cloudFolder = env["MAC_SYNC_CLOUD_FOLDER"]
         let selfPath = Config.realpathExisting(originalArgs.first ?? "mac-sync")
         let home = env["HOME"] ?? NSHomeDirectory()
         let machinesRepo = env["MAC_SYNC_MACHINES_REPO"] ?? "\(home)/github/mac-sync-data"
@@ -213,6 +217,9 @@ public final class MacSyncApp {
     private var backgroundCheckpoint = BackgroundCheckpoint()
     private var backgroundDeferralReason: String?
     private var backgroundConnectivityDeferred = false
+    private var restoreSnapshotRoot: String?
+    private var restoreOutputRoot: String?
+    private var backupPreferences = BackupPreferences()
     private var gitHubSSHTransport = "git@github.com:"
     private var checkpointPath: String {
         "\(config.statusDir)/\(config.machineName).background.json"
@@ -267,8 +274,32 @@ public final class MacSyncApp {
             try cmdSync()
         case "run":
             try cmdRun()
+        case "watch":
+            try cmdWatch(args)
         case "restore":
             try cmdRestore(args)
+        case "versions":
+            try cmdRecovery(args, verify: false)
+        case "refresh":
+            try checkRuntime()
+            try acquireLock()
+            defer { releaseLock() }
+            if config.storageKind == .cloudFolder {
+                try importFolderSnapshots()
+            } else {
+                try pullMachinesRepoIfSafe()
+            }
+            info("Available backups refreshed. No source files were backed up or restored.")
+        case "verify":
+            try cmdRecovery(args, verify: true)
+        case "undo-restore":
+            try cmdUndoRestore(args)
+        case "incoming":
+            try cmdIncoming(args)
+        case "deliver":
+            try cmdDeliver(args)
+        case "deliveries":
+            try cmdDeliveries(args)
         case "secrets":
             try cmdSecrets(args)
         case "packages":
@@ -301,9 +332,23 @@ public final class MacSyncApp {
             COMMANDS:
               sync        Sync configured paths, commit machine changes, and push
               run         Service mode; exits if the service is already running
+              watch [--interval-minutes <15-44640>]
+                          Watch selected folders; combine saves and keep timed checks (default: 60 minutes)
               restore     Restore this machine snapshot back into $HOME
               restore [--from <machine>|--select] [--path <path>]... [--force]
                           Restore another machine snapshot back into $HOME
+              versions [--from <machine>] [--offset <n>]
+                          List saved versions (50 per page)
+              verify [--from <machine>] [--revision <id>]
+                          Test a version in a temporary folder without replacing user files
+              restore --from <machine> --revision <id> [--path <path>] [--output <empty folder>]
+              undo-restore <id> --preview|--force
+                          Recover local pre-restore copies
+              incoming list | incoming resolve <id> --keep-local|--use-incoming|--keep-both
+              deliver --to <machine> --path <relative home path> --file <local file>
+                          Send or replace a file on another Mac at its next sync
+              deliveries list | deliveries resolve <id> --apply|--keep-local
+              refresh     Fetch/import stored snapshots without changing source files
               secrets     Manage encrypted secret snapshots with age and Keychain
               packages    Manage Homebrew package snapshots and restore commands
               editor      Manage VS Code extension snapshots and restore commands
@@ -368,6 +413,8 @@ public final class MacSyncApp {
               --list-machines    List available machine snapshots and exit.
               --path <path>      Restore only this selected snapshot path. May be repeated.
               --force            Replace existing local files and resolve file/directory conflicts.
+              --revision <id>    Read an immutable saved version without switching branches.
+              --output <folder>  Export to an empty absolute folder, not the original paths.
               -h, --help         Show this help text.
 
             BEHAVIOR:
@@ -436,11 +483,13 @@ public final class MacSyncApp {
               list       List files in an encrypted secret snapshot
               restore    Restore files from an encrypted secret snapshot
               test       Check Keychain identity and current archive decryption
+              export-key Export a private recovery key to a new owner-only file
               help       Show this help text
 
             OPTIONS:
               list --from <machine>
               restore --from <machine> [--force]
+              export-key --output <absolute new file> --confirm-sensitive-export
 
             NOTES:
               Private age identity is stored in Apple Keychain under the configured service.
@@ -665,10 +714,8 @@ public final class MacSyncApp {
     }
 
     private func info(_ message: String = "") {
-        if isServiceInvocation || environment["MAC_SYNC_QUIET"] == "1" {
-            if message.contains(" -> ") || message.contains("skip missing") || message.contains("unchanged local file") {
-                return
-            }
+        if isServiceInvocation || environment["MAC_SYNC_QUIET"] == "1", message.contains(" -> ") || message.contains("skip missing") || message.contains("unchanged local file") {
+            return
         }
         print(message)
     }
@@ -792,7 +839,10 @@ public final class MacSyncApp {
     }
 
     private func sourcePath(for rel: String) -> String {
-        rel.hasPrefix("/") ? rel : "\(config.homeDir)/\(rel)"
+        if let root = restoreOutputRoot {
+            return rel.hasPrefix("/") ? "\(root)/absolute\(rel)" : "\(root)/home/\(rel)"
+        }
+        return rel.hasPrefix("/") ? rel : "\(config.homeDir)/\(rel)"
     }
 
     private func destPath(for rel: String) -> String {
@@ -800,7 +850,8 @@ public final class MacSyncApp {
     }
 
     private func snapshotPath(machine: String, rel: String) -> String {
-        rel.hasPrefix("/") ? "\(config.machinesRootDir)/\(machine)/absolute\(rel)" : "\(config.machinesRootDir)/\(machine)/home/\(rel)"
+        let root = restoreSnapshotRoot ?? config.machinesRootDir
+        return rel.hasPrefix("/") ? "\(root)/\(machine)/absolute\(rel)" : "\(root)/\(machine)/home/\(rel)"
     }
 
     private func checkRuntime() throws {
@@ -842,9 +893,10 @@ public final class MacSyncApp {
                 "--", sharedPath,
             ],
         )
-        return sharedFiles.stdout.trimmed.isEmpty
+        let paths = sharedFiles.stdout.trimmed.isEmpty
             ? [machinePath]
             : [machinePath, sharedPath]
+        return paths + ((try? MachineFileDeliveryStore(repository: config.machinesRepoDir, environment: environment).outboundPaths(sender: config.machineName)) ?? [])
     }
 
     private func repoCommitVersion(_ repo: String? = nil) -> String {
@@ -893,6 +945,16 @@ public final class MacSyncApp {
     private func validatedSyncPaths(_ paths: [String], source: String) throws -> [String] {
         for path in paths where !MacSyncPaths.safeSyncPath(path) {
             try fail("unsafe sync path in \(source): \(path)", code: 2)
+        }
+        for path in paths {
+            let sourcePath = sourcePath(for: path)
+            for protected in [config.machinesRepoDir, config.statusDir, config.cloudFolder].compactMap(\.self) {
+                if BackupDestinationSettings.isInside(sourcePath, directory: protected)
+                    || BackupDestinationSettings.isInside(protected, directory: sourcePath)
+                {
+                    try fail("the selection overlaps Mac Sync's backup or status storage: \(path). Choose individual settings folders instead", code: 2)
+                }
+            }
         }
         return paths
     }
@@ -1000,8 +1062,8 @@ public final class MacSyncApp {
     }
 
     private func isTextFile(_ file: String) -> Bool {
-        guard fm.fileExists(atPath: file), !isDirectory(file) else { return false }
-        guard let size = try? fm.attributesOfItem(atPath: file)[.size] as? NSNumber,
+        guard fm.fileExists(atPath: file), !isDirectory(file),
+              let size = try? fm.attributesOfItem(atPath: file)[.size] as? NSNumber,
               size.intValue <= 1024 * 1024,
               let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: file)) else { return false }
         defer { try? handle.close() }
@@ -1120,12 +1182,17 @@ public final class MacSyncApp {
             return try validatedSyncPaths(uniqueSorted(selectedPaths), source: "restore --path")
         }
         var seen = Set<String>()
-        let dynamicFile = "\(config.machinesRootDir)/\(machine)/dynamic-sync-paths.txt"
+        let root = restoreSnapshotRoot ?? config.machinesRootDir
+        let dynamicFile = "\(root)/\(machine)/dynamic-sync-paths.txt"
         let dynamic = storedDynamicManifestPaths(dynamicFile)
         for path in dynamic where !safeDynamicRelPath(path) {
             try fail("unsafe dynamic sync path in \(dynamicFile): \(path)", code: 2)
         }
-        return try (configuredManifestPaths() + dynamic).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
+        let savedConfiguration = "\(root)/\(machine)/config/sync-paths.txt"
+        let configured = fm.fileExists(atPath: savedConfiguration)
+            ? try validatedSyncPaths(readConfigLines(savedConfiguration), source: savedConfiguration)
+            : try configuredManifestPaths()
+        return (configured + dynamic).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
     }
 
     private func machineSnapshotNames() -> [String] {
@@ -1495,13 +1562,9 @@ public final class MacSyncApp {
             let repoReal = Config.realpathExisting(repoDir)
             guard repoReal.hasPrefix("\(rootReal)/") else { continue }
             let rel = String(repoReal.dropFirst(rootReal.count + 1))
-            guard MacSyncPaths.safeGitHubRepositoryRelativePath(rel) else { continue }
-            guard runner.run("git", ["-C", repoDir, "rev-parse", "--is-inside-work-tree"]).status == 0 else { continue }
+            guard MacSyncPaths.safeGitHubRepositoryRelativePath(rel), runner.run("git", ["-C", repoDir, "rev-parse", "--is-inside-work-tree"]).status == 0 else { continue }
             let top = runner.run("git", ["-C", repoDir, "rev-parse", "--show-toplevel"]).stdout.trimmed
-            guard !top.isEmpty, Config.realpathExisting(top) == repoReal else { continue }
-            guard !githubRepoHasParentWorktree(repoReal: repoReal, rootReal: rootReal) else { continue }
-            guard runner.run("git", ["-C", repoDir, "rev-parse", "--show-superproject-working-tree"]).stdout.trimmed.isEmpty else { continue }
-            guard let cloneURL = githubRemoteForRepo(repoDir) else { continue }
+            guard !top.isEmpty, Config.realpathExisting(top) == repoReal, !githubRepoHasParentWorktree(repoReal: repoReal, rootReal: rootReal), runner.run("git", ["-C", repoDir, "rev-parse", "--show-superproject-working-tree"]).stdout.trimmed.isEmpty, let cloneURL = githubRemoteForRepo(repoDir) else { continue }
             lines.append("\(rel)\t\(cloneURL)")
         }
         return uniqueSorted(lines)
@@ -1867,9 +1930,7 @@ public final class MacSyncApp {
     private func preflightSecretsArchive() throws {
         guard secretsSyncEnabled() else { return }
         let recipients = configuredAgeRecipients()
-        guard !recipients.isEmpty else { return }
-        guard keychainIdentityExists(allowInteraction: !isServiceInvocation) else { return }
-        guard runner.commandExists("age"), runner.commandExists("age-keygen") else { return }
+        guard !recipients.isEmpty, keychainIdentityExists(allowInteraction: !isServiceInvocation), runner.commandExists("age"), runner.commandExists("age-keygen") else { return }
 
         let tmpDir = try tempPath(prefix: "mac-sync-secrets-preflight", directory: true)
         defer { try? removePath(tmpDir) }
@@ -2217,11 +2278,53 @@ public final class MacSyncApp {
         try commitAndPush()
     }
 
+    private func cmdExportRecoveryKey(_ args: [String]) throws {
+        guard args.count == 3, args[0] == "--output", args[1].hasPrefix("/"), args[2] == "--confirm-sensitive-export" else {
+            try fail("use secrets export-key --output <absolute path> --confirm-sensitive-export; keep this private recovery key off the backup destination", code: 2)
+        }
+        let target = args[1]
+        for protected in [config.machinesRepoDir, config.statusDir, config.cloudFolder].compactMap(\.self) {
+            guard !BackupDestinationSettings.isInside(target, directory: protected) else {
+                try fail("do not export a private recovery key into backup or status storage", code: 2)
+            }
+        }
+        if fm.fileExists(atPath: config.pathsFile) {
+            for selected in try configuredManifestPaths() where BackupDestinationSettings.isInside(target, directory: sourcePath(for: selected)) {
+                try fail("the recovery-key location is included in ordinary backup selection; choose an offline location", code: 2)
+            }
+        }
+        guard config.dryRun != "1" else { info("would export a private recovery key; no key was read or written"); return }
+        try requireKeychainIdentity()
+        guard let identity = keychainIdentity(allowInteraction: true).identity else { throw ExitError(code: 1) }
+        let descriptor = Darwin.open(target, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { try fail("the recovery-key file could not be created; existing files are never replaced") }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: Data(identity.utf8))
+            try handle.synchronize()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            try? fm.removeItem(atPath: target)
+            throw error
+        }
+        info("Private recovery key exported with owner-only permissions. Keep it offline and separate from your backups. It was not printed or uploaded.")
+    }
+
     private func cmdSecrets(_ arguments: [String]) throws {
         var args = arguments
         let command = args.first ?? "help"
         if !args.isEmpty {
             args.removeFirst()
+        }
+        let locking = ["init", "list", "restore", "test", "export-key"].contains(command)
+        if locking {
+            try acquireLock()
+        }
+        defer {
+            if locking {
+                releaseLock()
+            }
         }
         switch command {
         case "init":
@@ -2230,6 +2333,8 @@ public final class MacSyncApp {
         case "sync":
             guard args.isEmpty else { try fail("secrets sync does not accept options", code: 2) }
             try cmdSecretsSync()
+        case "export-key":
+            try cmdExportRecoveryKey(args)
         case "list":
             try cmdSecretsList(args)
         case "restore":
@@ -2567,7 +2672,17 @@ public final class MacSyncApp {
             return
         }
         try ensureDirectory(parent)
-        var args = isDirectory(src) ? ["-a", "--delete", "--itemize-changes", "--out-format=%i %n"] : ["-aL", "--itemize-changes", "--out-format=%i %n"]
+        if pathExists(dest), isDirectory(src) != isDirectory(dest) {
+            try replaceSnapshotType(source: src, destination: dest)
+            progressDone("replaced snapshot type: \(src) -> \(dest)")
+            recordHistoryTransfer(direction: .upload, outcome: .updated, path: rel,
+                                  source: src, destination: dest, detail: "The source changed between a file and a directory")
+            return
+        }
+        var args = isDirectory(src) ? ["-a", "--checksum", "--delete", "--delete-excluded", "--itemize-changes", "--out-format=%i %n"] : ["-aL", "--checksum", "--itemize-changes", "--out-format=%i %n"]
+        if isDirectory(src) {
+            args.append("--exclude=.git/")
+        }
         if fm.fileExists(atPath: config.excludesFile) {
             args.append("--exclude-from=\(config.excludesFile)")
         }
@@ -2637,10 +2752,53 @@ public final class MacSyncApp {
         }
     }
 
+    /// Copy first, then replace. A failed copy must leave the old backup usable.
+    private func replaceSnapshotType(source: String, destination: String) throws {
+        let staging = "\(config.machinesRepoDir)/.mac-sync-staging/\(UUID().uuidString)"
+        try ensureDirectory(staging)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: staging)
+        let payload = "\(staging)/payload"
+        let previous = "\(staging)/previous"
+        var preserveRecoveryCopy = false
+        defer {
+            if !preserveRecoveryCopy {
+                try? removePath(staging)
+            }
+        }
+        let directory = isDirectory(source)
+        if directory {
+            try ensureDirectory(payload)
+        }
+        var args = directory ? ["-a", "--delete", "--exclude=.git/"] : ["-aL"]
+        if fm.fileExists(atPath: config.excludesFile) {
+            args.append("--exclude-from=\(config.excludesFile)")
+        }
+        let result = runner.run("rsync", args + [directory ? "\(source)/" : source, directory ? "\(payload)/" : payload])
+        guard result.status == 0 else {
+            fputs(result.combinedOutput, stderr)
+            throw ExitError(code: Int(result.status))
+        }
+        try fm.moveItem(atPath: destination, toPath: previous)
+        do {
+            try fm.moveItem(atPath: payload, toPath: destination)
+        } catch {
+            do { try fm.moveItem(atPath: previous, toPath: destination) }
+            catch {
+                preserveRecoveryCopy = true
+                try fail("snapshot replacement failed; the previous backup is preserved at \(previous)")
+            }
+            throw error
+        }
+    }
+
     private func restoreOnePath(machine: String, rel: String, force: Bool) throws {
         let src = snapshotPath(machine: machine, rel: rel)
         let dest = sourcePath(for: rel)
         let parent = (dest as NSString).deletingLastPathComponent
+        let snapshotRoot = "\(restoreSnapshotRoot ?? config.machinesRootDir)/\(machine)"
+        guard BackupDestinationSettings.isInside((src as NSString).deletingLastPathComponent, directory: snapshotRoot) else {
+            try fail("the archived path has a linked parent outside its snapshot", code: 2)
+        }
         let destinationExisted = pathExists(dest)
         guard pathExists(src) else {
             info("skip missing snapshot path: \(src)")
@@ -2654,8 +2812,8 @@ public final class MacSyncApp {
             )
             return
         }
-        if isDirectory(src) {
-            if pathExists(dest), !isDirectory(dest) {
+        if isDirectory(src), (try? fm.destinationOfSymbolicLink(atPath: src)) == nil {
+            if pathExists(dest), !isDirectory(dest) || (try? fm.destinationOfSymbolicLink(atPath: dest)) != nil {
                 if force {
                     if config.dryRun == "1" {
                         info("would replace non-directory with directory: \(dest)")
@@ -3020,11 +3178,16 @@ public final class MacSyncApp {
     }
 
     private func pullRepoIfSafe() throws {
-        guard config.repoDir != config.machinesRepoDir else { return }
+        guard config.dryRun != "1", config.repoDir != config.machinesRepoDir else { return }
         try pullGitRepoIfSafe(repo: config.repoDir, label: "local repo")
     }
 
     private func pullMachinesRepoIfSafe() throws {
+        guard config.dryRun != "1" else { return }
+        if config.storageKind == .cloudFolder {
+            try importFolderSnapshots()
+            return
+        }
         guard repoHasOrigin(config.machinesRepoDir) else {
             recordHealthCondition(SyncHealthCondition(
                 code: .remoteConfigurationMissing,
@@ -3192,12 +3355,11 @@ public final class MacSyncApp {
         guard runWithProgressCommand(
             "checking machine snapshot changes",
             "git",
-            ["-C", config.machinesRepoDir, "add", "--all", "--"] + snapshotPaths,
+            ["-C", config.machinesRepoDir, "add", "--force", "--all", "--"] + snapshotPaths,
         ) else {
             printProgressCommandOutput()
             throw ExitError(code: 1)
         }
-        var committed = false
         if runner.run(
             "git",
             ["-C", config.machinesRepoDir, "diff", "--cached", "--quiet", "--"] + snapshotPaths,
@@ -3205,18 +3367,21 @@ public final class MacSyncApp {
             progressDone("no machine snapshot changes to commit")
         } else {
             let message = "chore(\(config.machineName)): sync machine state"
-            guard runWithProgressCommand(
-                "committing machine snapshot changes",
-                "git",
-                ["-C", config.machinesRepoDir, "commit", "-m", message, "--"] + snapshotPaths,
-            ) else {
+            guard try commitManagedSnapshot(paths: snapshotPaths, message: message) else {
                 printProgressCommandOutput()
                 throw ExitError(code: 1)
             }
             progressDone("committed machine snapshot changes")
-            committed = true
+        }
+        if config.storageKind == .cloudFolder {
+            guard let folder = config.cloudFolder else { throw BackupStorageError.invalidDestination }
+            _ = try FolderSnapshotStore(folder: folder, environment: environment).publish(repository: config.machinesRepoDir, machine: config.machineName)
+            try recordProtection(.savedToFolder)
+            progressDone("backup saved to the selected folder; cloud upload is managed by its provider and is not verified by Mac Sync")
+            return
         }
         guard repoHasOrigin(config.machinesRepoDir) else {
+            try recordProtection(.localOnly)
             recordHealthCondition(SyncHealthCondition(
                 code: .remoteConfigurationMissing,
                 component: .remoteRepository,
@@ -3228,11 +3393,110 @@ public final class MacSyncApp {
             warning("no origin remote configured for machines repo; skipping git push")
             return
         }
-        if !committed, !branchAheadOfUpstream(config.machinesRepoDir) {
-            progressDone("no local commits to push")
-            return
+        // Cached upstream refs are not proof of publication. An unchanged
+        // snapshot still needs a successful push before claiming an upload.
+        guard pushMachinesRepoWithRetries(branch: branch) else {
+            try recordProtection(.localOnly)
+            throw ExitError(code: 1)
         }
-        guard pushMachinesRepoWithRetries(branch: branch) else { throw ExitError(code: 1) }
+        try recordProtection(.uploaded)
+    }
+
+    private func recordProtection(_ result: BackupProtectionResult) throws {
+        let commit = runner.run("git", ["-C", config.machinesRepoDir, "rev-parse", "HEAD"]).stdout.trimmed
+        let remote = runner.run("git", ["-C", config.machinesRepoDir, "remote", "get-url", "origin"]).stdout.trimmed
+        let destination = config.storageKind == .cloudFolder
+            ? "folder:\(config.cloudFolder ?? "")"
+            : "git:\(GitRemote(remote)?.displayURL ?? "local-only")"
+        let previous = BackupProtectionRecord.load(directory: config.statusDir, machine: config.machineName)
+        try BackupProtectionRecord(destination: destination, result: result, commit: commit, previous: previous)
+            .save(directory: config.statusDir, machine: config.machineName)
+    }
+
+    private func importFolderSnapshots() throws {
+        guard let folder = config.cloudFolder else { throw BackupStorageError.invalidDestination }
+        let store = FolderSnapshotStore(folder: folder, environment: environment)
+        let hasHead = runner.run("git", ["-C", config.machinesRepoDir, "rev-parse", "--verify", "HEAD"]).status == 0
+        for machine in try store.machines() {
+            if machine == config.machineName, hasHead {
+                continue
+            }
+            guard let record = try store.records(machine: machine, limit: 1).first else { continue }
+            let marker = "\(config.statusDir)/cloud-imports/\(machine).id"
+            let target = "\(config.machinesRootDir)/\(machine)"
+            if readText(marker).trimmed == record.id, isDirectory(target) {
+                continue
+            }
+            do {
+                let commit = try store.fetch(record, into: config.machinesRepoDir)
+                let workspace = try SnapshotReadWorkspace(repository: config.machinesRepoDir, revision: commit, environment: environment)
+                defer { withExtendedLifetime(workspace) {} }
+                let deliveries = MachineFileDeliveryStore(repository: config.machinesRepoDir, environment: environment)
+                try deliveries.importDeliveries(from: workspace.root.path, sender: record.machine)
+                let incoming = workspace.root.appendingPathComponent("machines/\(machine)").path
+                guard isDirectory(incoming), BackupDestinationSettings.isInside(incoming, directory: workspace.root.path) else {
+                    throw BackupStorageError.invalidSnapshot
+                }
+                try ensureDirectory(config.machinesRootDir)
+                if let senders = try? fm.contentsOfDirectory(atPath: target + "/inbox") {
+                    let prepared = MachineFileDeliveryStore(repository: workspace.root.path, environment: environment)
+                    for sender in senders where MacSyncPaths.safeMachineName(sender) {
+                        try prepared.importDeliveries(from: config.machinesRepoDir, sender: sender)
+                    }
+                }
+                let previousRepository = "\(config.machinesRepoDir)/.mac-sync-staging/import-\(UUID().uuidString)"
+                let previous = "\(previousRepository)/machines/\(machine)"
+                try ensureDirectory((previous as NSString).deletingLastPathComponent)
+                let existed = pathExists(target)
+                if existed {
+                    try fm.moveItem(atPath: target, toPath: previous)
+                }
+                do { try fm.moveItem(atPath: incoming, toPath: target) }
+                catch {
+                    if existed {
+                        do { try fm.moveItem(atPath: previous, toPath: target) }
+                        catch { throw BackupStorageError.unavailable("The previous snapshot is preserved at \(previous)") }
+                    }
+                    throw error
+                }
+                if existed {
+                    try removePath(previous)
+                }
+                try writeText(marker, record.id)
+                withExtendedLifetime(workspace) {}
+            } catch {
+                backgroundConnectivityDeferred = isServiceInvocation
+                recordHealthCondition(SyncHealthCondition(code: .remoteUnavailable, component: .remoteRepository, severity: .warning,
+                                                          title: "An incoming cloud snapshot is not ready", detail: "The snapshot for \(machine) is incomplete, unavailable or failed its integrity check. Retained local data has not been reset.",
+                                                          recovery: "Mac Sync will retry automatically. If this continues, check the cloud provider's download status and free disk space."))
+                warning("incoming snapshot for \(machine) is not ready; retained local data was not reset. A later sync will retry.")
+            }
+        }
+    }
+
+    /// Commit only app-managed paths without rebuilding a path-limited index
+    /// from HEAD (which fails on file-to-directory changes on supported Git).
+    /// The real index retains any unrelated changes staged by the user.
+    private func commitManagedSnapshot(paths: [String], message: String) throws -> Bool {
+        let temporary = try tempPath(prefix: "mac-sync-index", directory: true)
+        defer { try? removePath(temporary) }
+        let environment = ["GIT_INDEX_FILE": "\(temporary)/index"]
+        let hasHead = runner.run("git", ["-C", config.machinesRepoDir, "rev-parse", "--verify", "HEAD"]).status == 0
+        let commands = [
+            ["read-tree", hasHead ? "HEAD" : "--empty"],
+            ["add", "--force", "--all", "--"] + paths,
+            ["commit", "-m", message],
+        ]
+        progressPending("committing machine snapshot changes")
+        for arguments in commands {
+            let result = runner.run("git", ["-C", config.machinesRepoDir] + arguments, extraEnvironment: environment)
+            lastCommandOutput = result.combinedOutput
+            lastCommandStatus = result.status
+            if result.status != 0 {
+                return false
+            }
+        }
+        return true
     }
 
     private func publishingBranch(in repo: String) throws -> String {
@@ -3324,6 +3588,7 @@ public final class MacSyncApp {
     }
 
     private func startSyncStatus() throws {
+        guard config.dryRun != "1" else { return }
         try ensureDirectory(config.statusDir)
         runActive = true
         runStartedAt = statusTimestamp()
@@ -3353,8 +3618,7 @@ public final class MacSyncApp {
         startedAt: String? = nil,
         startedEpoch: Int? = nil,
     ) {
-        guard config.dryRun != "1" else { return }
-        guard (try? ensureDirectory(config.syncHistoryDir)) != nil else { return }
+        guard config.dryRun != "1", (try? ensureDirectory(config.syncHistoryDir)) != nil else { return }
         historyActive = true
         historyAction = action
         historySourceMachine = sourceMachine
@@ -3503,6 +3767,14 @@ public final class MacSyncApp {
             var seen = Set<String>()
             let manifest = (configured + dynamicExtra).filter { !$0.trimmed.isEmpty && seen.insert($0).inserted }
             progressDone("built sync manifest")
+            let incoming = config.dryRun == "1" ? nil : try incomingEngine()
+            let automaticSelection = manifest.filter { !$0.hasPrefix("/") && (try? fm.destinationOfSymbolicLink(atPath: sourcePath(for: $0))) == nil }
+            if config.dryRun != "1" {
+                let preferences = try BackupPreferences.load(directory: config.statusDir, machine: config.machineName)
+                try MachineFileDeliveryStore(repository: config.machinesRepoDir, environment: environment)
+                    .applyPending(target: config.machineName, home: config.homeDir, status: config.statusDir,
+                                  selection: automaticSelection, automatic: preferences.incomingPolicy == .automatic)
+            }
             if config.dryRun != "1" {
                 try ensureDirectory(config.machineHomeDir)
                 try ensureDirectory(config.machineAbsoluteDir)
@@ -3513,6 +3785,23 @@ public final class MacSyncApp {
                 try autoreleasepool { try syncOnePath(rel) }
             }
             progressDone("synced configured paths")
+            if let incoming {
+                try incoming.capture(selection: automaticSelection)
+                let preferences = try BackupPreferences.load(directory: config.statusDir, machine: config.machineName)
+                let applied = try incoming.receive(selection: automaticSelection, policy: preferences.incomingPolicy) { try self.backgroundBoundary() }
+                if applied > 0 {
+                    info("Applied \(applied) non-conflicting incoming file changes; pre-change copies are available in Undo.")
+                    for path in manifest {
+                        try syncOnePath(path)
+                    }
+                    try incoming.capture(selection: automaticSelection)
+                }
+                try incoming.exportIndex(selection: automaticSelection)
+                let pending = try incoming.changes()
+                if !pending.isEmpty {
+                    warning("Incoming changes need review. Open Settings → Incoming Changes or run mac-sync incoming list. Deletions were not applied automatically.")
+                }
+            }
             try pruneStaleDynamicPaths(currentDynamic: dynamicExtra, configured: configured)
             try backgroundBoundary()
             if !isServiceInvocation || backgroundCheckpoint.lastInventory.map({ Date().timeIntervalSince($0) >= 86400 }) ?? true {
@@ -3539,7 +3828,7 @@ public final class MacSyncApp {
             }
             captureSyncFinishMetrics()
             try commitAndPush()
-            if !isServiceInvocation {
+            if !isServiceInvocation, config.dryRun != "1" {
                 var checkpoint = BackgroundCheckpoint.load(from: checkpointPath, repository: config.machinesRepoDir)
                 checkpoint.consecutiveFailures = 0
                 checkpoint.nextAttempt = nil
@@ -3561,20 +3850,124 @@ public final class MacSyncApp {
         }
     }
 
+    private func cmdWatch(_ args: [String]) throws {
+        var minutes = 60
+        if !args.isEmpty {
+            guard args.count == 2, args[0] == "--interval-minutes", let value = Int(args[1]), (15 ... 44640).contains(value) else {
+                try fail("watch accepts --interval-minutes from 15 to 44640", code: 2)
+            }
+            minutes = value
+        }
+        guard config.dryRun != "1" else { try fail("watch is not available in preview mode", code: 2) }
+        try checkRuntime()
+        guard let lock = try MacSyncProcessLock.acquire(at: URL(fileURLWithPath: config.serviceLockFile + ".watch")) else {
+            info("a Mac Sync folder observer is already running")
+            return
+        }
+        defer { withExtendedLifetime(lock) {} }
+        _ = setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)
+        let preferences = BackupPreferences.url(directory: config.statusDir, machine: config.machineName).path
+        let controls = [config.pathsFile, config.excludesFile, config.secretPathsFile, preferences, checkpointPath]
+        let service = BackgroundWatchService(executable: Config.realpathExisting(invocationArguments.first ?? "mac-sync"),
+                                             environment: environment, interval: TimeInterval(minutes * 60), controls: controls,
+                                             excluded: [config.machinesRepoDir, config.statusDir], checkpoint: checkpointPath,
+                                             repository: config.machinesRepoDir)
+        { [self] in
+            let paths = try manifestPaths().map { sourcePath(for: $0) }
+            let secrets = readConfigLines(config.secretPathsFile).filter(MacSyncPaths.safeSyncPath).map { sourcePath(for: $0) }
+            return paths + secrets + (config.cloudFolder.map { [$0] } ?? [])
+        }
+        info("Watching selected folders; saves are combined for 15 seconds, with a full safety/remote check every \(minutes) minutes")
+        try service.run()
+    }
+
+    private func incomingEngine() throws -> IncomingSyncEngine {
+        try IncomingSyncEngine(repository: config.machinesRepoDir, status: config.statusDir, home: config.homeDir,
+                               machine: config.machineName, environment: environment)
+    }
+
+    private func cmdDeliver(_ args: [String]) throws {
+        guard args.count >= 6, args.count <= 402, (args.count - 2) % 4 == 0, args[0] == "--to" else {
+            try fail("deliver --to <machine> --path <relative home path> --file <local file>. The receiving Mac applies it on its next sync if its local copy still matches.", code: 2)
+        }
+        for index in stride(from: 2, to: args.count, by: 4) {
+            guard args[index] == "--path", args[index + 2] == "--file" else { try fail("each delivery needs --path <relative path> --file <local file>", code: 2) }
+        }
+        try checkRuntime()
+        try acquireLock()
+        defer { releaseLock() }
+        guard config.dryRun != "1" else { info("Would queue a file delivery. No files were copied or uploaded."); return }
+        try pullMachinesRepoIfSafe()
+        let store = MachineFileDeliveryStore(repository: config.machinesRepoDir, environment: environment)
+        for index in stride(from: 2, to: args.count, by: 4) {
+            _ = try store.send(file: args[index + 3], sender: config.machineName, target: args[1], path: args[index + 1])
+        }
+        try commitAndPush()
+        info("Queued \((args.count - 2) / 4) files for \(args[1]). They apply on the next sync if selected and there is no local conflict; otherwise they wait in that Mac's Inbox.")
+    }
+
+    private func cmdDeliveries(_ args: [String]) throws {
+        try checkRuntime()
+        try acquireLock()
+        defer { releaseLock() }
+        let store = MachineFileDeliveryStore(repository: config.machinesRepoDir, environment: environment)
+        if args.isEmpty || args == ["list"] {
+            for record in try store.deliveries(target: config.machineName) {
+                info("\(record.id)\t\(record.sender)\t\(record.path)\t\(store.receipt(record)?.state ?? "pending")")
+            }
+            return
+        }
+        guard args.count == 3, args[0] == "resolve", ["--apply", "--keep-local"].contains(args[2]) else {
+            try fail("deliveries resolve <id> --apply|--keep-local. --apply explicitly replaces the local file and saves Undo first.", code: 2)
+        }
+        let record = try store.delivery(target: config.machineName, id: args[1])
+        guard config.dryRun != "1" else { info("Preview: delivery was not applied."); return }
+        if args[2] == "--apply" {
+            try store.apply(record, home: config.homeDir, status: config.statusDir, force: true)
+        } else {
+            try store.keepLocal(record)
+        }
+        info("Delivery decision saved. Sync to publish its receipt.")
+    }
+
+    private func cmdIncoming(_ args: [String]) throws {
+        try checkRuntime()
+        try acquireLock()
+        defer { releaseLock() }
+        let engine = try incomingEngine()
+        if args.isEmpty || args == ["list"] {
+            for change in try engine.changes(limit: 200) {
+                info("\(change.id)\t\(change.machine)\t\(change.path)\t\(change.reason)")
+            }
+            return
+        }
+        guard args.count == 3, args[0] == "resolve", ["--keep-local", "--use-incoming", "--keep-both"].contains(args[2]) else {
+            try fail("incoming list | incoming resolve <id> --keep-local|--use-incoming|--keep-both. Applying an incoming deletion requires --use-incoming.", code: 2)
+        }
+        guard config.dryRun != "1" else { info("Preview: no incoming resolution was saved or applied."); return }
+        try engine.resolve(id: args[1], keepLocal: args[2] == "--keep-local", keepBoth: args[2] == "--keep-both", selection: manifestPaths())
+        info("Incoming change resolved. The next sync publishes the resolution.")
+    }
+
     private func cmdRun() throws {
+        let watched = environment["MAC_SYNC_WATCH_WORKER"] == "1"
+        if watched {
+            _ = setpgid(0, 0); WorkerCancellation.shared.install()
+        }
         guard let lock = try MacSyncProcessLock.acquire(
             at: URL(fileURLWithPath: config.serviceLockFile),
         ) else {
             let lockPID = readText(config.serviceLockFile).trimmed
             let processDescription = lockPID.isEmpty ? "" : ": pid \(lockPID)"
             info("another mac-sync service is already running; exiting\(processDescription)")
-            throw ExitError(code: 0)
+            throw ExitError(code: watched ? 75 : 0)
         }
         serviceLock = lock
         isServiceInvocation = true
         // Background priority also applies when invoked by Homebrew services.
         _ = setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)
         backgroundResources = BackgroundResources()
+        backupPreferences = try BackupPreferences.load(directory: config.statusDir, machine: config.machineName)
         backgroundCheckpoint = BackgroundCheckpoint.load(from: checkpointPath, repository: config.machinesRepoDir)
         defer {
             isServiceInvocation = false
@@ -3583,18 +3976,29 @@ public final class MacSyncApp {
         }
         try BackgroundAgentMigration.migrate(homeDirectory: config.homeDir,
                                              executable: Config.realpathExisting(invocationArguments.first ?? "mac-sync"), runner: runner)
-        if let reason = backgroundResources?.deferralReason {
+        if let reason = backupPreferences.resourceDeferral(cloudFolder: config.storageKind == .cloudFolder)
+            ?? backgroundResources?.reason(allowLowPowerMode: backupPreferences.allowLowPowerMode)
+        {
             backgroundCheckpoint.detail = reason
             try backgroundCheckpoint.save(to: checkpointPath)
             info(reason)
+            if watched {
+                throw ExitError(code: 75)
+            }
             return
         }
         if let next = backgroundCheckpoint.nextAttempt, next > Date() {
             info(backgroundCheckpoint.detail)
+            if watched {
+                throw ExitError(code: 75)
+            }
             return
         }
         do {
             try cmdSync()
+            if watched, backgroundConnectivityDeferred {
+                throw ExitError(code: 75)
+            }
             backgroundCheckpoint.consecutiveFailures = 0
             backgroundCheckpoint.nextAttempt = nil
             backgroundCheckpoint.lastSuccess = Date()
@@ -3617,8 +4021,14 @@ public final class MacSyncApp {
 
     private func backgroundBoundary() throws {
         guard isServiceInvocation else { return }
+        if WorkerCancellation.shared.isCancelled {
+            throw ExitError(code: 130)
+        }
         let budgetExpired = Date().timeIntervalSince1970 - Double(runStartedEpoch) >= 900
-        if let reason = backgroundResources?.deferralReason ?? (budgetExpired ? "Background work paused after its 15-minute budget" : nil) {
+        let paused = try BackupPreferences.load(directory: config.statusDir, machine: config.machineName).pauseReason()
+        if let reason = paused ?? backgroundResources?.reason(allowLowPowerMode: backupPreferences.allowLowPowerMode)
+            ?? (budgetExpired ? "Background work paused after its 15-minute budget" : nil)
+        {
             backgroundDeferralReason = reason
             info(reason)
             throw ExitError(code: 75)
@@ -3633,6 +4043,8 @@ public final class MacSyncApp {
         var listMachines = false
         var selectMachine = false
         var selectedPaths: [String] = []
+        var revision: String?
+        var output: String?
         while !args.isEmpty {
             let arg = args.removeFirst()
             switch arg {
@@ -3647,6 +4059,14 @@ public final class MacSyncApp {
                 listMachines = true
             case "--force":
                 force = true
+            case "--revision":
+                guard let value = args.first else { try fail("missing revision after --revision", code: 2) }
+                revision = value
+                args.removeFirst()
+            case "--output":
+                guard let value = args.first else { try fail("missing folder after --output", code: 2) }
+                output = value
+                args.removeFirst()
             case "--path":
                 guard let value = args.first else { try fail("missing path after --path", code: 2) }
                 selectedPaths.append(value)
@@ -3660,12 +4080,30 @@ public final class MacSyncApp {
                 throw ExitError(code: 2)
             }
         }
-        if fromProvided && selectMachine {
+        if fromProvided, selectMachine {
             try fail("--from and --select cannot be used together", code: 2)
         }
         try checkRuntime()
+        try acquireLock()
+        defer { releaseLock() }
         try pullRepoIfSafe()
         try pullMachinesRepoIfSafe()
+        let recovery = recoveryService()
+        var workspace: SnapshotReadWorkspace?
+        if let revision {
+            guard fromProvided, !selectMachine else { try fail("--revision requires --from <machine>", code: 2) }
+            workspace = try recovery.workspace(machine: fromMachine, revision: revision)
+            restoreSnapshotRoot = workspace!.root.appendingPathComponent("machines").path
+        }
+        defer { restoreSnapshotRoot = nil; restoreOutputRoot = nil; withExtendedLifetime(workspace) {} }
+        if let output {
+            guard output.hasPrefix("/"), !force else { try fail("--output requires an absolute, empty folder and cannot be combined with --force", code: 2) }
+            try recovery.validateTarget(output, relative: false)
+            if pathExists(output), try !(fm.contentsOfDirectory(atPath: output)).isEmpty {
+                try fail("the recovery output folder must be empty", code: 2)
+            }
+            restoreOutputRoot = output
+        }
         if listMachines {
             machineSnapshotSuggestionLines()
             return
@@ -3673,7 +4111,9 @@ public final class MacSyncApp {
         if fromProvided {
             guard MacSyncPaths.safeMachineName(fromMachine) else { try fail("invalid machine name: \(fromMachine)", code: 2) }
             let requested = fromMachine
-            guard let resolved = resolveMachineSnapshotName(requested) else {
+            guard let resolved = restoreSnapshotRoot == nil ? resolveMachineSnapshotName(requested)
+                : (isDirectory("\(restoreSnapshotRoot!)/\(requested)") ? requested : nil)
+            else {
                 machineSnapshotSuggestionLines()
                 try fail("missing machine snapshot: \(config.machinesRootDir)/\(requested)")
             }
@@ -3681,7 +4121,7 @@ public final class MacSyncApp {
         } else if selectMachine || !isDirectory("\(config.machinesRootDir)/\(config.machineName)") {
             fromMachine = try selectMachineSnapshot()
         }
-        let machineDir = "\(config.machinesRootDir)/\(fromMachine)"
+        let machineDir = "\(restoreSnapshotRoot ?? config.machinesRootDir)/\(fromMachine)"
         guard isDirectory(machineDir) else { try fail("missing machine snapshot: \(machineDir)") }
         warningCount = 0
         errorCount = 0
@@ -3695,10 +4135,18 @@ public final class MacSyncApp {
             } else {
                 info("existing local files will be kept; use --force to replace them")
             }
-            for rel in try restoreManifestPaths(machine: fromMachine, selectedPaths: selectedPaths) {
+            let manifest = try restoreManifestPaths(machine: fromMachine, selectedPaths: selectedPaths)
+            for rel in manifest {
+                try recovery.validateTarget(sourcePath(for: rel), relative: output == nil && !rel.hasPrefix("/"))
+            }
+            if config.dryRun != "1", output == nil {
+                let undo = try recovery.beginUndo(paths: manifest)
+                info("Undo restore ID: \(undo.id). Use undo-restore <id> --force to restore the pre-recovery copies.")
+            }
+            for rel in manifest {
                 try restoreOnePath(machine: fromMachine, rel: rel, force: force)
             }
-            if !selectedPaths.isEmpty {
+            if !selectedPaths.isEmpty || revision != nil || output != nil {
                 info("selected restore complete; skipped package, editor, repository, and secrets restore steps")
                 finishHistory(.success)
                 return
@@ -3715,6 +4163,67 @@ public final class MacSyncApp {
             finishHistory(.failed)
             throw error
         }
+    }
+
+    private func recoveryService() -> BackupRecoveryService {
+        BackupRecoveryService(repository: config.machinesRepoDir, statusDirectory: config.statusDir, home: config.homeDir, environment: environment)
+    }
+
+    private func cmdRecovery(_ arguments: [String], verify: Bool) throws {
+        var args = arguments
+        var machine = config.machineName
+        var revision: String?
+        var offset = 0
+        while !args.isEmpty {
+            let option = args.removeFirst()
+            guard ["--from", "--revision", "--offset"].contains(option), let value = args.first else {
+                try fail("use \(verify ? "verify" : "versions") --from <machine> [--revision <id>]", code: 2)
+            }
+            args.removeFirst()
+            if option == "--from" {
+                machine = value
+            } else if option == "--offset" {
+                guard let number = Int(value), number >= 0 else { try fail("offset must be a non-negative whole number", code: 2) }
+                offset = number
+            } else {
+                revision = value
+            }
+        }
+        guard MacSyncPaths.safeMachineName(machine) else { try fail("invalid machine name", code: 2) }
+        try checkRuntime()
+        try acquireLock()
+        defer { releaseLock() }
+        let service = recoveryService()
+        if verify {
+            guard let selected = try revision ?? service.revisions(machine: machine).first?.id else {
+                try fail("no backup version is available for this machine")
+            }
+            let report = try service.testRecovery(machine: machine, revision: selected)
+            info("Recovery verified: \(report.verifiedFiles) files, \(report.verifiedBytes) bytes. No user files were replaced. Encrypted archive bytes were checked, not the recovery key.")
+        } else {
+            for item in try service.revisions(machine: machine, offset: offset) {
+                info("\(item.id)\t\(item.createdAt.formatted(.iso8601))")
+            }
+        }
+    }
+
+    private func cmdUndoRestore(_ arguments: [String]) throws {
+        guard let id = arguments.first, UUID(uuidString: id) != nil,
+              arguments.dropFirst().allSatisfy({ $0 == "--force" || $0 == "--preview" })
+        else {
+            try fail("use undo-restore <id> --preview, or undo-restore <id> --force", code: 2)
+        }
+        let preview = arguments.contains("--preview") || config.dryRun == "1"
+        guard preview || arguments.contains("--force") else { try fail("undo replaces current files; review --preview, then explicitly choose --force", code: 2) }
+        try acquireLock()
+        defer { releaseLock() }
+        try recoveryService().undo(id: id, preview: preview)
+        if preview {
+            for entry in try recoveryService().undoPreview(id: id) {
+                info("\(entry.existed ? "would recover previous copy" : "would remove file created by the restore"): \(entry.path)")
+            }
+        }
+        info(preview ? "Undo preview complete; current files were not changed." : "Pre-restore copies were recovered. Other files were not changed.")
     }
 
     private func cmdList() throws {

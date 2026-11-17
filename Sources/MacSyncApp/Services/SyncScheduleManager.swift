@@ -37,6 +37,7 @@ struct SyncScheduleCalendarEntry: Equatable, Hashable {
 }
 
 enum SyncSchedule: Equatable {
+    case watch
     case interval(minutes: Int)
     case calendar(entries: [SyncScheduleCalendarEntry])
 
@@ -164,6 +165,9 @@ struct SyncScheduleManager {
             return SyncScheduleStatus(state: state, agentPath: agentURL.path)
         }
 
+        if let arguments = values["ProgramArguments"] as? [String], arguments.dropFirst() == ["watch"] {
+            return SyncScheduleStatus(state: .configured(.watch), agentPath: agentURL.path)
+        }
         if let seconds = (values["StartInterval"] as? NSNumber)?.intValue,
            seconds > 0,
            seconds % 60 == 0,
@@ -186,48 +190,52 @@ struct SyncScheduleManager {
         if let schedule, !Self.isValid(schedule: schedule) {
             throw SyncScheduleError.invalidSchedule
         }
+        if schedule != nil, executableURL == nil {
+            throw SyncScheduleError.missingExecutable
+        }
+        let previous = try? Data(contentsOf: agentURL)
+        let previousApplication = try? Data(contentsOf: applicationAgentURL)
 
         try fileManager.createDirectory(
             at: agentURL.deletingLastPathComponent(),
             withIntermediateDirectories: true,
         )
 
-        // bootout is deliberately best-effort: the agent may be configured on
-        // disk but not yet loaded, which is normal for a first-time schedule.
+        // Complete fallible preparation before stopping the old job.
+        let data: Data?
+        if let schedule, let executableURL {
+            let logsDirectory = URL(fileURLWithPath: configuration.homeDirectory).appendingPathComponent("Library/Logs/mac-sync")
+            try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
+            data = try PropertyListSerialization.data(fromPropertyList: launchAgentValues(executableURL: executableURL, schedule: schedule, logsDirectory: logsDirectory), format: .xml, options: 0)
+            try data?.write(to: agentURL, options: .atomic)
+        } else {
+            data = nil
+        }
+
         _ = runner.run(arguments: ["bootout", launchdDomain, agentURL.path])
         _ = runner.run(arguments: ["bootout", launchdDomain, applicationAgentURL.path])
-
-        guard let schedule else {
-            try removeLaunchAgent(at: agentURL)
+        do {
+            if data == nil {
+                try removeLaunchAgent(at: agentURL)
+                try removeLaunchAgent(at: applicationAgentURL)
+                return status()
+            }
             try removeLaunchAgent(at: applicationAgentURL)
+            guard runner.run(arguments: ["bootstrap", launchdDomain, agentURL.path]).status == 0 else { throw SyncScheduleError.launchdUnavailable }
             return status()
+        } catch {
+            if let previous {
+                try previous.write(to: agentURL, options: .atomic)
+                _ = runner.run(arguments: ["bootstrap", launchdDomain, agentURL.path])
+            } else {
+                try? removeLaunchAgent(at: agentURL)
+            }
+            if let previousApplication {
+                try previousApplication.write(to: applicationAgentURL, options: .atomic)
+                _ = runner.run(arguments: ["bootstrap", launchdDomain, applicationAgentURL.path])
+            }
+            throw error
         }
-
-        guard let executableURL else {
-            throw SyncScheduleError.missingExecutable
-        }
-        let logsDirectory = URL(fileURLWithPath: configuration.homeDirectory)
-            .appendingPathComponent("Library/Logs/mac-sync")
-        try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
-
-        let data = try PropertyListSerialization.data(
-            fromPropertyList: launchAgentValues(
-                executableURL: executableURL,
-                schedule: schedule,
-                logsDirectory: logsDirectory,
-            ),
-            format: .xml,
-            options: 0,
-        )
-        try data.write(to: agentURL, options: .atomic)
-        try removeLaunchAgent(at: applicationAgentURL)
-
-        guard runner.run(arguments: ["bootstrap", launchdDomain, agentURL.path]).status == 0 else {
-            try? removeLaunchAgent(at: agentURL)
-            try? removeLaunchAgent(at: applicationAgentURL)
-            throw SyncScheduleError.launchdUnavailable
-        }
-        return status()
     }
 
     /// Explicitly repair the worker and remove the legacy UI-at-login job.
@@ -241,7 +249,7 @@ struct SyncScheduleManager {
         let syncArguments = syncValues?["ProgramArguments"] as? [String]
         let syncProcessType = syncValues?["ProcessType"] as? String
         let syncEnvironment = syncValues?["EnvironmentVariables"] as? [String: String]
-        guard syncArguments != [executableURL.path, "run"]
+        guard syncArguments != [executableURL.path, schedule == .watch ? "watch" : "run"]
             || syncProcessType != "Background"
             || syncEnvironment != launchEnvironment
             || fileManager.fileExists(atPath: applicationAgentURL.path)
@@ -252,6 +260,8 @@ struct SyncScheduleManager {
 
     static func description(for schedule: SyncSchedule) -> String {
         switch schedule {
+        case .watch:
+            return "when selected files change, with hourly safety and remote checks"
         case let .interval(minutes):
             return intervalDescription(minutes: minutes)
         case let .calendar(entries):
@@ -294,6 +304,8 @@ struct SyncScheduleManager {
 
     private static func isValid(schedule: SyncSchedule) -> Bool {
         switch schedule {
+        case .watch:
+            return true
         case let .interval(minutes):
             return isValid(intervalMinutes: minutes)
         case let .calendar(entries):
@@ -376,7 +388,7 @@ struct SyncScheduleManager {
     ) -> [String: Any] {
         var values: [String: Any] = [
             "Label": Self.label,
-            "ProgramArguments": [executableURL.path, "run"],
+            "ProgramArguments": [executableURL.path, schedule == .watch ? "watch" : "run"],
             "ProcessType": "Background",
             "Nice": 10,
             "LowPriorityIO": true,
@@ -386,6 +398,10 @@ struct SyncScheduleManager {
         ]
 
         switch schedule {
+        case .watch:
+            values["RunAtLoad"] = true
+            values["KeepAlive"] = true
+            values["ThrottleInterval"] = 60
         case let .interval(minutes):
             values["StartInterval"] = minutes * 60
         case let .calendar(entries):
@@ -412,8 +428,12 @@ struct SyncScheduleManager {
             "MAC_SYNC_MACHINES_REPO": configuration.dataRepository,
             "MAC_SYNC_PATHS_FILE": configuration.pathsFile,
             "MAC_SYNC_STATUS_DIR": configuration.statusDirectory,
+            "MAC_SYNC_STORAGE_KIND": configuration.storageKind.rawValue,
             "PATH": preparedEnvironment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin",
         ]
+        if let folder = configuration.cloudFolder {
+            values["MAC_SYNC_CLOUD_FOLDER"] = folder
+        }
         if let keychainService = environment["MAC_SYNC_KEYCHAIN_SERVICE"] {
             values["MAC_SYNC_KEYCHAIN_SERVICE"] = keychainService
         }

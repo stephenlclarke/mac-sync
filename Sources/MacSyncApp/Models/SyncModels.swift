@@ -339,10 +339,14 @@ struct SyncConfiguration: Equatable {
     let statusDirectory: String
     let machineName: String
     let pathsFile: String
+    var storageKind: BackupStorageKind = .git
+    var cloudFolder: String?
 }
 
 struct RepositoryLocations: Equatable, Sendable {
     let dataRepository: String
+    var storageKind: BackupStorageKind = .git
+    var cloudFolder: String?
 
     static func defaults(homeDirectory: String) -> RepositoryLocations {
         RepositoryLocations(
@@ -364,10 +368,6 @@ enum LocalRepositoryKind: String, CaseIterable, Identifiable, Sendable {
 
     var shortTitle: String {
         "mac-sync data"
-    }
-
-    var cloneURL: String {
-        "https://github.com/stephenlclarke/mac-sync-data.git"
     }
 }
 
@@ -400,22 +400,22 @@ struct RepositoryRecoveryPlan: Equatable, Sendable {
     let backupPath: String
 }
 
-enum GitHubAccessState: Equatable, Sendable {
+enum RepositoryAccessState: Equatable, Sendable {
     case notChecked
     case checking
     case readAccessReady
     case syncAccessReady
     case noOrigin
-    case notGitHubRemote
+    case unsupportedRemote
     case authenticationRequired
     case writeAccessDenied
     case unavailable
     case failed
 }
 
-struct GitHubConnectionReport: Identifiable, Equatable, Sendable {
+struct RepositoryConnectionReport: Identifiable, Equatable, Sendable {
     let repository: LocalRepositoryInspection
-    let state: GitHubAccessState
+    let state: RepositoryAccessState
     let detail: String
 
     var id: LocalRepositoryKind {
@@ -445,6 +445,10 @@ enum SyncAction: Equatable {
     case restoring(String)
     case preparingEncryptedSecretsAccess
     case testingEncryptedSecretsAccess
+    case testingRecovery(String)
+    case undoingRestore
+    case exportingRecoveryKey
+    case refreshingBackups
 
     var title: String {
         switch self {
@@ -458,6 +462,14 @@ enum SyncAction: Equatable {
             "Preparing encrypted secrets access"
         case .testingEncryptedSecretsAccess:
             "Testing encrypted secrets access"
+        case let .testingRecovery(machine):
+            "Testing recovery from \(machine)"
+        case .undoingRestore:
+            "Recovering pre-restore copies"
+        case .exportingRecoveryKey:
+            "Exporting the private recovery key"
+        case .refreshingBackups:
+            "Refreshing available backups"
         }
     }
 }

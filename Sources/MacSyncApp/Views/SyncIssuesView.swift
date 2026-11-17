@@ -265,7 +265,7 @@ struct SyncIssuesView: View {
         } label: {
             Label(action.title, systemImage: action.systemImage)
         }
-        .disabled(store.isRunning || store.isCheckingGitHubAccess)
+        .disabled(store.isRunning || store.isCheckingRepositoryAccess)
     }
 
     private func selectFirstIssueIfNeeded() {

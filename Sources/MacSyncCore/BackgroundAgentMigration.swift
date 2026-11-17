@@ -21,7 +21,8 @@ public enum BackgroundAgentMigration {
                 stableExecutable = String(executable[..<range.lowerBound]) + "/opt/\(formula)/bin/mac-sync"
             }
         }
-        values["ProgramArguments"] = [stableExecutable, "run"]
+        let watching = (values["ProgramArguments"] as? [String])?.dropFirst() == ["watch"]
+        values["ProgramArguments"] = [stableExecutable, watching ? "watch" : "run"]
         values["ProcessType"] = "Background"
         values["Nice"] = 10
         values["LowPriorityIO"] = true

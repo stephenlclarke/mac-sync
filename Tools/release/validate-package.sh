@@ -15,6 +15,10 @@ expected_commit="$5"
 checksum_file="${archive}.sha256"
 codesign_tool="${MAC_SYNC_CODESIGN:-codesign}"
 require_developer_id="${MAC_SYNC_REQUIRE_DEVELOPER_ID:-0}"
+require_notarization="${MAC_SYNC_REQUIRE_NOTARIZATION:-0}"
+if [[ "$require_notarization" == "1" ]]; then
+  require_developer_id=1
+fi
 expected_team_id="${MAC_SYNC_CODESIGN_TEAM_ID:-}"
 
 test -f "$archive"
@@ -43,6 +47,8 @@ test -x "$payload/bin/mac-sync"
 test -x "$app/Contents/MacOS/MacSync"
 test -x "$app/Contents/Resources/mac-sync"
 test -f "$app/Contents/Resources/MacSync.icns"
+test -f "$app/Contents/Resources/LICENSE.md"
+test -f "$app/Contents/Resources/NOTICE.md"
 test -f "$payload/resources/build-info.json"
 
 "$payload/bin/mac-sync" --help >/dev/null
@@ -111,4 +117,10 @@ elif [[ "$require_developer_id" == "1" ]]; then
   exit 1
 else
   printf 'Package validation passed; app bundle is unsigned for Homebrew distribution.\n'
+fi
+
+if [[ "$require_notarization" == "1" ]]; then
+  xcrun stapler validate "$app"
+  spctl --assess --type execute --verbose=2 "$app"
+  printf 'Package validation passed; Apple ticket and Gatekeeper assessment verified after extraction.\n'
 fi

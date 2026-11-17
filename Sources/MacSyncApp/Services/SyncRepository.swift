@@ -177,12 +177,14 @@ struct SyncRepository: @unchecked Sendable {
             statusDirectory: statusDirectory,
             machineName: machineName,
             pathsFile: pathsFile,
+            storageKind: BackupStorageKind(rawValue: environment["MAC_SYNC_STORAGE_KIND"] ?? "") ?? .git,
+            cloudFolder: environment["MAC_SYNC_CLOUD_FOLDER"],
         )
     }
 
     private func writeConfiguredPaths(_ cleanPaths: [String]) throws {
         let configuration = configuration()
-        if readPathList(configuration.pathsFile) == cleanPaths {
+        if fileManager.fileExists(atPath: configuration.pathsFile), readPathList(configuration.pathsFile) == cleanPaths {
             return
         }
         let header = existingHeader(in: configuration.pathsFile)
@@ -254,8 +256,7 @@ struct SyncRepository: @unchecked Sendable {
     private func readStatus(configuration: SyncConfiguration) -> SyncStatus {
         let prefix = "\(configuration.statusDirectory)/\(configuration.machineName)"
         let values = keyValueFile("\(prefix).env")
-        guard !values.isEmpty else { return .empty }
-        guard statusBelongsToConfiguredRepository(values, configuration: configuration) else {
+        guard !values.isEmpty, statusBelongsToConfiguredRepository(values, configuration: configuration) else {
             return .empty
         }
 
@@ -362,8 +363,7 @@ struct SyncRepository: @unchecked Sendable {
         let directory = URL(fileURLWithPath: configuration.statusDirectory)
             .appendingPathComponent("history")
             .appendingPathComponent(configuration.machineName)
-        guard fileManager.fileExists(atPath: directory.path) else { return [] }
-        guard let store = try? LocalHistoryStore(directory: directory.path) else { return [] }
+        guard fileManager.fileExists(atPath: directory.path), let store = try? LocalHistoryStore(directory: directory.path) else { return [] }
         try? store.importLegacy(directory: directory.path)
         return (try? store.page(offset: offset)) ?? []
     }

@@ -60,7 +60,7 @@ enum RepositorySSHConfigurationError: LocalizedError {
         case .missingOrigin:
             "The mac-sync data repository has no origin remote to change."
         case .unsupportedRemote:
-            "The origin remote is not a supported github.com repository."
+            "The origin must be a supported HTTPS or SSH Git repository."
         case let .accessFailed(detail):
             "SSH access could not be verified, so the origin remote was not changed. \(detail)"
         case let .updateFailed(detail):
@@ -88,7 +88,33 @@ struct RepositorySetupService {
         }
     }
 
-    func cloneMissing(_ locations: RepositoryLocations) -> RepositoryCloneResult {
+    func prepareCloudFolder(_ folder: String, home: String) throws -> RepositoryLocations {
+        var directory = ObjCBool(false)
+        guard folder.hasPrefix("/"), fileManager.fileExists(atPath: folder, isDirectory: &directory), directory.boolValue else {
+            throw BackupStorageError.invalidDestination
+        }
+        let workspace = BackupDestinationSettings.cloudWorkspace(folder: folder, home: home)
+        guard !BackupDestinationSettings.isInside(workspace, directory: folder),
+              !BackupDestinationSettings.isInside(folder, directory: workspace) else { throw BackupStorageError.invalidDestination }
+        let locations = RepositoryLocations(dataRepository: workspace, storageKind: .cloudFolder, cloudFolder: folder)
+        if inspect(locations).allSatisfy(\.isReady) {
+            return locations
+        }
+        guard try !fileManager.fileExists(atPath: workspace) || fileManager.contentsOfDirectory(atPath: workspace).isEmpty else {
+            throw BackupStorageError.invalidDestination
+        }
+        try fileManager.createDirectory(atPath: workspace, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        for command in [["init", "-b", "main"], ["config", "user.name", "Mac Sync"], ["config", "user.email", "mac-sync@localhost"]] {
+            let result = git(command, in: workspace)
+            guard result.status == 0 else { throw BackupStorageError.unavailable("The local backup workspace could not be prepared (Git exit \(result.status)).") }
+        }
+        return locations
+    }
+
+    func cloneMissing(_ locations: RepositoryLocations, remoteURL: String = "") -> RepositoryCloneResult {
+        guard let remote = GitRemote(remoteURL), remote.isSSH || remote.user == nil else {
+            return RepositoryCloneResult(inspections: inspect(locations), messages: ["Unable to clone: enter your own HTTPS or SSH repository URL without passwords or tokens."])
+        }
         var messages: [String] = []
 
         for kind in LocalRepositoryKind.allCases {
@@ -112,8 +138,9 @@ struct RepositorySetupService {
                 break
             }
 
-            let result = git(["clone", "--origin", "origin", kind.cloneURL, path])
+            let result = git(["clone", "--origin", "origin", "--", remote.cloneURL, path])
             if result.status == 0 {
+                ensureCommitIdentity(in: path)
                 messages.append("Cloned \(kind.shortTitle).")
             } else {
                 messages.append("Unable to clone \(kind.shortTitle): \(safeMessage(from: result, fallback: "Git clone failed."))")
@@ -141,7 +168,10 @@ struct RepositorySetupService {
         return RepositoryRecoveryPlan(kind: kind, originalPath: originalPath, backupPath: backupPath)
     }
 
-    func backUpAndClone(_ plan: RepositoryRecoveryPlan, locations: RepositoryLocations) -> RepositoryCloneResult {
+    func backUpAndClone(_ plan: RepositoryRecoveryPlan, locations: RepositoryLocations, remoteURL: String = "") -> RepositoryCloneResult {
+        guard let remote = GitRemote(remoteURL), remote.isSSH || remote.user == nil else {
+            return RepositoryCloneResult(inspections: inspect(locations), messages: ["Unable to clone: enter your own credential-free repository URL first."])
+        }
         let expectedPath = path(for: plan.kind, locations: locations)
         guard plan.originalPath == expectedPath,
               !fileManager.fileExists(atPath: plan.backupPath),
@@ -162,7 +192,7 @@ struct RepositorySetupService {
             )
         }
 
-        let clone = git(["clone", "--origin", "origin", plan.kind.cloneURL, plan.originalPath])
+        let clone = git(["clone", "--origin", "origin", "--", remote.cloneURL, plan.originalPath])
         guard clone.status == 0 else {
             try? fileManager.removeItem(atPath: plan.originalPath)
             do {
@@ -178,57 +208,69 @@ struct RepositorySetupService {
                 )
             }
         }
+        ensureCommitIdentity(in: plan.originalPath)
         return RepositoryCloneResult(
             inspections: inspect(locations),
             messages: ["Backed up \(plan.kind.shortTitle) to \(plan.backupPath) and cloned a fresh repository."],
         )
     }
 
-    func initialGitHubReports(for inspections: [LocalRepositoryInspection]) -> [GitHubConnectionReport] {
+    private func ensureCommitIdentity(in path: String) {
+        // New users may never have configured Git. Keep existing user/global
+        // identity, but provide a local machine-snapshot identity if absent.
+        for (key, value) in [("user.name", "Mac Sync"), ("user.email", "mac-sync@localhost")] {
+            let configured = git(["config", "--get", key], in: path)
+            if configured.status != 0 || configured.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                _ = git(["config", key, value], in: path)
+            }
+        }
+    }
+
+    func initialRepositoryReports(for inspections: [LocalRepositoryInspection]) -> [RepositoryConnectionReport] {
         inspections.map { inspection in
             switch inspection.state {
             case .missing:
-                GitHubConnectionReport(
+                RepositoryConnectionReport(
                     repository: inspection,
                     state: .failed,
-                    detail: "Choose or clone this repository before checking GitHub access.",
+                    detail: "Choose or clone this repository before checking Repository access.",
                 )
             case .notGitRepository:
-                GitHubConnectionReport(
+                RepositoryConnectionReport(
                     repository: inspection,
                     state: .failed,
                     detail: "This folder is not a Git checkout accepted by mac-sync.",
                 )
             case .ready where !inspection.hasOrigin:
-                GitHubConnectionReport(
+                RepositoryConnectionReport(
                     repository: inspection,
                     state: .noOrigin,
                     detail: "No origin remote is configured. Sync stays local until you add one.",
                 )
             case .ready:
-                GitHubConnectionReport(
+                RepositoryConnectionReport(
                     repository: inspection,
                     state: .notChecked,
-                    detail: "GitHub access has not been checked in this app session.",
+                    detail: "Repository access has not been checked in this app session.",
                 )
             }
         }
     }
 
-    func checkingGitHubReports(for inspections: [LocalRepositoryInspection]) -> [GitHubConnectionReport] {
+    func checkingRepositoryReports(for inspections: [LocalRepositoryInspection]) -> [RepositoryConnectionReport] {
         inspections.map { inspection in
-            GitHubConnectionReport(
+            RepositoryConnectionReport(
                 repository: inspection,
-                state: inspection.isReady && inspection.hasOrigin ? .checking : initialGitHubReports(for: [inspection])[0].state,
+                state: inspection.isReady && inspection.hasOrigin ? .checking : initialRepositoryReports(for: [inspection])[0].state,
                 detail: inspection.isReady && inspection.hasOrigin
-                    ? "Checking GitHub without prompting for credentials…"
-                    : initialGitHubReports(for: [inspection])[0].detail,
+                    ? "Checking Repository without prompting for credentials…"
+                    : initialRepositoryReports(for: [inspection])[0].detail,
             )
         }
     }
 
-    func checkGitHubAccess(for locations: RepositoryLocations) -> [GitHubConnectionReport] {
-        inspect(locations).map(checkGitHubAccess)
+    func checkRepositoryAccess(for locations: RepositoryLocations) -> [RepositoryConnectionReport] {
+        inspect(locations).map(checkRepositoryAccess)
     }
 
     /// Verifies the equivalent SSH remote before changing the configured
@@ -243,11 +285,10 @@ struct RepositorySetupService {
         guard origin.status == 0 else {
             throw RepositorySSHConfigurationError.missingOrigin
         }
-        guard let sshRemote = MacSyncPaths.githubSSHRemoteURL(
-            origin.stdout.trimmingCharacters(in: .whitespacesAndNewlines),
-        ) else {
+        guard let remote = GitRemote(origin.stdout) else {
             throw RepositorySSHConfigurationError.unsupportedRemote
         }
+        let sshRemote = remote.sshURL
 
         let access = git(["ls-remote", sshRemote, "HEAD"], in: inspection.path)
         guard access.status == 0 else {
@@ -264,42 +305,39 @@ struct RepositorySetupService {
         return sshRemote
     }
 
-    private func checkGitHubAccess(_ inspection: LocalRepositoryInspection) -> GitHubConnectionReport {
-        guard inspection.isReady else {
-            return initialGitHubReports(for: [inspection])[0]
-        }
-        guard inspection.hasOrigin else {
-            return initialGitHubReports(for: [inspection])[0]
+    private func checkRepositoryAccess(_ inspection: LocalRepositoryInspection) -> RepositoryConnectionReport {
+        guard inspection.isReady, inspection.hasOrigin else {
+            return initialRepositoryReports(for: [inspection])[0]
         }
 
         let origin = git(["remote", "get-url", "origin"], in: inspection.path)
         guard origin.status == 0 else {
-            return GitHubConnectionReport(
+            return RepositoryConnectionReport(
                 repository: inspection,
                 state: .noOrigin,
                 detail: "No origin remote is configured. Sync stays local until you add one.",
             )
         }
-        guard MacSyncPaths.normalizeGitHubRemoteURL(origin.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) != nil else {
-            return GitHubConnectionReport(
+        guard GitRemote(origin.stdout) != nil else {
+            return RepositoryConnectionReport(
                 repository: inspection,
-                state: .notGitHubRemote,
-                detail: "The origin remote is not hosted on github.com.",
+                state: .unsupportedRemote,
+                detail: "The origin is not a supported HTTPS or SSH Git remote.",
             )
         }
 
         let readCheck = git(["ls-remote", "origin"], in: inspection.path)
         guard readCheck.status == 0 else {
-            return GitHubConnectionReport(
+            return RepositoryConnectionReport(
                 repository: inspection,
                 state: accessFailureState(for: readCheck, requiresWrite: false),
-                detail: safeMessage(from: readCheck, fallback: "Git could not read this GitHub remote."),
+                detail: safeMessage(from: readCheck, fallback: "Git could not read this Git remote."),
             )
         }
 
         let localHead = git(["rev-parse", "--verify", "HEAD"], in: inspection.path)
         guard localHead.status == 0 else {
-            return GitHubConnectionReport(
+            return RepositoryConnectionReport(
                 repository: inspection,
                 state: .readAccessReady,
                 detail: "Git can read this empty data repository. Your first sync will create and push the initial snapshot.",
@@ -307,7 +345,7 @@ struct RepositorySetupService {
         }
 
         guard let branch = inspection.branch, !branch.isEmpty else {
-            return GitHubConnectionReport(
+            return RepositoryConnectionReport(
                 repository: inspection,
                 state: .writeAccessDenied,
                 detail: "Git can read this repository, but this checkout is detached and cannot push a sync.",
@@ -316,13 +354,13 @@ struct RepositorySetupService {
 
         let pushCheck = git(["push", "--dry-run", "--porcelain", "origin", "HEAD:refs/heads/\(branch)"], in: inspection.path)
         guard pushCheck.status == 0 else {
-            return GitHubConnectionReport(
+            return RepositoryConnectionReport(
                 repository: inspection,
                 state: accessFailureState(for: pushCheck, requiresWrite: true),
-                detail: safeMessage(from: pushCheck, fallback: "Git could not verify write access to this GitHub repository."),
+                detail: safeMessage(from: pushCheck, fallback: "Git could not verify write access to this Git repository."),
             )
         }
-        return GitHubConnectionReport(
+        return RepositoryConnectionReport(
             repository: inspection,
             state: .syncAccessReady,
             detail: "Git can read and dry-run push to this repository without prompting for credentials.",
@@ -347,7 +385,7 @@ struct RepositorySetupService {
             path: path,
             state: .ready,
             hasOrigin: !rawRemote.isEmpty,
-            remoteURL: MacSyncPaths.normalizeGitHubRemoteURL(rawRemote),
+            remoteURL: GitRemote(rawRemote)?.displayURL,
             branch: branch.isEmpty ? nil : branch,
         )
     }
@@ -380,7 +418,7 @@ struct RepositorySetupService {
         )
     }
 
-    private func accessFailureState(for result: GitCommandResult, requiresWrite: Bool) -> GitHubAccessState {
+    private func accessFailureState(for result: GitCommandResult, requiresWrite: Bool) -> RepositoryAccessState {
         let output = result.output.lowercased()
         if output.contains("authentication failed")
             || output.contains("permission denied")

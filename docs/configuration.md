@@ -6,13 +6,21 @@
 
 The installed app and default CLI use one private data checkout, normally `~/github/mac-sync-data`. They do not use the legacy `dot-files` repository unless a CLI compatibility override is explicitly selected.
 
-Each Mac is the source for its own selected files: sync replaces that Mac's snapshot with its local copies, regardless of timestamps. Restoring a peer snapshot is a separate action; missing local files are added and existing files are kept unless replacement is explicitly requested.
+Each Mac owns its snapshot. Selected home-relative files can receive non-conflicting peer changes before the resulting local state is published. Conflicts and deletions wait for review. Explicit copies and targeted file deliveries are also available. See [sync, transfer and recovery](sync-and-transfer.md).
+
+The helper saves `MAC_SYNC_DATA_REPOSITORY`, `MAC_SYNC_STORAGE_KIND` (`git` or `cloudFolder`), optional `MAC_SYNC_CLOUD_FOLDER`, and optional `MAC_SYNC_MACHINE` in local `config.env`, without credentials. Working storage and cloud-folder storage must not overlap. Selections must not overlap app storage or status.
+
+Resource, pause and incoming preferences use `status/<machine>.preferences.json`. Preserve local `status/device-id` and `sync-*.sqlite` ledgers when moving app state. Do not share the status folder between Macs. Portable causal metadata uses each machine's `sync-index.ndjson`; deliveries use the target's `inbox/<sender>/<id>/` and `delivery-receipts/`.
 
 ```text
 ~/github/mac-sync-data/machines/<machine-name>/
 ```
 
 ## Paths and inventories
+
+Exclusions remove matching files from the current directory snapshot, not from previous Git/cloud versions. They stop publishing those paths; they are not instructions to delete another Mac's live copy. Explicit regular selections are staged even if a Git ignore rule matches them. Never use a Git ignore file as your credential-protection boundary.
+
+Automatic incoming sync uses conservative matching for standard exclude globs. Advanced include/merge filter rules require explicit copying instead of automatic application, so incoming files cannot bypass an exclusion.
 
 The configured backup paths for the current Mac are listed in:
 

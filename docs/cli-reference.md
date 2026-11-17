@@ -34,6 +34,14 @@ Commands:
 
 - `sync`: copy configured home paths into the machine snapshot, commit, and push
 - `run`: service mode; exits successfully if the service is already running
+- `watch [--interval-minutes <15-44640>]`: foreground FSEvents observer; debounce saves, launch one existing worker and keep timed safety/remote checks (default 60 minutes)
+- `refresh`: fetch/import available snapshots without copying into source files
+- `versions --from <machine> [--offset <n>]`: list saved versions, 50 per page
+- `verify --from <machine> [--revision <id>]`: copy and hash a version in a temporary folder; no local file replacement or private-key verification
+- `undo-restore <id> --preview|--force`: inspect/recover local copies saved before replacement
+- `incoming list` and `incoming resolve <id> --keep-local|--use-incoming|--keep-both`: review incoming conflicts; applying deletions is explicit
+- `deliver --to <machine> --path <home-relative path> --file <local regular file>`: queue an exact-path file replacement or new file for the target's next sync; repeat path/file pairs for up to 100 files
+- `deliveries list` and `deliveries resolve <id> --apply|--keep-local`: inspect the current Mac's Inbox and explicitly resolve a queued delivery
 - `restore`: copy a machine snapshot from `mac-sync-data` back into `$HOME` and re-clone missing GitHub repos
 - `secrets`: manage encrypted secret snapshots with `age` and Apple Keychain
 - `packages`: manage Homebrew snapshots, diffs, and installs
@@ -66,6 +74,8 @@ Completed real syncs and restores also write one JSON record per run under `hist
 Use `brew services info mac-sync` for the optional Homebrew service status. The app shows its own automatic-sync schedule in **Settings → Automatic sync**.
 
 ## Restore
+
+Use `--revision <id>` to read a saved version without switching branches. Add `--output <absolute empty folder>` to export under `home/` and `absolute/` instead of replacing the original paths. Ordinary real restores save pre-restore copies and print an Undo ID. See [version and transfer safety](sync-and-transfer.md).
 
 Restore the current machine snapshot:
 

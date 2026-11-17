@@ -8,6 +8,7 @@ struct SelectionEditorView: View {
     @State private var selectedOutlinePaths = Set<String>()
     @State private var expandedOutlinePaths = Set<String>()
     @State private var isFileDropTargeted = false
+    @State private var safetyWarnings: [SyncSelectionWarning] = []
 
     private var selectedPathTree: [PathOutlineNode] {
         PathOutlineTree.nodes(for: store.selectedPaths.map {
@@ -40,11 +41,24 @@ struct SelectionEditorView: View {
 
             Divider()
 
+            if !safetyWarnings.isEmpty {
+                DisclosureGroup("Review \(safetyWarnings.count) possible credential risks before syncing") {
+                    ForEach(safetyWarnings) { warning in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(warning.path).font(.caption.monospaced()).textSelection(.enabled)
+                            Text(warning.reason).font(.caption).foregroundStyle(.secondary)
+                        }.padding(.vertical, 3)
+                    }
+                    Text("Warnings are advisory, not a complete secrets scan. Removing a file now does not remove copies from older Git or cloud versions; rotate exposed credentials.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(.horizontal, 24).padding(.vertical, 8).foregroundStyle(.orange)
+            }
+
             List(selection: $selectedOutlinePaths) {
                 SelectionOutlineRows(
                     nodes: selectedPathTree,
                     expandedPaths: $expandedOutlinePaths,
-                    row: selectionRow
+                    row: selectionRow,
                 )
             }
             .listStyle(.inset)
@@ -57,7 +71,7 @@ struct SelectionEditorView: View {
             .onDrop(
                 of: [UTType.fileURL],
                 isTargeted: $isFileDropTargeted,
-                perform: importFileURLs(from:)
+                perform: importFileURLs(from:),
             )
             .onDeleteCommand(perform: removeSelectedPaths)
 
@@ -65,6 +79,11 @@ struct SelectionEditorView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
+                    Menu("Add Preset") {
+                        ForEach(SyncSelectionPreset.allCases) { preset in
+                            Button(preset.title) { store.add(paths: preset.existingPaths(home: store.overview.configuration.homeDirectory)) }
+                        }
+                    }
                     Button("Add Files or Folders...") {
                         choosePaths()
                     }
@@ -110,6 +129,14 @@ struct SelectionEditorView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(18)
+        }
+        .task(id: store.selectedPaths.joined(separator: "\0")) {
+            let paths = store.selectedPaths
+            let home = store.overview.configuration.homeDirectory
+            let result = await Task.detached(priority: .utility) { SyncSelectionSafety.warnings(paths: paths, home: home) }.value
+            if !Task.isCancelled {
+                safetyWarnings = result
+            }
         }
         .onPasteCommand(of: [UTType.fileURL]) { providers in
             _ = importFileURLs(from: providers)
@@ -275,7 +302,7 @@ struct SelectionEditorView: View {
         ]
         let urls = NSPasteboard.general.readObjects(
             forClasses: [NSURL.self],
-            options: options
+            options: options,
         ) as? [URL] ?? []
         store.add(fileURLs: urls)
     }
@@ -332,7 +359,7 @@ private struct SelectionOutlineRows<Row: View>: View {
                 } else {
                     expandedPaths.remove(path)
                 }
-            }
+            },
         )
     }
 }
