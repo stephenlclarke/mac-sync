@@ -173,7 +173,7 @@ struct SettingsView: View {
             }
 
             Section("Legal") {
-                Text("Mac Sync by xyzzy.tools is licensed under AGPL-3.0-or-later. It is provided without warranty.")
+                Text("Mac Sync by quux.io is licensed under AGPL-3.0-or-later. It is provided without warranty.")
                 Text("Use at your own risk. Files can be lost, corrupted, overwritten or deleted. Keep an independent verified backup. Stephen Clarke and contributors disclaim liability to the extent permitted by law.")
                     .font(.caption)
                 Link("View the source and licence", destination: URL(string: "https://github.com/stephenlclarke/mac-sync")!)

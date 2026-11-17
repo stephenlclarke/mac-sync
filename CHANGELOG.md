@@ -7,6 +7,9 @@
 - Reuse the existing background helper for opt-in filesystem observation, debounced saves, single-flight workers and periodic safety/remote checks. Add pause, power/network controls and incoming policy.
 - Add versioned preview/export/restore, local Undo copies, streamed recovery verification, recovery-key export, reviewed presets and credential warnings. Add an explicit data-loss disclaimer.
 - Fix file/directory snapshot transitions, same-size rapid saves, preview checkpoint writes, restore/secret-operation locking, unsafe storage recursion, failed schedule replacement and personal-repository setup assumptions. Require a successful remote operation before reporting an upload.
+- Keep cloud-folder health checks and repair actions separate from Git authentication checks.
+- Sign release apps with Developer ID, require Apple notarisation, staple the acceptance ticket and verify the extracted download before publication.
+- Update the publisher and copyright notices to quux.io. Keep existing app and background-service identifiers for upgrade compatibility.
 
 - Stop animating the system menu-bar label during sync. The original SwiftUI status-image update loop reproduced rapid memory growth and a frozen main thread on macOS 27.0.1. Keep static idle/syncing/warning indicators and accessible labels; retain the separate dashboard animation. Add a real menu-bar memory/responsiveness check to CI.
 - Keep Sync Health's panes full-height and top-aligned when there are no active conditions, including after resizing the window.

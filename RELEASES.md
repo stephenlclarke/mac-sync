@@ -82,7 +82,7 @@ until its replacement has been uploaded.
 
 ## Stable Release
 
-For 1.1.0, use the changes and compatibility notes in [CHANGELOG.md](CHANGELOG.md)
+For 1.2.0, use the changes and compatibility notes in [CHANGELOG.md](CHANGELOG.md)
 and [Architecture](docs/architecture.md). Include the resource-probe result and
 the uncompleted multi-day soak limit in release notes. The standard release
 gate is not a claim of long-term memory stability.
@@ -93,12 +93,12 @@ Prepare a release only from a clean, published `main` commit:
 make ci
 git fetch --all --prune --no-tags
 git status --short --branch
-git tag --no-sign 1.1.0
-git push origin refs/tags/1.1.0
-gh workflow run prebuilt-binaries.yml --ref main -f ref=1.1.0
+git tag --no-sign 1.2.0
+git push origin refs/tags/1.2.0
+gh workflow run prebuilt-binaries.yml --ref main -f ref=1.2.0
 ```
 
-Replace `1.1.0` with the intended semantic version. Never move or recreate a
+Replace `1.2.0` with the intended semantic version. Never move or recreate a
 published semantic tag. The workflow refuses to overwrite an existing stable
 release or mismatched assets.
 

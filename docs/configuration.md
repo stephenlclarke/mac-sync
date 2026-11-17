@@ -61,7 +61,7 @@ VS Code extension state is captured during sync when `code` is available. The ge
 
 If a Homebrew or VS Code inventory command fails, sync stops without replacing the previous package or extension snapshot with an empty result.
 
-Git repositories under `~/github`, including nested paths such as `xyzzy.tools/fixdecoder_rs`, are captured during sync when they have at least one GitHub remote. The generated per-machine clone list is persisted to:
+Git repositories under `~/github`, including nested paths such as `quux.io/mac-sync`, are captured during sync when they have at least one GitHub remote. The generated per-machine clone list is persisted to:
 
 ```text
 ~/github/mac-sync-data/machines/<machine-name>/github-repositories/repositories.txt

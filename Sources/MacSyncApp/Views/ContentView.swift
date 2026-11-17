@@ -45,7 +45,7 @@ struct ContentView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationTitle("xyzzy.tools")
+            .navigationTitle("quux.io")
         } detail: {
             detail
         }
@@ -65,7 +65,7 @@ struct ContentView: View {
                         .foregroundStyle(.tint)
                     Text("Mac Sync")
                         .fontWeight(.semibold)
-                    Text("xyzzy.tools")
+                    Text("quux.io")
                         .foregroundStyle(.secondary)
                 }
             }

@@ -18,7 +18,7 @@ For the opt-in Current build, use `mac-sync-current` instead. Uninstall one chan
 
 ## Use
 
-> Desktop build 63 has a [memory-growth defect](SUPPORT.md#desktop-ui-memory-growth). Upgrade to a Current build containing the fix before syncing with the desktop app. Until then, keep the app closed and use the CLI or background worker.
+> Desktop build 63 has a [memory-growth defect](SUPPORT.md#desktop-ui-memory-growth). Upgrade to version 1.2.0 or later before syncing with the desktop app. Until then, keep the app closed and use the CLI or background worker.
 
 1. Open `mac-sync ui`. The setup helper lets you create a private repository in your browser and clone it, or choose a cloud-synced folder. Use the same destination on each Mac and a unique **This Mac identifier**.
 2. In **Sync Selection**, choose the files and folders to sync, then save the selection. Presets can help you start.
@@ -71,4 +71,4 @@ For Current, use `brew upgrade mac-sync-current`. Restart an existing Homebrew s
 - [Troubleshooting and known issues](SUPPORT.md)
 - [Development and API documentation](CONTRIBUTING.md) · [Releases and rollback](RELEASES.md)
 
-Licensed under [AGPL-3.0-or-later](LICENSE.md). See [notices](NOTICE.md).
+Copyright © 2026 quux.io. Licensed under [AGPL-3.0-or-later](LICENSE.md). See [notices](NOTICE.md).
