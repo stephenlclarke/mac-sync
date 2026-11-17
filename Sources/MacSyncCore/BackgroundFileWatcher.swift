@@ -208,19 +208,26 @@ final class BackgroundWatchService: @unchecked Sendable {
     private let excluded: [String]
     private let checkpoint: String
     private let repository: String
+    private let observesFiles: Bool
+    private let calendarEntries: [BackgroundCalendarEntry]
+    private let restartFile: String?
+    private var restartRequested = false
 
-    init(executable: String, environment: [String: String], interval: TimeInterval, controls: [String], excluded: [String], checkpoint: String, repository: String, selection: @escaping () throws -> [String]) {
+    init(executable: String, environment: [String: String], interval: TimeInterval, controls: [String], excluded: [String], checkpoint: String, repository: String, observesFiles: Bool = true, calendarEntries: [BackgroundCalendarEntry] = [], selection: @escaping () throws -> [String]) {
         self.executable = executable
         self.environment = environment
         self.controls = controls
         self.excluded = excluded
         self.checkpoint = checkpoint
         self.repository = repository
+        self.observesFiles = observesFiles
+        self.calendarEntries = calendarEntries
+        restartFile = environment["MAC_SYNC_ACCESS_BOOKMARKS_FILE"].map(FolderChangeState.normalise)
         self.selection = selection
         policy = WatchSyncPolicy(interval: interval, now: Date())
     }
 
-    func run() throws {
+    func run() throws -> Bool {
         // All observation and process state is confined to this queue.
         try queue.sync {
             try observe()
@@ -238,19 +245,27 @@ final class BackgroundWatchService: @unchecked Sendable {
             timer.resume()
         }
         stopped.wait()
-        queue.sync {
+        return queue.sync {
             observation = nil
             timer?.cancel()
             for source in signals {
                 source.cancel()
             }
             signals.removeAll()
+            return restartRequested
         }
     }
 
     private func observe() throws {
-        let next = try FolderChangeObservation(paths: selection(), controlFiles: controls, excluded: excluded, queue: queue) { [weak self] path in
+        let watchedPaths = observesFiles ? try selection() : []
+        let watchedControls = observesFiles ? controls : (restartFile.map { [$0] } ?? [])
+        let next = try FolderChangeObservation(paths: watchedPaths, controlFiles: watchedControls, excluded: excluded, queue: queue) { [weak self] path in
             guard let self else { return }
+            if let path, let restartFile, FolderChangeState.normalise(path) == restartFile {
+                restartRequested = true
+                stop()
+                return
+            }
             let checkpointEvent = path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == URL(fileURLWithPath: checkpoint).resolvingSymlinksInPath().path } ?? false
             // Our worker writes its checkpoint on every run. That must not
             // schedule another run. Only an external manual recovery wakes a
@@ -305,6 +320,9 @@ final class BackgroundWatchService: @unchecked Sendable {
                 }
                 policy.finished(success: finished.terminationReason == .exit && finished.terminationStatus == 0,
                                 now: Date(), deferredUntil: checkpoint.nextAttempt)
+                if finished.terminationStatus == 0, !calendarEntries.isEmpty {
+                    policy.nextCheck = BackgroundCalendarEntry.nextDate(entries: calendarEntries, after: Date()) ?? .distantFuture
+                }
                 if let preferences = preferences(), !preferences.pauseIndefinitely,
                    let until = preferences.pausedUntil, until > Date()
                 {

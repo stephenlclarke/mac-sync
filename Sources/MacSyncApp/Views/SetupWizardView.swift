@@ -7,6 +7,7 @@ struct SetupWizardView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: SetupWizardModel
     @State private var recoveryPlan: RepositoryRecoveryPlan?
+    @State private var folderAccessError: String?
 
     init(store: SyncStore) {
         self.store = store
@@ -47,11 +48,16 @@ struct SetupWizardView: View {
                         if let creationURL = model.provider.creationURL {
                             Link("Create a private repository on \(model.provider.title)…", destination: creationURL)
                         }
-                        Text("Create the repository in your browser, choose Private, then paste its HTTPS or SSH clone URL below. Mac Sync does not create accounts or store provider tokens.")
+                        Text("Create the repository in your browser, choose Private, then paste its HTTPS or SSH clone URL below. Mac Sync does not create accounts. Provider tokens must stay in Keychain, never in clone URLs.")
                             .font(.caption).foregroundStyle(.secondary)
                         Link("Repository setup instructions", destination: model.provider.instructionsURL)
                         TextField("Your repository clone URL", text: $model.remoteURL)
                             .textFieldStyle(.roundedBorder)
+                        if MacSyncDistribution.current == .appStore {
+                            DisclosureGroup("Set up HTTPS access") {
+                                GitCredentialsView(remote: model.remoteURL)
+                            }
+                        }
                         Toggle("I confirmed that this repository is private", isOn: $model.confirmedPrivate)
                         HStack {
                             Label("mac-sync-data", systemImage: "externaldrive.connected.to.line.below")
@@ -72,6 +78,10 @@ struct SetupWizardView: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+
+            if let folderAccessError {
+                Label(folderAccessError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
             }
 
             if model.storageKind == .git {
@@ -137,8 +147,12 @@ struct SetupWizardView: View {
                 }
             }
 
+            InstallationIdentityImportView(store: store)
+
             HStack(alignment: .bottom) {
-                Text("Finish saves this destination and updates any Mac Sync-managed schedule. Git credentials stay in Git and Keychain. Background Homebrew services remain a separate scheduling choice.")
+                Text(MacSyncDistribution.current == .appStore
+                    ? "Finish saves this destination. Choose Automatic sync in Settings to allow background sync. Folder access and Keychain access must be granted in this edition."
+                    : "Finish saves this destination and updates any Mac Sync-managed schedule. Git credentials stay in Git and Keychain. Background Homebrew services remain a separate scheduling choice.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -202,6 +216,9 @@ struct SetupWizardView: View {
         panel.prompt = "Use Folder"
         panel.message = "Choose the mac-sync-data checkout or an empty folder to clone into."
         if panel.runModal() == .OK, let url = panel.url {
+            do { try MacSyncApplicationRuntime.shared.remember(url) }
+            catch { folderAccessError = error.localizedDescription; return }
+            folderAccessError = nil
             model.setPath(url.standardizedFileURL.path, for: .syncData)
         }
     }
@@ -213,6 +230,9 @@ struct SetupWizardView: View {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
+            do { try MacSyncApplicationRuntime.shared.remember(url) }
+            catch { folderAccessError = error.localizedDescription; return }
+            folderAccessError = nil
             model.cloudFolder = url.path
         }
     }
@@ -423,7 +443,7 @@ final class SetupWizardModel: ObservableObject {
         gitLocation = locations.storageKind == .git ? locations.dataRepository : (environment["HOME"] ?? NSHomeDirectory()) + "/github/mac-sync-data"
         storageKind = locations.storageKind
         cloudFolder = locations.cloudFolder ?? ""
-        self.environment = MacSyncUserConfiguration.resolvedEnvironment(environment)
+        self.environment = MacSyncUserConfiguration.resolvedEnvironment(MacSyncDistribution.current == .appStore ? MacSyncRuntimeEnvironment.prepared(environment) : environment)
     }
 
     var hasAllRepositories: Bool {

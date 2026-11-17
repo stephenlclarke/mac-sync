@@ -3,6 +3,8 @@
 <!-- markdownlint-disable MD013 -->
 
 Mac Sync uses the same two-lane release contract as `container-compose`.
+
+The GitHub/Homebrew process remains the direct-distribution path. App Store archives are separate, self-contained builds with a different bundle identifier, signing identity, provisioning profile and update mechanism. Follow the [App Store submission gates](docs/app-store-submission.md); do not publish an experimental archive as an approved Store release. Mac Sync's own code now offers AGPL-3.0-or-later OR MIT. Bundled third-party tools retain their licences and require separate distribution review.
 Semantic releases are immutable and Current is a replaceable prerelease built
 from the newest fully validated `main` commit.
 

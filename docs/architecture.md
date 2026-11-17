@@ -1,5 +1,15 @@
 # Quiet background sync
 
+## Distribution boundary
+
+Both editions use `MacSyncCore` and the same per-Mac snapshot, version and delivery formats. `MacSyncDistribution` reads the sealed bundle's edition. The direct edition keeps its Homebrew command locations and LaunchAgent path. The Store edition selects bundled tools, holds explicit folder grants, uses container-private settings/status/workspace and registers its own signed executable as a background agent. No UI instance is created for `--background-agent`.
+
+The registered agent restores bookmarks independently and invokes the existing watcher. A changed grant file requests an orderly observer restart; launchd reacquires scopes on the next launch with throttling. Each worker receives an immutable access manifest that describes its parent's active grants. The kernel remains the authority; metadata never grants access. Ordinary and encrypted source preflights refuse unavailable access instead of publishing an incomplete replacement. Managed service status distinguishes saved, approval-pending, disabled and failed states.
+
+The Store runtime is source-pinned and linked to Apple system libraries. It includes notices and corresponding source. The main app and inherited children use different, minimal entitlement sets. [Distribution](distribution.md) and [submission](app-store-submission.md) describe migration, authentication and remaining external gates.
+
+## Shared engine
+
 Version 1.1 keeps the existing snapshot format and separates the worker's
 lifetime from the desktop UI. The goal is low disturbance and bounded resource
 use, not the shortest possible sync time.

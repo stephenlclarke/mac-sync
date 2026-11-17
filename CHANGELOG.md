@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Improve credential-risk warnings with normal-size, full-contrast descriptions, bold file paths and clearer spacing. Keep orange on the warning heading rather than the explanatory text.
+- Bound and scroll expanded credential warnings, propagate scan cancellation, and add an explicit Settings Close button.
+- Offer Mac Sync's own code under AGPL-3.0-or-later OR MIT. Preserve third-party licences and historical releases.
+- Prepare a separate self-contained, sandboxed App Store target with pinned runtime tools, saved folder grants, Keychain HTTPS setup and a managed background agent. Keep developer-tool actions in the direct edition. This is not an App Store release; signing, external-folder/service qualification and third-party distribution terms remain submission gates.
+- Add explicit same-Mac identity import for changing editions, without overwriting another identity or enabling a second schedule. Document privacy, distribution differences, migration and submission checks.
 
 ## 1.2.0
 

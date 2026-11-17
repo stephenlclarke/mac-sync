@@ -5,8 +5,8 @@ import SwiftUI
 @MainActor
 enum MacSyncAboutPanel {
     private static let aboutCreditsText = """
-    Licensed under the GNU Affero General Public License v3.0 or later
-    (AGPL-3.0-or-later).
+    Mac Sync: AGPL-3.0-or-later OR MIT, at your choice.
+    Third-party materials retain their own licences.
 
     This program is provided without warranty.
     """
@@ -61,6 +61,10 @@ final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationWillTerminate(_: Notification) {
+        MacSyncApplicationRuntime.shared.fileAccess?.stop()
+    }
+
     private func activateRunningApplication() {
         guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return }
         let currentProcessID = ProcessInfo.processInfo.processIdentifier
@@ -70,10 +74,9 @@ final class MacSyncAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-@main
 struct MacSyncDesktopApp: App {
     @NSApplicationDelegateAdaptor(MacSyncAppDelegate.self) private var appDelegate
-    @StateObject private var store = SyncStore()
+    @StateObject private var store = SyncStore(environment: MacSyncApplicationRuntime.shared.environment)
 
     var body: some Scene {
         WindowGroup("Mac Sync", id: "main") {

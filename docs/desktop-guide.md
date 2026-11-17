@@ -4,6 +4,8 @@
 
 [Quick start](../README.md) · [Setup and workflow](../WORKFLOW.md) · [CLI reference](cli-reference.md)
 
+For channel differences, folder permissions and moving the same Mac between editions, see [Installation editions](distribution.md). The App Store target is not yet listed. It uses a bundled background agent and does not need Homebrew. The direct edition retains its existing installation and schedule options. Settings has a visible **Close** button; Escape and Command-W also dismiss it. Credential warnings expand into a bounded scrolling panel with readable body text.
+
 > Desktop build 63 can freeze with rapid memory growth during sync. Upgrade to a Current build containing the [menu-bar fix](../SUPPORT.md#desktop-ui-memory-growth) before syncing with the app open.
 
 ## Screens and actions

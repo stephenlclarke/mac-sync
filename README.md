@@ -6,7 +6,7 @@ Mac Sync helps keep important files and settings in sync between Macs. Each Mac 
 
 ## Install
 
-Requires an Apple silicon Mac, macOS 13 or later, and Homebrew. Use a private Git repository (GitHub, GitLab, Bitbucket or another host), or a folder already synced by iCloud Drive, OneDrive or another provider.
+Requires an Apple silicon Mac and macOS 13 or later. The GitHub/Homebrew edition uses Homebrew dependencies. A separate, self-contained App Store edition is being prepared; it is not yet listed. See [edition differences and migration](docs/distribution.md). Use a private Git repository (GitHub, GitLab, Bitbucket or another host), or a folder already synced by iCloud Drive, OneDrive or another provider.
 
 ```sh
 brew tap stephenlclarke/tap
@@ -68,7 +68,8 @@ For Current, use `brew upgrade mac-sync-current`. Restart an existing Homebrew s
 - [Desktop app guide](docs/desktop-guide.md)
 - [CLI reference](docs/cli-reference.md)
 - [Configuration and snapshot layout](docs/configuration.md)
+- [Installation editions and migration](docs/distribution.md) · [Privacy](PRIVACY.md)
 - [Troubleshooting and known issues](SUPPORT.md)
 - [Development and API documentation](CONTRIBUTING.md) · [Releases and rollback](RELEASES.md)
 
-Copyright © 2026 quux.io. Licensed under [AGPL-3.0-or-later](LICENSE.md). See [notices](NOTICE.md).
+Copyright © 2026 quux.io. Mac Sync code is [dual-licensed: AGPL-3.0-or-later OR MIT](LICENSE.md). Third-party licences are unchanged. See [notices](NOTICE.md).

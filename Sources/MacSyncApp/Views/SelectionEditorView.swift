@@ -42,29 +42,9 @@ struct SelectionEditorView: View {
             Divider()
 
             if !safetyWarnings.isEmpty {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(safetyWarnings) { warning in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(warning.path)
-                                    .font(.body.monospaced().weight(.semibold))
-                                    .textSelection(.enabled)
-                                Text(warning.reason)
-                            }
-                        }
-                        Text("Warnings are advisory, not a complete secrets scan. Removing a file now does not remove copies from older Git or cloud versions; rotate exposed credentials.")
-                    }
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                } label: {
-                    Label("Review \(safetyWarnings.count) possible credential risks before syncing", systemImage: "exclamationmark.triangle.fill")
-                        .font(.headline)
-                        .foregroundStyle(.orange)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                SyncSelectionWarningsView(warnings: safetyWarnings)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
             }
 
             List(selection: $selectedOutlinePaths) {
@@ -146,7 +126,7 @@ struct SelectionEditorView: View {
         .task(id: store.selectedPaths.joined(separator: "\0")) {
             let paths = store.selectedPaths
             let home = store.overview.configuration.homeDirectory
-            let result = await Task.detached(priority: .utility) { SyncSelectionSafety.warnings(paths: paths, home: home) }.value
+            let result = await SyncSelectionSafety.scan(paths: paths, home: home)
             if !Task.isCancelled {
                 safetyWarnings = result
             }

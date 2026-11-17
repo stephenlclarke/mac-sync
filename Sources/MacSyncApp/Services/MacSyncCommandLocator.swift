@@ -1,8 +1,12 @@
 import Foundation
+import MacSyncCore
 
 enum MacSyncCommandLocator {
     static func executableURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
-        executableURL(candidates: [
+        if MacSyncDistribution(environment: environment) == .appStore || MacSyncDistribution.current == .appStore {
+            return executableURL(candidates: [Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mac-sync").path])
+        }
+        return executableURL(candidates: [
             environment["MAC_SYNC_EXECUTABLE"],
             Bundle.main.url(forResource: "mac-sync", withExtension: nil)?.path,
             "/opt/homebrew/bin/mac-sync",
@@ -17,7 +21,10 @@ enum MacSyncCommandLocator {
         bundleURL: URL = Bundle.main.bundleURL,
         fileManager: FileManager = .default,
     ) -> URL? {
-        executableURL(candidates: [
+        if MacSyncDistribution(environment: environment) == .appStore || MacSyncDistribution.current == .appStore {
+            return executableURL(candidates: [bundleURL.appendingPathComponent("Contents/Helpers/mac-sync").path], fileManager: fileManager)
+        }
+        return executableURL(candidates: [
             environment["MAC_SYNC_EXECUTABLE"],
             homebrewOptRoot(for: bundleURL)?.appendingPathComponent("bin/mac-sync").path,
             "/opt/homebrew/opt/mac-sync-current/bin/mac-sync",
@@ -37,7 +44,10 @@ enum MacSyncCommandLocator {
         bundleURL: URL = Bundle.main.bundleURL,
         fileManager: FileManager = .default,
     ) -> URL? {
-        applicationURL(
+        if MacSyncDistribution(environment: environment) == .appStore || MacSyncDistribution.current == .appStore {
+            return applicationURL(candidates: [bundleURL.path], fileManager: fileManager)
+        }
+        return applicationURL(
             candidates: [
                 environment["MAC_SYNC_APPLICATION"],
                 homebrewOptRoot(for: bundleURL)?.appendingPathComponent("MacSync.app").path,

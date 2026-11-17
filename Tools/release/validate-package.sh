@@ -48,6 +48,8 @@ test -x "$app/Contents/MacOS/MacSync"
 test -x "$app/Contents/Resources/mac-sync"
 test -f "$app/Contents/Resources/MacSync.icns"
 test -f "$app/Contents/Resources/LICENSE.md"
+test -f "$app/Contents/Resources/LICENSE"
+test -f "$app/Contents/Resources/LICENSE-MIT.md"
 test -f "$app/Contents/Resources/NOTICE.md"
 test -f "$payload/resources/build-info.json"
 

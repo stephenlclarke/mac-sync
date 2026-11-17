@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import MacSyncCore
 
 enum MacSyncRuntimeEnvironment {
     private static let requiredCommandDirectories = [
@@ -14,6 +16,14 @@ enum MacSyncRuntimeEnvironment {
     ]
 
     static func prepared(_ environment: [String: String]) -> [String: String] {
+        if MacSyncDistribution.current == .appStore, MacSyncDistribution(environment: environment) != .appStore {
+            let container = NSHomeDirectory()
+            let sourceHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? container
+            return MacSyncStoreRuntime.environment(environment, bundle: Bundle.main.bundleURL, containerHome: container, sourceHome: sourceHome)
+        }
+        if MacSyncDistribution(environment: environment) == .appStore {
+            return environment
+        }
         var environment = environment
         let currentPaths = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
         var seen = Set<String>()
