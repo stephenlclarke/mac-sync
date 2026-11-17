@@ -158,7 +158,7 @@ struct SyncIssuesView: View {
                         .textSelection(.enabled)
                 }
 
-                if store.healthActivity(for: issue) == .active, !issue.recoveryActions.isEmpty {
+                if store.healthActivity(for: issue) == .active, !issue.recoveryActions(for: store.overview.configuration.storageKind).isEmpty {
                     GroupBox("Recovery actions") {
                         ViewThatFits(in: .horizontal) {
                             HStack {
@@ -248,7 +248,7 @@ struct SyncIssuesView: View {
     }
 
     private func recoveryButtons(for issue: SyncIssue) -> some View {
-        ForEach(Array(issue.recoveryActions.enumerated()), id: \.element.id) { index, action in
+        ForEach(Array(issue.recoveryActions(for: store.overview.configuration.storageKind).enumerated()), id: \.element.id) { index, action in
             if index == 0 {
                 recoveryButton(action)
                     .buttonStyle(.borderedProminent)

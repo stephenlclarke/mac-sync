@@ -18,13 +18,14 @@ The source candidate is Mac Sync 1.2.0. The review covered storage ownership, tw
 - A watcher could trigger itself from its own checkpoint or generated manifest. Those writes do not schedule another worker. The real-process test verifies an initial run, a quiet idle period, a new source edit and graceful stop. Idle mode arms the next event deadline rather than polling every few seconds.
 - macOS could shorten an existing `/private/tmp` path to `/tmp`, but leave a missing child unchanged. Shared boundary checks now resolve the existing ancestor before appending missing components. Tests cover aliases, missing descendants and a link escaping storage.
 - A cached Git ref could be mistaken for a verified upload. Upload status now requires a successful remote operation. Folder saves explicitly do not confirm provider upload.
+- Cloud-folder errors offered irrelevant Git authentication repairs. Health reconciliation and recovery actions now use the configured storage kind; provider errors remain active until a successful folder operation.
 - Signed distribution had no notarisation gate. New release packaging requires Apple's `Accepted` result, a stapled ticket and Gatekeeper acceptance. Extracted release assets are checked again. Credentials stay outside the source and app bundle.
 
 ## Validation
 
-- `make ci`: passed, including 164 Swift tests, 13 shell integration suites, seven release-tool tests, CLI smoke checks and the 85% coverage floor. Measured core line coverage: **88.11%**.
-- AddressSanitizer: all 164 Swift tests passed; no reported invalid memory access.
-- ThreadSanitizer: all 164 Swift tests passed; no reported data race.
+- `make ci`: passed, including 165 Swift tests, 13 shell integration suites, seven release-tool tests, CLI smoke checks and the 85% coverage floor. Measured core line coverage: **88.16%**.
+- AddressSanitizer: all 165 Swift tests passed; no reported invalid memory access.
+- ThreadSanitizer: all 165 Swift tests passed; no reported data race.
 - Core memory probe: 512 MiB file comparison, bounded 64 MiB command output and 100,000 history entries. Warm, final and peak resident memory were **28 MiB** over 1,000 read iterations.
 - Native menu-bar probe: **21 MiB** warm/final/peak physical footprint over 120 seconds; steady CPU **2.2% of one core**. No watchdog failure or growing footprint.
 - Generated two-Mac tests covered stale versions, concurrent edits, deletion review, Keep Both, expected-hash replacement and delivery receipts. A real local bare Git remote and independent shared-folder caches exercised both transport routes.

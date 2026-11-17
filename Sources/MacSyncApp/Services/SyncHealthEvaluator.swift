@@ -71,6 +71,9 @@ struct SyncHealthEvaluator {
         _ active: inout Set<SyncHealthConditionCode>,
         overview: SyncOverview,
     ) {
+        // A provider download is confirmed by a successful folder refresh,
+        // not by probing the local cache's intentionally absent Git origin.
+        guard overview.configuration.storageKind == .git else { return }
         let remoteCodes: Set<SyncHealthConditionCode> = [
             .remoteAuthenticationFailed,
             .remoteRefreshFailed,

@@ -116,6 +116,10 @@ struct SyncIssue: Identifiable, Equatable {
         isActive && disposition == .open
     }
 
+    func recoveryActions(for storageKind: BackupStorageKind) -> [SyncIssueRecoveryAction] {
+        storageKind == .git ? recoveryActions : recoveryActions.filter { $0 != .testGitHubAccess && $0 != .useSSH }
+    }
+
     var dispositionTitle: String {
         isActive ? disposition.title : "Recovered"
     }

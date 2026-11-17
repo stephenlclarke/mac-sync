@@ -6,6 +6,25 @@ import XCTest
 final class SyncHealthEvaluatorTests: XCTestCase {
     private let fileManager = FileManager.default
 
+    func testCloudHealthKeepsProviderFailuresWithoutGitProbesOrRepairActions() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let overview = makeOverview(fixture: fixture, conditions: [condition(.remoteUnavailable, component: .remoteRepository)], storageKind: .cloudFolder)
+        var gitCalls = 0
+        let runner = FakeSyncHealthRunner(commandAvailability: false) { executable, _ in
+            if executable == "git" {
+                gitCalls += 1
+            }
+            return CommandResult(status: 0, stdout: "", stderr: "")
+        }
+        XCTAssertTrue(SyncHealthEvaluator(environment: [:], runner: runner).activeConditionCodes(in: overview).contains(.remoteUnavailable))
+        XCTAssertEqual(gitCalls, 0)
+        let issue = try XCTUnwrap(SyncIssueRepository(configuration: overview.configuration).issues(for: overview).first)
+        XCTAssertTrue(issue.recoveryActions(for: .git).contains(.testGitHubAccess))
+        XCTAssertFalse(issue.recoveryActions(for: .cloudFolder).contains(.testGitHubAccess))
+        XCTAssertFalse(issue.recoveryActions(for: .cloudFolder).contains(.useSSH))
+    }
+
     func testOriginAloneDoesNotClearABranchCondition() throws {
         let fixture = try makeFixture()
         defer { try? fileManager.removeItem(at: fixture.root) }
@@ -214,6 +233,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
         fixture: Fixture,
         conditions: [SyncHealthCondition],
         finishedAt: String = "2026-07-31 09:00:03 BST",
+        storageKind: BackupStorageKind = .git,
     ) -> SyncOverview {
         SyncOverview(
             configuration: SyncConfiguration(
@@ -224,6 +244,7 @@ final class SyncHealthEvaluatorTests: XCTestCase {
                 pathsFile: fixture.data
                     .appendingPathComponent("machines/local/config/sync-paths.txt")
                     .path,
+                storageKind: storageKind,
             ),
             status: SyncStatus(
                 result: .partial,
