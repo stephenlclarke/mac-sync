@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Improve credential-risk warnings with normal-size, full-contrast descriptions, bold file paths and clearer spacing. Keep orange on the warning heading rather than the explanatory text.
+
 ## 1.2.0
 
 - Support private GitHub, GitLab, Bitbucket and custom Git destinations, plus verified immutable snapshots in user-selected cloud-synced folders. Distinguish a folder save from confirmed provider upload.

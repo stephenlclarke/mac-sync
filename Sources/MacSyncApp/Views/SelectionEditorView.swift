@@ -42,16 +42,29 @@ struct SelectionEditorView: View {
             Divider()
 
             if !safetyWarnings.isEmpty {
-                DisclosureGroup("Review \(safetyWarnings.count) possible credential risks before syncing") {
-                    ForEach(safetyWarnings) { warning in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(warning.path).font(.caption.monospaced()).textSelection(.enabled)
-                            Text(warning.reason).font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 3)
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(safetyWarnings) { warning in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(warning.path)
+                                    .font(.body.monospaced().weight(.semibold))
+                                    .textSelection(.enabled)
+                                Text(warning.reason)
+                            }
+                        }
+                        Text("Warnings are advisory, not a complete secrets scan. Removing a file now does not remove copies from older Git or cloud versions; rotate exposed credentials.")
                     }
-                    Text("Warnings are advisory, not a complete secrets scan. Removing a file now does not remove copies from older Git or cloud versions; rotate exposed credentials.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(.horizontal, 24).padding(.vertical, 8).foregroundStyle(.orange)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                } label: {
+                    Label("Review \(safetyWarnings.count) possible credential risks before syncing", systemImage: "exclamationmark.triangle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.orange)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
             }
 
             List(selection: $selectedOutlinePaths) {
