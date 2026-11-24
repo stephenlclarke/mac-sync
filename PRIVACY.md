@@ -26,6 +26,12 @@ The input is an in-memory, app-generated summary of the last displayed run resul
 
 Unknown and empty incoming-review queues do not call the model. Missing or unreadable counts remain unknown, not zero. The app derives a fixed-order safety checklist from typed records; no model-generated repair prose is displayed. This advice has no executable actions and remains available if the model is absent, fails or returns an inconsistent answer. A healthy empty queue produces no repair tasks. The advice cannot initiate a sync, inspect file contents or select a winning version.
 
+## Local Repair Assistant
+
+The separate, optional Local Repair Assistant runs only when opened in Sync Health. Its repair prompt contains only verified identifiers from a three-action allowlist, not paths, logs, file contents, repository URLs, names or credentials. It uses the same tool-free on-device model with no cloud fallback. The automatic executor can change only app memory and read-only monitoring handles: refresh stale status, reconnect the status observer or clear a finished operation's busy indicator. Status reads are bounded local reads; they do not invoke Git, credential helpers, history migration or network probes. No AI transcript or repair receipt is saved to disk.
+
+Sync requires a separate native confirmation tied to the current destination, selected files and operation. It can upload and replace non-conflicting selected files. File/conflict review and credential/security review are separate manual screens; opening them does not approve changes. The AI cannot grant permission, resolve a conflict, alter credentials/security or enable a background schedule. An already configured sync schedule is not disabled by this feature. Closing or stopping the assistant cancels further repairs, without undoing earlier verified app-memory/observer repairs.
+
 ## Background activity and removal
 
 Automatic sync is optional. The App Store edition registers its bundled background agent with macOS after you save a schedule. You can disable it in Mac Sync or in macOS Login Items & Extensions. The direct edition also supports Homebrew services. Stop automatic sync before switching editions or uninstalling.

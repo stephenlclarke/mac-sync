@@ -36,6 +36,7 @@ final class SyncStore: ObservableObject {
     private let healthQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.health", qos: .utility, autoreleaseFrequency: .workItem)
     private var refreshPending = false
     private var generation = 0
+    private var repairScopeNonce = UUID()
 
     private var repository: SyncRepository
     private let baseEnvironment: [String: String]
@@ -747,6 +748,7 @@ final class SyncStore: ObservableObject {
         commandOutput = ""
         errorMessage = nil
         activeAction = action
+        repairScopeNonce = UUID()
         self.process = process
 
         activityObservation = LocalStateObservation(directory: url.path) { [weak self] in
@@ -788,6 +790,8 @@ final class SyncStore: ObservableObject {
     }
 
     private func finish(process: Process) {
+        // A late callback must not finish an operation started after a safe repair.
+        guard self.process === process else { return }
         readActivityTail()
         activityObservation = nil
         try? activityHandle?.close()
@@ -817,6 +821,7 @@ final class SyncStore: ObservableObject {
     }
 
     private func applyRepositoryLocations(_ locations: RepositoryLocations) {
+        repairScopeNonce = UUID()
         generation += 1
         isRefreshing = false
         refreshPending = false
@@ -923,5 +928,111 @@ final class SyncStore: ObservableObject {
         let badge = openIssueCount == 0 ? nil : "\(openIssueCount)"
         NSApplication.shared.dockTile.badgeLabel = badge
         NSApplication.shared.dockTile.display()
+    }
+}
+
+extension SyncStore: LocalRepairRuntime {
+    /// Private app context is never sent to the model. Selection changes invalidate approval too.
+    var localRepairScope: String {
+        let config = overview.configuration
+        let fields = [repairScopeNonce.uuidString, config.homeDirectory, config.dataRepository, config.statusDirectory,
+                      config.machineName, config.storageKind.rawValue, config.cloudFolder ?? ""] + selectedPaths
+        return String(data: (try? JSONEncoder().encode(fields)) ?? Data(), encoding: .utf8) ?? ""
+    }
+
+    func inspectLocalRepairs() async throws -> LocalRepairInspection {
+        let state = try await readLocalRepairState()
+        var candidates: [LocalRepairAction] = []
+        if let status = state.status, status != overview.status {
+            candidates.append(.refreshStatus)
+        }
+        if stateObservation?.isHealthy != true {
+            candidates.append(.reconnectObserver)
+        }
+        if (activeAction != nil && process?.isRunning != true) || overview.isLocalSyncActive {
+            if state.worker == .idle {
+                candidates.append(.clearFinishedActivity)
+            }
+        }
+        return .init(scope: state.scope, worker: state.worker, candidates: candidates)
+    }
+
+    func applyLocalRepair(_ action: LocalRepairAction, scope: String) async throws {
+        let state = try await readLocalRepairState()
+        guard state.scope == scope else { throw LocalRepairError.changedScope }
+        guard state.worker == .idle else { throw LocalRepairError.workerNotIdle }
+        // No suspension between this final check and the bounded memory/handle change.
+        switch action {
+        case .refreshStatus:
+            guard let status = state.status else { throw LocalRepairError.unreadableStatus }
+            replaceOperationalOverview(status: status, clearWorker: false)
+            activeConditionCodes = Set(status.conditions.map(\.code)
+                + (status.warnings + status.errors).compactMap(SyncHealthMessage.conditionCode))
+            syncIssues = issueRepository.issues(
+                for: overview, activeConditionCodes: activeConditionCodes, cachedDecisions: syncIssues
+            )
+            updateDockBadge()
+        case .reconnectObserver:
+            if stateObservation?.isHealthy != true {
+                observeLocalState()
+            }
+            guard stateObservation?.isHealthy == true else { throw LocalRepairError.verificationFailed }
+        case .clearFinishedActivity:
+            guard process?.isRunning != true else { throw LocalRepairError.workerNotIdle }
+            // Do not call finish/reload: those paths may migrate history or probe credentials/network.
+            if let process, process.terminationStatus != 0 {
+                errorMessage = "mac-sync finished with exit status \(process.terminationStatus)."
+            }
+            process = nil
+            activeAction = nil
+            activityObservation = nil
+            try? activityHandle?.close()
+            activityHandle = nil
+            activityURL = nil
+            replaceOperationalOverview(status: overview.status, clearWorker: true)
+        }
+    }
+
+    /// Call only from an explicit native confirmation, never from the model or automatic executor.
+    func approveAssistantSync(scope: String) async throws {
+        let inspection = try await inspectLocalRepairs()
+        guard inspection.scope == scope else { throw LocalRepairError.changedScope }
+        guard inspection.worker == .idle, !isRunning else { throw LocalRepairError.workerNotIdle }
+        repairScopeNonce = UUID() // Single use, including a failed launch.
+        syncSelection()
+    }
+
+    private func readLocalRepairState() async throws -> LocalRepairReadState {
+        try Task.checkCancellation()
+        let scope = localRepairScope
+        let config = overview.configuration
+        let cached = overview.status
+        let remote = repositoryInspections.first?.remoteURL
+        let temporaryDirectory = commandEnvironment["TMPDIR"] ?? "/tmp"
+        let state = try await Task.detached(priority: .utility) {
+            let worker = try LocalRepairInspectionReader.worker(
+                configuration: config,
+                temporaryDirectory: temporaryDirectory
+            )
+            let status = try LocalRepairInspectionReader.status(
+                configuration: config,
+                cached: cached,
+                expectedRemote: remote
+            )
+            guard status != nil || cached.result == .unknown else { throw LocalRepairError.unreadableStatus }
+            return (worker, status)
+        }.value
+        try Task.checkCancellation()
+        guard scope == localRepairScope else { throw LocalRepairError.changedScope }
+        return .init(worker: process?.isRunning == true ? .active : state.0, status: state.1, scope: scope)
+    }
+
+    private func replaceOperationalOverview(status: SyncStatus, clearWorker: Bool) {
+        overview = SyncOverview(
+            configuration: overview.configuration, status: status, history: overview.history,
+            currentMachine: overview.currentMachine, peerMachines: overview.peerMachines,
+            localSyncProcessID: clearWorker ? nil : overview.localSyncProcessID,
+            isLocalSyncActive: clearWorker ? false : overview.isLocalSyncActive
+        )
     }
 }

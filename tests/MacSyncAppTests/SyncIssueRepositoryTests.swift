@@ -50,6 +50,18 @@ final class SyncIssueRepositoryTests: XCTestCase {
         XCTAssertEqual(reloadedError.note, "Will repair remote access after the maintenance window.")
         XCTAssertEqual(history.first?.errors, ["ERROR: git push failed"])
         XCTAssertTrue(fileManager.fileExists(atPath: fixture.status.appendingPathComponent("issues/local.json").path))
+
+        // A memory-only refresh must retain cached decisions without rereading or replacing this file.
+        let triageURL = fixture.status.appendingPathComponent("issues/local.json")
+        let unreadable = Data("not valid triage JSON".utf8)
+        try unreadable.write(to: triageURL)
+        let cached = try XCTUnwrap(repository.issues(for: overview, cachedDecisions: reloadedIssues)
+            .first { $0.id == error.id })
+        XCTAssertEqual(cached.disposition, .acknowledged)
+        XCTAssertEqual(cached.note, reloadedError.note)
+        XCTAssertEqual(cached.updatedAt, reloadedError.updatedAt)
+        XCTAssertEqual(try Data(contentsOf: triageURL), unreadable)
+        XCTAssertEqual(repository.issues(for: overview).first { $0.id == error.id }?.disposition, .open)
     }
 
     func testRepeatedConditionIsGroupedAndReopensWhenItRecurs() throws {

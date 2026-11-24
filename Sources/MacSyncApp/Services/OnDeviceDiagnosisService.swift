@@ -9,9 +9,50 @@ protocol OnDeviceDiagnosisGenerating: Sendable {
 
 /// One user-requested, bounded session. No subprocess, tools, remote provider,
 /// credentials or sync/recovery API is reachable from this service.
-actor OnDeviceDiagnosisService: OnDeviceDiagnosisGenerating {
+actor OnDeviceDiagnosisService: OnDeviceDiagnosisGenerating, OnDeviceRepairPlanning {
     static let shared = OnDeviceDiagnosisService()
     private var running = false
+
+    func planRepairs(candidateIDs: [String]) async throws -> LocalRepairPlan {
+        try Task.checkCancellation()
+        let input = LocalRepairPlan(actionIDs: candidateIDs)
+        let candidates = candidateIDs.compactMap(LocalRepairAction.init(rawValue:))
+        _ = try input.validated(for: candidates)
+        guard !candidateIDs.isEmpty else { return input }
+        guard !running else { throw LocalDiagnosisError.busy }
+        running = true
+        defer { running = false }
+        #if canImport(FoundationModels)
+            if #available(macOS 26.0, *) {
+                let model = SystemLanguageModel.default
+                guard case .available = model.availability else { throw LocalDiagnosisError.notReady }
+                let session = LanguageModelSession(model: model, instructions: """
+                Order the supplied verified Mac Sync operational repair IDs. Return each ID exactly once.
+                The app has already verified these faults. Do not invent, omit or duplicate an ID.
+                refreshStatus updates app memory only. reconnectObserver replaces a read-only status observer.
+                clearFinishedActivity clears app memory only after its process has exited.
+                No sync, file changes, conflict decisions, credentials or security changes are permitted.
+                You have no tools. Return only actionIDs. The app independently rechecks and verifies each repair.
+                """)
+                #if compiler(>=6.4)
+                    let options = GenerationOptions(samplingMode: .greedy, maximumResponseTokens: 256)
+                #else
+                    let options = GenerationOptions(sampling: .greedy, maximumResponseTokens: 256)
+                #endif
+                guard let prompt = String(data: try JSONEncoder().encode(candidateIDs), encoding: .utf8) else {
+                    throw LocalRepairError.invalidPlan
+                }
+                let response = try await session.respond(
+                    to: prompt,
+                    generating: GeneratedLocalRepairPlan.self,
+                    options: options
+                )
+                try Task.checkCancellation()
+                return .init(actionIDs: response.content.actionIDs)
+            }
+        #endif
+        throw LocalDiagnosisError.unsupportedOS
+    }
 
     func generate(evidence: LocalDiagnosisEvidence) async throws -> LocalDiagnosisAnswer {
         try Task.checkCancellation()
@@ -80,6 +121,13 @@ actor OnDeviceDiagnosisService: OnDeviceDiagnosisGenerating {
 }
 
 #if canImport(FoundationModels)
+    @available(macOS 26.0, *)
+    @Generable
+    private struct GeneratedLocalRepairPlan {
+        @Guide(description: "A complete permutation of the supplied repair IDs. No new IDs.")
+        var actionIDs: [String]
+    }
+
     @available(macOS 26.0, *)
     @Generable
     private struct GeneratedLocalDiagnosis {

@@ -6,6 +6,7 @@ struct SyncIssuesView: View {
     @State private var selectedIssueID: String?
     @State private var triageNote = ""
     @State private var showingLocalDiagnosis = false
+    @State private var showingLocalRepairs = false
 
     private var filteredIssues: [SyncIssue] {
         switch filter {
@@ -41,6 +42,15 @@ struct SyncIssuesView: View {
                     }
                     .disabled(store.isRunning)
                     .help("Read-only diagnosis using Apple's local model. No cloud fallback or automatic fixes. Wait for an active sync to finish first.")
+                    Button {
+                        showingLocalRepairs = true
+                    } label: {
+                        Label("Local Repair Assistant", systemImage: "wrench.and.screwdriver")
+                    }
+                    .help("""
+                    Repair verified local app-state faults automatically.
+                    Sync, file and security actions require your approval.
+                    """)
                 }
                 .padding()
 
@@ -76,6 +86,9 @@ struct SyncIssuesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $showingLocalDiagnosis) {
             LocalDiagnosisView(overview: store.overview)
+        }
+        .sheet(isPresented: $showingLocalRepairs) {
+            LocalRepairAssistantView(store: store)
         }
         .onAppear {
             selectFirstIssueIfNeeded()

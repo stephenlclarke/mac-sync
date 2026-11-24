@@ -59,8 +59,18 @@ struct SyncIssueRepository {
     func issues(
         for overview: SyncOverview,
         activeConditionCodes: Set<SyncHealthConditionCode>? = nil,
+        cachedDecisions: [SyncIssue]? = nil,
     ) -> [SyncIssue] {
-        let states = readStates()
+        // Operational memory refresh must not read an unrelated, potentially large triage file.
+        let states = cachedDecisions.map { issues in
+            issues.reduce(into: [String: PersistedState]()) { states, issue in
+                guard let updatedAt = issue.updatedAt else { return }
+                states[issue.id] = PersistedState(
+                    disposition: issue.disposition, note: issue.note,
+                    updatedAt: updatedAt, latestOccurrenceID: issue.latestOccurrenceID
+                )
+            }
+        } ?? readStates()
         return groupedCandidates(for: overview, activeConditionCodes: activeConditionCodes)
             .map { candidate in
                 let state = states[candidate.id] ?? states[candidate.latestOccurrenceID]

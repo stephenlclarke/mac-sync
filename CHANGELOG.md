@@ -2,9 +2,11 @@
 
 ## Unreleased
 
+- Add a separate Local Repair Assistant. Apple's on-device model can order only three verified operational repairs: refresh app status in memory, reconnect a read-only status observer, and clear a finished operation's busy indicator. Recheck each precondition and verify each effect. Reject the whole plan for invented, omitted, duplicate or protected actions. Stop on cancellation, an active/unknown worker, a changed scope or failed verification.
+- Require a separate native approval before assistant-initiated sync. Bind it to the destination, selected paths and operation, and consume it once. File/conflict review and credential/security review remain manual; the assistant's file-review screen cannot start a sync. Preserve the existing read-only diagnosis option. No cloud AI, background inference, file writes or security changes are available to the automatic executor.
 - Add a read-only safety checklist beside on-device diagnosis: preserve available versions, review conflicts and path/link items, require separate deletion decisions and user approval, then verify any later, separately authorised sync. The app owns the advice and its order; the model cannot invent actions or omit safeguards.
 - Keep missing and unreadable review counts explicitly unknown, including null values in the diagnostic input format. Unknown and empty review queues never call the model. A healthy empty queue shows no repair steps; recorded failures and cloud upload uncertainty remain separate from file review.
-- Keep advice available without an AI model, preserve evidence on model errors and add regression tests for no-model paths, corrupt ledgers, healthy queues and all review categories. No cloud fallback, automatic repairs, file contents or new sync capability.
+- Keep read-only advice available without an AI model, preserve evidence on model errors and add regression tests for no-model paths, corrupt ledgers, healthy queues and all review categories. The read-only diagnosis has no automatic repairs, file contents or sync capability.
 
 ## 1.3.0 — 24 November 2026
 

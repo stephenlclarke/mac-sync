@@ -1,5 +1,15 @@
 # Quiet background sync implementation
 
+## Guarded operational repairs — 24 November 2026
+
+- [x] Preserve the read-only diagnosis option and add a separate on-demand Local Repair Assistant.
+- [x] Limit automatic effects to app-memory status refresh, read-only observer reconnection and finished-process busy-state cleanup. Use cached triage decisions, not another disk read or migration.
+- [x] Give the local model only verified repair IDs. Reject the whole invalid batch, recheck scope/worker state, verify effects and stop on cancellation, unavailable model or failure. Never use cloud AI or generated commands.
+- [x] Require native, single-use, scope-bound approval for sync. Keep manual file/conflict and credential/security review separate. Do not enable background sync or choose file versions.
+- [x] Add deterministic policy, production-adapter, bounded-read, observer and layout tests. Validate native diagnosis and synthetic repair plans on this Mac without applying real file changes.
+
+The upgrade uses the existing signed/notarised Current delivery lane, exact-commit hosted gates and protected Homebrew tap. App Store sandbox model access and earlier-macOS AI behaviour remain unqualified. This assistant is not an unrestricted repair agent; only its explicit operational allowlist can run automatically. See [the user guide](desktop-guide.md#local-repair-assistant).
+
 ## Read-only on-device diagnosis — 23 November 2026
 
 - [x] Add a user-requested Sync Health diagnosis sheet and native on-device-only model service, without a cloud or command-line fallback.
