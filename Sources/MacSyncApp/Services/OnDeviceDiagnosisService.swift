@@ -14,6 +14,13 @@ actor OnDeviceDiagnosisService: OnDeviceDiagnosisGenerating {
     private var running = false
 
     func generate(evidence: LocalDiagnosisEvidence) async throws -> LocalDiagnosisAnswer {
+        try Task.checkCancellation()
+        guard evidence.requiresModelOrdering else {
+            return .init(
+                runResult: evidence.runResult, totalReviewItems: evidence.totalReviewItems,
+                pendingDeletions: evidence.pendingDeletions, orderedFindingIDs: evidence.requiredFindingIDs
+            )
+        }
         guard !running else { throw LocalDiagnosisError.busy }
         running = true
         defer { running = false }
@@ -45,6 +52,9 @@ actor OnDeviceDiagnosisService: OnDeviceDiagnosisGenerating {
             The inventory counts are authoritative. Review items are not necessarily deletions.
             Generic warning wording and absent paths do not establish deletions.
             Recorded causes and unknowns are separate. Missing edit history is not a recorded cause.
+            Unknown and empty review inventories are handled by the app without an AI request.
+            The app supplies a separate, fixed-order safety checklist. Never invent repair advice or file choices.
+            Saved publication success is not a live connectivity test. Unconfirmed cloud upload is not a failure.
             Do not propose or perform actions. There are no tools and no cloud fallback.
             """)
             // CodeQL still uses Xcode 26; match each SDK's public spelling.

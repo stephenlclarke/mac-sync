@@ -3,7 +3,8 @@
 # Build a self-contained Xcode archive; export requires Apple Distribution signing.
 # MAC_SYNC_STORE_TEAM selects the authorised Apple team for signed archives/exports.
 set -euo pipefail
-readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly REPOSITORY_ROOT
 readonly ARCHIVE="$REPOSITORY_ROOT/.build/MacSyncStore.xcarchive"
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   printf 'usage: %s [--signed|--export]\nSet MAC_SYNC_STORE_TEAM for signing/export. Default: unsigned CI archive.\n' "$(basename "$0")"
@@ -37,5 +38,5 @@ MAC_SYNC_SOURCE_ROOT="$REPOSITORY_ROOT" xcodegen generate \
 xcodebuild -project "$REPOSITORY_ROOT/MacSyncStore.xcodeproj" \
   -scheme MacSyncStore -configuration Release -archivePath "$ARCHIVE" \
   -derivedDataPath "$REPOSITORY_ROOT/.build/store-derived" -jobs 2 ARCHS=arm64 \
-  MARKETING_VERSION="${MAC_SYNC_VERSION:-1.3.0}" \
+  MARKETING_VERSION="${MAC_SYNC_VERSION:-1.3.1}" \
   CURRENT_PROJECT_VERSION="${MAC_SYNC_BUILD:-1}" "${signing[@]}" archive

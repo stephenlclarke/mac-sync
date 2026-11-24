@@ -4,10 +4,13 @@ import MacSyncCore
 
 func diagnosisStatus(
     conditions: [SyncHealthCondition] = [],
-    commands: [SyncCommandDiagnostic]? = nil
+    commands: [SyncCommandDiagnostic]? = nil,
+    result: SyncResult = .success,
+    warningCount: Int = 1,
+    errorCount: Int = 0
 ) -> SyncStatus {
     .init(
-        result: .success,
+        result: result,
         startedAt: nil,
         finishedAt: "2026-11-23 14:42:54 GMT",
         durationSeconds: nil,
@@ -15,8 +18,8 @@ func diagnosisStatus(
         updatedByteCount: nil,
         storageFileCount: nil,
         storageByteCount: nil,
-        warningCount: 1,
-        errorCount: 0,
+        warningCount: warningCount,
+        errorCount: errorCount,
         lastCommit: nil,
         remoteRepository: "PRIVATE_VALUE",
         warnings: ["Deletions were not applied automatically. PRIVATE_VALUE"],

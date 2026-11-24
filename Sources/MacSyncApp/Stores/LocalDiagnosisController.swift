@@ -7,7 +7,10 @@ enum LocalDiagnosisSession {
         generator: any OnDeviceDiagnosisGenerating,
         timeoutNanoseconds: UInt64 = 30_000_000_000
     ) async throws -> [LocalDiagnosisFinding] {
-        try await withThrowingTaskGroup(of: LocalDiagnosisAnswer.self) { group in
+        try Task.checkCancellation()
+        // Do not ask a model to invent counts or work for an empty queue.
+        guard evidence.requiresModelOrdering else { return evidence.findings }
+        return try await withThrowingTaskGroup(of: LocalDiagnosisAnswer.self) { group in
             group.addTask { try await generator.generate(evidence: evidence) }
             group.addTask {
                 try await Task.sleep(nanoseconds: timeoutNanoseconds)
@@ -32,6 +35,10 @@ final class LocalDiagnosisController: ObservableObject {
     private var task: Task<Void, Never>?
     private var generation = 0
     private let generator: any OnDeviceDiagnosisGenerating
+
+    var usedModel: Bool {
+        orderedFindings != nil && evidence?.requiresModelOrdering == true
+    }
 
     init(generator: any OnDeviceDiagnosisGenerating = OnDeviceDiagnosisService.shared) {
         self.generator = generator
@@ -73,9 +80,11 @@ final class LocalDiagnosisController: ObservableObject {
                 }
             } catch {
                 if generation == expectedGeneration {
-                    message = evidence == nil
-                        ? "The review ledger could not be read safely. No AI request was made. Nothing was changed."
-                        : LocalDiagnosisError.failed.localizedDescription
+                    if evidence == nil {
+                        recordUnavailableInventory(status: status, storageKind: configuration.storageKind)
+                    } else {
+                        message = LocalDiagnosisError.failed.localizedDescription
+                    }
                 }
             }
             guard generation == expectedGeneration else { return }
@@ -105,5 +114,17 @@ final class LocalDiagnosisController: ObservableObject {
         return try await withTaskCancellationHandler {
             try await reader.value
         } onCancel: { reader.cancel() }
+    }
+
+    private func recordUnavailableInventory(status: SyncStatus, storageKind: BackupStorageKind) {
+        let facts = LocalDiagnosisEvidence(status: status, storageKind: storageKind, inventory: nil)
+        evidence = facts
+        orderedFindings = facts.findings
+        capturedAt = Date()
+        recordedRunFinishedAt = status.finishedAt
+        message = """
+        The review ledger could not be read safely. Counts remain unknown. \
+        No AI request was made and nothing was changed.
+        """
     }
 }

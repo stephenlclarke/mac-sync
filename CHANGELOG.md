@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add a read-only safety checklist beside on-device diagnosis: preserve available versions, review conflicts and path/link items, require separate deletion decisions and user approval, then verify any later, separately authorised sync. The app owns the advice and its order; the model cannot invent actions or omit safeguards.
+- Keep missing and unreadable review counts explicitly unknown, including null values in the diagnostic input format. Unknown and empty review queues never call the model. A healthy empty queue shows no repair steps; recorded failures and cloud upload uncertainty remain separate from file review.
+- Keep advice available without an AI model, preserve evidence on model errors and add regression tests for no-model paths, corrupt ledgers, healthy queues and all review categories. No cloud fallback, automatic repairs, file contents or new sync capability.
+
 ## 1.3.0 — 24 November 2026
 
 - Add optional read-only on-device diagnosis in Sync Health using Apple's native system model on macOS 26 or later. Keep complete typed review counts and verified explanations separate from AI ordering, reject inconsistent answers, and provide cancellation, a deadline and an evidence-only fallback. No cloud AI, raw-log/file-content input or automatic conflict resolution.
