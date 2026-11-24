@@ -1,5 +1,9 @@
 # Security Disclosure Process
 
+The GitHub/Homebrew edition uses the current user's normal permissions. The separate App Store target uses explicit folder grants, private container state, a bundled runtime and an opt-in `SMAppService` agent. Missing grant metadata fails closed before selected sources can become deletion records. Each worker uses the permission snapshot from its own launch; changing grants does not expand an existing child's rights. Resetting access disables the Store background agent.
+
+Store Git ignores external credential helpers, hooks, custom SSH commands and shell startup files. HTTPS credentials travel over standard input to the bundled Keychain helper and are never placed in process arguments, URLs or settings. SSH retains strict known-host checking. Store developer package/editor/Makefile operations are disabled. See [privacy](PRIVACY.md), [edition boundaries](docs/distribution.md) and the [submission gates](docs/app-store-submission.md).
+
 Ordinary synced files, Inbox deliveries and Undo copies are not end-to-end encrypted. Do not send credentials as ordinary file replacements. Causal metadata and expected hashes prevent accidental stale overwrites; they are not authentication against another writer with access to the same shared repository or provider folder. Use private, trusted destinations and separate encrypted-secret recovery. Cloud manifests verify integrity, not the provider's upload completion. See [sync and transfer safety](docs/sync-and-transfer.md) and the [data-loss disclaimer](NOTICE.md#data-loss-disclaimer).
 
 If you believe that you have discovered a security or privacy vulnerability in this open source project, please report it using the [GitHub private vulnerability reporting feature](https://github.com/stephenlclarke/mac-sync/security/advisories/new).

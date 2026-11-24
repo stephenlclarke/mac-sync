@@ -3,6 +3,8 @@
 <!-- markdownlint-disable MD013 -->
 
 Mac Sync uses the same two-lane release contract as `container-compose`.
+
+The GitHub/Homebrew process remains the direct-distribution path. App Store archives are separate, self-contained builds with a different bundle identifier, signing identity, provisioning profile and update mechanism. Follow the [App Store submission gates](docs/app-store-submission.md); do not publish an experimental archive as an approved Store release. Mac Sync's own code now offers AGPL-3.0-or-later OR MIT. Bundled third-party tools retain their licences and require separate distribution review.
 Semantic releases are immutable and Current is a replaceable prerelease built
 from the newest fully validated `main` commit.
 
@@ -71,7 +73,7 @@ A successful `main` CI run starts the release workflow automatically. It:
 2. Waits for exact-commit CI and CodeQL success.
 3. Builds and validates a commit-addressed archive.
 4. Stages the new assets on the existing Current release without moving its tag.
-5. Updates, pushes, installs, and tests `mac-sync-current` in the Homebrew tap.
+5. Opens a GitHub-signed formula pull request, waits for its checked merge, then installs and tests `mac-sync-current` from the Homebrew tap.
 6. Moves only the reserved `current` tag and recreates the prerelease with a
    fresh publication time.
 7. Removes assets from superseded releases while retaining their records and
@@ -82,7 +84,7 @@ until its replacement has been uploaded.
 
 ## Stable Release
 
-For 1.2.0, use the changes and compatibility notes in [CHANGELOG.md](CHANGELOG.md)
+For 1.3.0, use the changes and compatibility notes in [CHANGELOG.md](CHANGELOG.md)
 and [Architecture](docs/architecture.md). Include the resource-probe result and
 the uncompleted multi-day soak limit in release notes. The standard release
 gate is not a claim of long-term memory stability.
@@ -93,12 +95,12 @@ Prepare a release only from a clean, published `main` commit:
 make ci
 git fetch --all --prune --no-tags
 git status --short --branch
-git tag --no-sign 1.2.0
-git push origin refs/tags/1.2.0
-gh workflow run prebuilt-binaries.yml --ref main -f ref=1.2.0
+git tag --no-sign 1.3.0
+git push origin refs/tags/1.3.0
+gh workflow run prebuilt-binaries.yml --ref main -f ref=1.3.0
 ```
 
-Replace `1.2.0` with the intended semantic version. Never move or recreate a
+Replace `1.3.0` with the intended semantic version. Never move or recreate a
 published semantic tag. The workflow refuses to overwrite an existing stable
 release or mismatched assets.
 
@@ -122,6 +124,8 @@ brew trust --formula stephenlclarke/tap/mac-spinner
 ```
 
 The workflow trusts only that dependency, not every formula in the tap.
+
+Both release lanes use a signed pull request for the protected tap. The publication step prints its URL and waits up to 15 minutes for a maintainer to merge it. Check that `Formula Syntax` passes before merging. The workflow never bypasses reviews or changes branch protection. If the wait expires, merge the checked formula and rerun the release job; an exact formula already on `main` is accepted without a new pull request.
 
 Only these releases retain downloadable assets:
 

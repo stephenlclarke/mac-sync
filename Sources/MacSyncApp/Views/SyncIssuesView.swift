@@ -5,6 +5,7 @@ struct SyncIssuesView: View {
     @State private var filter: SyncIssueFilter = .open
     @State private var selectedIssueID: String?
     @State private var triageNote = ""
+    @State private var showingLocalDiagnosis = false
 
     private var filteredIssues: [SyncIssue] {
         switch filter {
@@ -33,6 +34,13 @@ struct SyncIssuesView: View {
                     Text("Active conditions are checked again automatically. Recovered events remain in All.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button {
+                        showingLocalDiagnosis = true
+                    } label: {
+                        Label("Diagnose On Device", systemImage: "sparkles")
+                    }
+                    .disabled(store.isRunning)
+                    .help("Read-only diagnosis using Apple's local model. No cloud fallback or automatic fixes. Wait for an active sync to finish first.")
                 }
                 .padding()
 
@@ -66,6 +74,9 @@ struct SyncIssuesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: $showingLocalDiagnosis) {
+            LocalDiagnosisView(overview: store.overview)
+        }
         .onAppear {
             selectFirstIssueIfNeeded()
         }

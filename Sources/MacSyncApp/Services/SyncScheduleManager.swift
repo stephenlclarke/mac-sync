@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import MacSyncCore
 
-enum SyncScheduleWeekday: Int, CaseIterable, Hashable, Identifiable {
+enum SyncScheduleWeekday: Int, CaseIterable, Hashable, Identifiable, Codable {
     case sunday = 0
     case monday = 1
     case tuesday = 2
@@ -30,13 +30,13 @@ enum SyncScheduleWeekday: Int, CaseIterable, Hashable, Identifiable {
     }
 }
 
-struct SyncScheduleCalendarEntry: Equatable, Hashable {
+struct SyncScheduleCalendarEntry: Equatable, Hashable, Codable {
     let weekday: SyncScheduleWeekday
     let hour: Int
     let minute: Int
 }
 
-enum SyncSchedule: Equatable {
+enum SyncSchedule: Equatable, Codable {
     case watch
     case interval(minutes: Int)
     case calendar(entries: [SyncScheduleCalendarEntry])
@@ -57,6 +57,9 @@ enum SyncScheduleState: Equatable {
 struct SyncScheduleStatus: Equatable {
     let state: SyncScheduleState
     let agentPath: String
+    var requiresApproval = false
+    var serviceDisabled = false
+    var serviceDetail: String?
 
     var schedule: SyncSchedule? {
         if case let .configured(schedule) = state {
@@ -66,7 +69,16 @@ struct SyncScheduleStatus: Equatable {
     }
 
     var detail: String {
-        switch state {
+        if let serviceDetail {
+            return serviceDetail
+        }
+        if requiresApproval {
+            return "Background sync is waiting for approval in System Settings → General → Login Items & Extensions."
+        }
+        if serviceDisabled {
+            return "Background sync is saved but disabled by macOS. Enable it in System Settings or save the schedule again."
+        }
+        return switch state {
         case .disabled:
             "No automatic sync schedule is installed by Mac Sync."
         case let .configured(schedule):
@@ -156,6 +168,9 @@ struct SyncScheduleManager {
     }
 
     func status() -> SyncScheduleStatus {
+        if MacSyncDistribution.current == .appStore {
+            return ManagedAgentService(environment: environment).status()
+        }
         guard let data = try? Data(contentsOf: agentURL),
               let propertyList = try? PropertyListSerialization.propertyList(from: data, format: nil),
               let values = propertyList as? [String: Any],
@@ -189,6 +204,9 @@ struct SyncScheduleManager {
     func configure(schedule: SyncSchedule?) throws -> SyncScheduleStatus {
         if let schedule, !Self.isValid(schedule: schedule) {
             throw SyncScheduleError.invalidSchedule
+        }
+        if MacSyncDistribution.current == .appStore {
+            return try ManagedAgentService(environment: environment).configure(schedule: schedule)
         }
         if schedule != nil, executableURL == nil {
             throw SyncScheduleError.missingExecutable
@@ -302,7 +320,7 @@ struct SyncScheduleManager {
         "gui/\(userID)"
     }
 
-    private static func isValid(schedule: SyncSchedule) -> Bool {
+    static func isValid(schedule: SyncSchedule) -> Bool {
         switch schedule {
         case .watch:
             return true

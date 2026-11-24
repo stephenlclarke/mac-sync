@@ -482,6 +482,7 @@ public struct ProcessRunner {
         capture: Bool = true,
         timeout: TimeInterval? = nil,
         outputLimit: Int = 8 * 1024 * 1024,
+        input: Data? = nil,
         onStdoutLine: ((String) -> Void)? = nil,
     ) -> CommandResult {
         if WorkerCancellation.shared.isCancelled {
@@ -489,14 +490,19 @@ public struct ProcessRunner {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [executable] + arguments
-        if let workingDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        let invocation = MacSyncDistribution(environment: environment) == .appStore && executable == "rsync"
+            ? MacSyncStoreRuntime.localTransfer(arguments: arguments, workingDirectory: workingDirectory)
+            : (arguments, workingDirectory)
+        process.arguments = [executable] + invocation.0
+        if let directory = invocation.1 {
+            process.currentDirectoryURL = URL(fileURLWithPath: directory)
         }
         process.environment = environment.merging(extraEnvironment) { _, new in new }
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
+        let inputPipe = input.map { _ in Pipe() }
+        process.standardInput = inputPipe ?? FileHandle.nullDevice
         if capture {
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
@@ -514,6 +520,15 @@ public struct ProcessRunner {
         let grouped = setpgid(process.processIdentifier, process.processIdentifier) == 0
         let output = ProcessOutputCapture(limit: outputLimit, lineHandler: onStdoutLine)
         let reads = DispatchGroup()
+        if let input, let inputPipe {
+            try? inputPipe.fileHandleForReading.close()
+            _ = fcntl(inputPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            reads.enter()
+            DispatchQueue.global(qos: .utility).async {
+                defer { try? inputPipe.fileHandleForWriting.close(); reads.leave() }
+                try? inputPipe.fileHandleForWriting.write(contentsOf: input)
+            }
+        }
         if capture {
             reads.enter()
             DispatchQueue.global(qos: .utility).async {

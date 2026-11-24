@@ -4,6 +4,7 @@
 *.log
 .build/
 .swiftpm/
+MacSyncStore.xcodeproj/
 dist/
 coverage.lcov
 coverage.xml

@@ -4,6 +4,8 @@
 
 ## Local development
 
+For the separate self-contained Store target, see [distribution boundaries](docs/distribution.md), [build and submission gates](docs/app-store-submission.md) and [runtime source provenance](Tools/runtime/README.md). `make store-archive`, `make store-audit` and `make store-smoke` do not replace the direct build or its CI gates. Own-code contributions must be available under **AGPL-3.0-or-later OR MIT**; third-party licences must stay intact.
+
 Use generated temporary HOME/repository/cloud directories for sync and recovery tests. Do not point development fixtures at a real selection or installed schedule. New core files must be included in the coverage export. The [sync and transfer guide](docs/sync-and-transfer.md) describes causal versions, Inbox ownership and storage-provider boundaries. Preserve the static menu-bar label; use the real desktop memory check before releasing UI status changes.
 
 Clone with `--recurse-submodules`, or initialise the pinned standalone `mac-spinner` submodule in an existing checkout:
@@ -72,7 +74,15 @@ serially. Coverage is written to `coverage.lcov` and `coverage.xml`; CI passes
 static-analysis findings and applies coverage only to the instrumented core
 files.
 
-Run the Swift tests with runtime instrumentation when changing process handling, concurrency, or memory ownership:
+### On-device diagnosis tests
+
+Normal CI uses fake AI generators and generated review records. It checks exact deletion counts, missing evidence, invalid or omitted findings, cancellation, deadlines, privacy filtering and read-only database access. Do not point these fixtures at an installed Mac Sync configuration or real synced files.
+
+For an explicit native-model check on an eligible Mac with macOS 26 or later and a prepared Apple Intelligence model, run `make diagnosis-model-test`. It uses only `SystemLanguageModel.default`, generated zero- and two-deletion cases, and a fresh session for each request. It never resolves conflicts or uses a cloud fallback. To verify offline operation, disconnect external networking before this opt-in check and confirm that it stays disconnected throughout; the target itself never changes network settings. Run with normal permission to contact macOS's local model service: a restricted command runner can report model error 1008 when it blocks that local service.
+
+### Runtime instrumentation
+
+Run these checks when changing process handling, concurrency or memory ownership:
 
 ```sh
 make sanitize-address

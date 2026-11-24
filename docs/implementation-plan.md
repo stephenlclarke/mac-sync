@@ -1,5 +1,37 @@
 # Quiet background sync implementation
 
+## Read-only on-device diagnosis — 23 November 2026
+
+- [x] Add a user-requested Sync Health diagnosis sheet and native on-device-only model service, without a cloud or command-line fallback.
+- [x] Stream complete review counts through a read-only ledger connection; keep missing or malformed evidence distinct from zero.
+- [x] Exclude file contents, names, paths, raw logs and credentials. Validate generated counts/result and finding identifiers; render only trusted explanations.
+- [x] Add cancellation, bounded generation, a deadline, unavailable-model handling and deterministic regression tests for false deletion claims.
+- [x] Complete final tests, native offline integration, running-window inspection and review. No installed app, sync destination or conflict is changed by development.
+
+Local validation on 24 November: `make ci` passed with 96 core and 115 app test cases, including one opt-in model test skipped in ordinary CI, and 88.17% instrumented core coverage. The focused AddressSanitizer and ThreadSanitizer runs passed. Strict lint and formatting checks passed for the new Swift files, as did documentation lint. The isolated production-view fixture showed the verified counts and a visible Close action without using real sync data.
+
+The native `make diagnosis-model-test` target passed separately on macOS 27.2.1 with external connectivity disabled throughout three fresh model sessions: zero deletions, a synthetic two-deletion case, then zero again. Ethernet was restored and checked afterwards. A first native validation correctly rejected an omitted zero-deletion finding; an explicit required-ID list corrected the model input without weakening validation. These results do not qualify earlier macOS runtimes, Store-sandbox model access or hosted release gates. No installed app was replaced, no conflict was resolved and nothing was published.
+
+## Dual distribution — started 17 November 2026
+
+Approved: keep Git and cloud-folder file sync in the App Store and GitHub/Homebrew editions. Optional developer-tool features may remain direct-distribution only. Keep one shared sync engine. quux.io has authorised an MIT option alongside AGPL for its own Mac Sync code; third-party licences are unchanged.
+
+- [x] Implement a bounded scrolling warning panel, scan cancellation and a visible Settings Close action, with regression tests. Final running-window inspection remains pending.
+- [x] Define explicit distribution capabilities and prevent App Store builds from using Homebrew paths or developer-tool installation.
+- [x] Build and audit an unsigned self-contained runtime, with dependency provenance, notices, corresponding-source materials and executable/library validation.
+- [ ] Persist user-granted folder access and restore it in UI and background processes. Fail closed when access needs renewal.
+- [x] Implement the bundled `SMAppService` entry point and registration/approval/rollback tests; retain the direct-edition schedule path and explicit consent. Real registration/disable/relaunch qualification remains pending.
+- [x] Provide separate direct and Store archive/export paths, without replacing the existing installer channel. Store export needs Apple Distribution certificates/profiles, not the available Developer ID identity.
+- [ ] Validate both editions, including a sandboxed generated-data round trip, background registration/permission states and an archive audit. Confirm signing/profile requirements before claiming submission readiness.
+- [x] Update user, security, architecture, privacy, release and submission documentation.
+- [ ] Finish the final source/package review and unresolved external-folder, service-lifecycle, signing and third-party distribution checks before publication.
+
+Local evidence on 17 November: full local CI passed at an intermediate revision with 88.11% Swift coverage; the final permission/transfer changes passed focused tests and ThreadSanitizer. The native sandbox fixture completed repeated sync, age encryption/decryption, GNU tar and denied-grant snapshot preservation using container-local generated files. The runtime audit passed for all ten executables. Resource probes held at 28 MiB over 1,000 iterations and 21–22 MiB during a 30-second menu-bar check. These results do not prove external-folder access, multi-day stability, minimum-OS operation or App Store acceptance.
+
+The user approved the empty `/private/tmp/mac-sync-store-access.DRiz3c` fixture. The exact-path external-folder test passed, then the same signed test app exited and restarted without a dialogue. The saved bookmark restored successfully; sync/update, age encryption, GNU tar and missing-grant snapshot preservation passed again on macOS 27.2.1. The test-only saved bookmark was removed. A harness cleanup-order defect left one generated subfolder after the first relaunch test; only that known fixture was removed, and cleanup was corrected to run before releasing access. Both stages passed again with the corrected cleanup, and the approved parent folder was verified empty. Final local CI passed with 88.12% Swift coverage. No installed Mac Sync app, destination, selection or schedule was changed. This does not qualify other macOS versions or the real registered background-service lifecycle. Apple distinguishes static inheritance from user-granted dynamic access; see [sandbox inheritance](https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/EnablingAppSandbox.html). Do not infer those untested cases from metadata or container-only tests.
+
+The App Store archive is not complete merely because it compiles. It must contain its runtime tools, have appropriate signatures/profiles and folder permissions, and pass the sandbox tests. Actual App Store submission, acceptance of Apple agreements and approval are not inferred from a local archive. No real user files or installed schedules will be used as test fixtures.
+
 ## Multi-Mac sync delivery — 16–17 November 2026
 
 Approved scope: fix all confirmed review defects; provide guided GitHub, GitLab and Bitbucket setup; support a Finder-selected cloud-synced folder; add versioned restore with undo, reviewed presets and credential warnings, honest protection status, pause/resource controls, and test recovery/key-recovery guidance. Do not change the maintainer's installed destination or sync real files during development. Folder mode must never claim that a provider has uploaded a locally saved backup. Direct cloud APIs and App Store submission are not part of this delivery.

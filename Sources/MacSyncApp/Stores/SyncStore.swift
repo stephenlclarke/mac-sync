@@ -285,6 +285,12 @@ final class SyncStore: ObservableObject {
     }
 
     func add(paths: [String]) {
+        if MacSyncDistribution(environment: commandEnvironment) == .appStore,
+           let problem = MacSyncApplicationRuntime.shared.accessProblem(paths: paths.map { $0.hasPrefix("/") ? $0 : "\(overview.configuration.homeDirectory)/\($0)" })
+        {
+            errorMessage = problem
+            return
+        }
         let allPaths = selectedPaths + paths
         var seen = Set<String>()
         selectedPaths = allPaths.filter {
@@ -294,6 +300,11 @@ final class SyncStore: ObservableObject {
     }
 
     func add(fileURLs: [URL]) {
+        do {
+            if MacSyncDistribution(environment: commandEnvironment) == .appStore {
+                try MacSyncApplicationRuntime.shared.authorize(fileURLs)
+            }
+        } catch { errorMessage = error.localizedDescription; return }
         add(paths: fileURLs.map(repository.pathForUserSelection))
     }
 
@@ -369,7 +380,7 @@ final class SyncStore: ObservableObject {
 
     func previewRestore(from machine: String, paths: [String]? = nil) {
         guardSetup()
-        guard isSetupComplete else { return }
+        guard isSetupComplete, authorizeCopyPaths(paths) else { return }
         let arguments = restoreArguments(from: machine, paths: paths)
         run(
             arguments: arguments,
@@ -380,7 +391,7 @@ final class SyncStore: ObservableObject {
 
     func restore(from machine: String, force: Bool, paths: [String]? = nil) {
         guardSetup()
-        guard isSetupComplete else { return }
+        guard isSetupComplete, authorizeCopyPaths(paths) else { return }
         var arguments = restoreArguments(from: machine, paths: paths)
         if force {
             arguments.append("--force")
@@ -513,6 +524,7 @@ final class SyncStore: ObservableObject {
     }
 
     func restoreVersion(machine: String, revision: String, paths: [String], force: Bool = false, preview: Bool = false, output: String? = nil) {
+        guard authorizeCopyPaths(output.map { [$0] } ?? paths) else { return }
         var arguments = ["restore", "--from", machine, "--revision", revision]
         for path in paths {
             arguments += ["--path", path]
@@ -528,6 +540,11 @@ final class SyncStore: ObservableObject {
     }
 
     func undoRestore(id: String, preview: Bool) {
+        if MacSyncDistribution(environment: commandEnvironment) == .appStore {
+            do {
+                guard try authorizeCopyPaths(recoveryService.undoPreview(id: id).map(\.path)) else { return }
+            } catch { errorMessage = error.localizedDescription; return }
+        }
         run(arguments: ["undo-restore", id, preview ? "--preview" : "--force"], action: .undoingRestore)
     }
 
@@ -544,11 +561,14 @@ final class SyncStore: ObservableObject {
     }
 
     func resolveIncoming(_ change: IncomingSyncChange, choice: String) {
+        guard authorizeCopyPaths([change.path]) else { return }
         run(arguments: ["incoming", "resolve", change.id, choice], action: .restoring(change.machine))
     }
 
     func sendFiles(_ files: [URL], to machine: String, paths: [String]) {
         guard !files.isEmpty, files.count == paths.count, files.count <= 100 else { errorMessage = "Choose between 1 and 100 regular files per delivery."; return }
+        do { try MacSyncApplicationRuntime.shared.authorize(files) }
+        catch { errorMessage = error.localizedDescription; return }
         var arguments = ["deliver", "--to", machine]
         for (file, path) in zip(files, paths) {
             arguments += ["--path", path, "--file", file.path]
@@ -566,6 +586,9 @@ final class SyncStore: ObservableObject {
     }
 
     func resolveDelivery(_ record: MachineFileDelivery, apply: Bool) {
+        if apply, !authorizeCopyPaths([record.path]) {
+            return
+        }
         run(arguments: ["deliveries", "resolve", record.id, apply ? "--apply" : "--keep-local"], action: .restoring(record.sender))
     }
 
@@ -650,6 +673,14 @@ final class SyncStore: ObservableObject {
         errorMessage = nil
     }
 
+    private func authorizeCopyPaths(_ paths: [String]?) -> Bool {
+        guard MacSyncDistribution(environment: commandEnvironment) == .appStore else { return true }
+        let home = overview.configuration.homeDirectory
+        let targets = (paths?.isEmpty == false ? paths! : [home]).map { URL(fileURLWithPath: $0.hasPrefix("/") ? $0 : "\(home)/\($0)") }
+        do { try MacSyncApplicationRuntime.shared.authorize(targets); return true }
+        catch { errorMessage = error.localizedDescription; return false }
+    }
+
     private func run(
         arguments: [String],
         action: SyncAction,
@@ -660,6 +691,14 @@ final class SyncStore: ObservableObject {
             return
         }
         guard activeAction == nil else { return }
+        if MacSyncDistribution(environment: commandEnvironment) == .appStore {
+            let configuration = overview.configuration
+            let paths = action == .syncing ? selectedPaths.map { $0.hasPrefix("/") ? $0 : "\(configuration.homeDirectory)/\($0)" } : []
+            if let problem = MacSyncApplicationRuntime.shared.accessProblem(paths: paths + [configuration.dataRepository] + (configuration.cloudFolder.map { [$0] } ?? [])) {
+                errorMessage = problem
+                return
+            }
+        }
         guard let executableURL = MacSyncCommandLocator.executableURL() else {
             errorMessage = SyncConfigurationError.missingExecutable.localizedDescription
             return
@@ -685,6 +724,22 @@ final class SyncStore: ObservableObject {
         process.executableURL = executableURL
         process.arguments = arguments
         process.environment = commandEnvironment.merging(extraEnvironment) { _, replacement in replacement }
+        var accessManifest: URL?
+        if MacSyncDistribution(environment: commandEnvironment) == .appStore {
+            do {
+                let lease = try MacSyncApplicationRuntime.shared.workerEnvironment()
+                accessManifest = lease.manifest
+                for key in ["MAC_SYNC_ACCESS_MANIFEST", "MAC_SYNC_ACCESS_BOOKMARKS_FILE"] {
+                    process.environment?[key] = lease.values[key]
+                }
+            } catch {
+                try? activityHandle?.close()
+                activityHandle = nil
+                activityURL = nil
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
         process.environment?["MAC_SYNC_QUIET"] = "1"
         process.standardOutput = activityHandle
         process.standardError = activityHandle
@@ -697,7 +752,11 @@ final class SyncStore: ObservableObject {
         activityObservation = LocalStateObservation(directory: url.path) { [weak self] in
             DispatchQueue.main.async { self?.readActivityTail() }
         }
+        let manifestToRemove = accessManifest
         process.terminationHandler = { [weak self] completedProcess in
+            if let manifestToRemove {
+                try? FileManager.default.removeItem(at: manifestToRemove)
+            }
             DispatchQueue.main.async {
                 self?.finish(process: completedProcess)
             }
@@ -706,6 +765,9 @@ final class SyncStore: ObservableObject {
         do {
             try process.run()
         } catch {
+            if let accessManifest {
+                try? FileManager.default.removeItem(at: accessManifest)
+            }
             activeAction = nil
             self.process = nil
             activityObservation = nil

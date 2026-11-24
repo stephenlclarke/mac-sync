@@ -72,6 +72,7 @@ enum RepositorySSHConfigurationError: LocalizedError {
 struct RepositorySetupService {
     private let fileManager: FileManager
     private let runner: any GitCommandRunning
+    private let environment: [String: String]
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -79,7 +80,9 @@ struct RepositorySetupService {
         runner: (any GitCommandRunning)? = nil,
     ) {
         self.fileManager = fileManager
-        self.runner = runner ?? SystemGitCommandRunner(environment: environment)
+        let prepared = MacSyncDistribution.current == .appStore ? MacSyncRuntimeEnvironment.prepared(environment) : environment
+        self.environment = prepared
+        self.runner = runner ?? SystemGitCommandRunner(environment: prepared)
     }
 
     func inspect(_ locations: RepositoryLocations) -> [LocalRepositoryInspection] {
@@ -93,7 +96,7 @@ struct RepositorySetupService {
         guard folder.hasPrefix("/"), fileManager.fileExists(atPath: folder, isDirectory: &directory), directory.boolValue else {
             throw BackupStorageError.invalidDestination
         }
-        let workspace = BackupDestinationSettings.cloudWorkspace(folder: folder, home: home)
+        let workspace = BackupDestinationSettings.cloudWorkspace(folder: folder, home: environment["MAC_SYNC_CONTAINER_HOME"] ?? home)
         guard !BackupDestinationSettings.isInside(workspace, directory: folder),
               !BackupDestinationSettings.isInside(folder, directory: workspace) else { throw BackupStorageError.invalidDestination }
         let locations = RepositoryLocations(dataRepository: workspace, storageKind: .cloudFolder, cloudFolder: folder)

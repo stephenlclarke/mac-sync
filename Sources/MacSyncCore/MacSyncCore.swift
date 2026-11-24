@@ -269,6 +269,9 @@ public final class MacSyncApp {
         if !args.isEmpty {
             args.removeFirst()
         }
+        if MacSyncDistribution(environment: environment) == .appStore, ["packages", "editor"].contains(command) {
+            try fail("Developer-tool installation is available only in the GitHub/Homebrew edition.", code: 2)
+        }
         switch command {
         case "sync":
             try cmdSync()
@@ -918,11 +921,13 @@ public final class MacSyncApp {
         guard fm.fileExists(atPath: config.pathsFile) else {
             try fail("missing paths file: \(config.pathsFile)")
         }
-        return try validatedSyncPaths(readConfigLines(config.pathsFile), source: config.pathsFile)
+        let paths = try validatedSyncPaths(readConfigLines(config.pathsFile), source: config.pathsFile)
+        try MacSyncAccessPolicy.validate(paths: paths.map { sourcePath(for: $0) }, environment: environment)
+        return paths
     }
 
     private func dotFilesManifestAvailable() -> Bool {
-        fm.fileExists(atPath: "\(config.machinesRepoDir)/Makefile") && runner.commandExists("make")
+        MacSyncDistribution(environment: environment).supportsDeveloperTools && fm.fileExists(atPath: "\(config.machinesRepoDir)/Makefile") && runner.commandExists("make")
     }
 
     private func configuredManifestPathsFromDotFiles() throws -> [String]? {
@@ -1655,6 +1660,12 @@ public final class MacSyncApp {
         }
     }
 
+    private func permittedSecretManifestPaths() throws -> [String] {
+        let paths = secretManifestPaths()
+        try MacSyncAccessPolicy.validate(paths: paths.map { sourcePath(for: $0) }, environment: environment)
+        return paths
+    }
+
     private func ageRecipients() -> [String] {
         readConfigLines(config.ageRecipientsFile)
     }
@@ -2033,7 +2044,8 @@ public final class MacSyncApp {
         let plainArchive = "\(tmpDir)/secrets.tar.gz"
         let stagedArchive = "\(config.secretsDir)/.secrets.tar.gz.age.\(UUID().uuidString).tmp"
         defer { try? removePath(stagedArchive) }
-        let includedPaths = secretManifestPaths().filter { pathExists(sourcePath(for: $0)) }
+        let secretPaths = try permittedSecretManifestPaths()
+        let includedPaths = secretPaths.filter { pathExists(sourcePath(for: $0)) }
         if mode == "required" {
             for rel in secretManifestPaths() where !pathExists(sourcePath(for: rel)) {
                 info("skip missing secret source: \(sourcePath(for: rel))")
@@ -2107,7 +2119,7 @@ public final class MacSyncApp {
                                                       recovery: "Reinstall the Homebrew formula and retry."))
             return
         }
-        let includedPaths = secretManifestPaths().filter { pathExists(sourcePath(for: $0)) }
+        let includedPaths = try permittedSecretManifestPaths().filter { pathExists(sourcePath(for: $0)) }
         guard !includedPaths.isEmpty else { return }
         let temporary = try tempPath(prefix: "mac-sync-background-secrets", directory: true)
         defer { try? removePath(temporary) }
@@ -3867,18 +3879,26 @@ public final class MacSyncApp {
         defer { withExtendedLifetime(lock) {} }
         _ = setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)
         let preferences = BackupPreferences.url(directory: config.statusDir, machine: config.machineName).path
-        let controls = [config.pathsFile, config.excludesFile, config.secretPathsFile, preferences, checkpointPath]
+        let controls = [config.pathsFile, config.excludesFile, config.secretPathsFile, preferences, checkpointPath] + (environment["MAC_SYNC_ACCESS_BOOKMARKS_FILE"].map { [$0] } ?? [])
+        let calendarEntries = try environment["MAC_SYNC_CALENDAR_ENTRIES"].map {
+            try JSONDecoder().decode([BackgroundCalendarEntry].self, from: Data($0.utf8))
+        } ?? []
+        guard calendarEntries.isEmpty || BackgroundCalendarEntry.nextDate(entries: calendarEntries, after: Date()) != nil else {
+            try fail("invalid managed calendar schedule", code: 2)
+        }
         let service = BackgroundWatchService(executable: Config.realpathExisting(invocationArguments.first ?? "mac-sync"),
                                              environment: environment, interval: TimeInterval(minutes * 60), controls: controls,
                                              excluded: [config.machinesRepoDir, config.statusDir], checkpoint: checkpointPath,
-                                             repository: config.machinesRepoDir)
+                                             repository: config.machinesRepoDir, observesFiles: environment["MAC_SYNC_OBSERVE_FILES"] != "0", calendarEntries: calendarEntries)
         { [self] in
             let paths = try manifestPaths().map { sourcePath(for: $0) }
             let secrets = readConfigLines(config.secretPathsFile).filter(MacSyncPaths.safeSyncPath).map { sourcePath(for: $0) }
             return paths + secrets + (config.cloudFolder.map { [$0] } ?? [])
         }
         info("Watching selected folders; saves are combined for 15 seconds, with a full safety/remote check every \(minutes) minutes")
-        try service.run()
+        if try service.run() {
+            throw ExitError(code: 75)
+        }
     }
 
     private func incomingEngine() throws -> IncomingSyncEngine {

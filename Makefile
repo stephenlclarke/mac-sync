@@ -10,7 +10,7 @@ MARKDOWNLINT ?= markdownlint
 COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
 MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
-MAC_SYNC_VERSION ?= 1.2.0
+MAC_SYNC_VERSION ?= 1.3.0
 MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
@@ -43,7 +43,33 @@ MAC_SPINNER_BINARY ?= $(abspath .build/debug/mac-spinner)
 MAC_SYNC_APP_BINARY ?= $(abspath .build/$(PACKAGE_BUILD_CONFIGURATION)/MacSync)
 MAC_SYNC_APP_BUNDLE ?= $(abspath $(DIST_DIR)/mac-sync/MacSync.app)
 SHELL_TESTS := spinner help manifest dynamic status restore homebrew editor github-repositories secrets concurrent-machines user-configuration reliability
-MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md CHANGELOG.md docs/architecture.md docs/desktop-guide.md docs/cli-reference.md docs/configuration.md docs/sync-and-transfer.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md docs/reviews/reliability-review-2026-11-17.md .github/pull_request_template.md
+MARKDOWN_FILES := README.md CODE_OF_CONDUCT.md CONTRIBUTING.md RELEASES.md SECURITY.md SUPPORT.md WORKFLOW.md NOTICE.md LICENSE.md LICENSE-MIT.md PRIVACY.md CHANGELOG.md docs/architecture.md docs/distribution.md docs/app-store-submission.md docs/desktop-guide.md docs/cli-reference.md docs/configuration.md docs/sync-and-transfer.md docs/implementation-plan.md docs/reviews/memory-review-2026-10-26.md docs/reviews/reliability-review-2026-11-17.md Tools/runtime/README.md .github/pull_request_template.md
+
+.PHONY: store-runtime store-archive store-signed-archive store-audit store-export store-smoke store-smoke-external
+store-runtime:
+	$(PYTHON) Tools/runtime/build_runtime.py
+
+store-archive:
+	bash Tools/release/build-store.sh
+
+store-signed-archive:
+	bash Tools/release/build-store.sh --signed
+
+store-audit:
+	$(PYTHON) Tools/runtime/audit_runtime.py .build/MacSyncStore.xcarchive/Products/Applications/MacSync.app
+
+store-export:
+	bash Tools/release/build-store.sh --export
+
+store-smoke: store-runtime
+	MAC_SYNC_SOURCE_ROOT="$(CURDIR)" xcodegen generate --spec Store/project.yml --project-root "$(CURDIR)" --project "$(CURDIR)"
+	xcodebuild -project MacSyncStore.xcodeproj -scheme MacSyncStoreSmoke -configuration Release -derivedDataPath .build/store-smoke-derived -jobs 2 ARCHS=arm64 CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES build
+	.build/store-smoke-derived/Build/Products/Release/MacSyncStoreSmoke.app/Contents/MacOS/MacSyncStoreSmoke
+
+store-smoke-external: store-smoke
+	@test -n "$(MAC_SYNC_TEST_FOLDER)" || { printf 'Set MAC_SYNC_TEST_FOLDER to an explicitly approved empty mac-sync-store-access temporary folder.\n' >&2; exit 2; }
+	.build/store-smoke-derived/Build/Products/Release/MacSyncStoreSmoke.app/Contents/MacOS/MacSyncStoreSmoke --grant-folder "$(MAC_SYNC_TEST_FOLDER)"
+	.build/store-smoke-derived/Build/Products/Release/MacSyncStoreSmoke.app/Contents/MacOS/MacSyncStoreSmoke --restore-grant "$(MAC_SYNC_TEST_FOLDER)"
 
 .PHONY: all workflow ci clean run build build-release codeql-build app-debug app-built sign-app signing-identities verify-signing package-signed icon test resolve submodules spinner-build cli-binaries docs serve-docs swift-test-build swift-test swift-coverage coverage-shell-test shell-test cli-smoke cli-smoke-built coverage coverage-check sonar sonar-scan package package-release package-debug package-built coverage-tools-test check lint format fmt
 
@@ -124,7 +150,7 @@ app-built:
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(MAC_SYNC_VERSION)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(MAC_SYNC_BUILD)" "$(MAC_SYNC_APP_BUNDLE)/Contents/Info.plist"
 	cp "Sources/MacSyncApp/Resources/MacSync.icns" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/MacSync.icns"
-	cp LICENSE.md NOTICE.md "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/"
+	cp LICENSE LICENSE.md LICENSE-MIT.md NOTICE.md "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/"
 	chmod +x "$(MAC_SYNC_APP_BUNDLE)/Contents/MacOS/MacSync" "$(MAC_SYNC_APP_BUNDLE)/Contents/Resources/mac-sync"
 	$(MAKE) sign-app \
 		MAC_SYNC_APP_BUNDLE="$(MAC_SYNC_APP_BUNDLE)" \
@@ -189,6 +215,10 @@ run:
 
 test: swift-test shell-test
 
+.PHONY: diagnosis-model-test
+diagnosis-model-test:
+	MAC_SYNC_TEST_LOCAL_AI=1 $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --filter LocalDiagnosisSessionTests/testLiveOnDeviceDiagnosisWhenExplicitlyRequested
+
 swift-test-build:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --build-tests --enable-code-coverage
 
@@ -241,6 +271,11 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/StreamingHistoryReader.swift \
 		--sources Sources/MacSyncCore/BackgroundPolicy.swift \
 		--sources Sources/MacSyncCore/BackgroundAgentMigration.swift \
+		--sources Sources/MacSyncCore/BackgroundCalendarSchedule.swift \
+		--sources Sources/MacSyncCore/InstallationIdentity.swift \
+		--sources Sources/MacSyncCore/MacSyncAccessPolicy.swift \
+		--sources Sources/MacSyncCore/MacSyncDistribution.swift \
+		--sources Sources/MacSyncCore/MacSyncFileAccess.swift \
 		--sources Sources/MacSyncCore/BackupDestination.swift \
 		--sources Sources/MacSyncCore/BackupPreferences.swift \
 		--sources Sources/MacSyncCore/BackupRecovery.swift \
@@ -248,6 +283,7 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/FolderSnapshotStore.swift \
 		--sources Sources/MacSyncCore/GitRemote.swift \
 		--sources Sources/MacSyncCore/IncomingSync.swift \
+		--sources Sources/MacSyncCore/IncomingReviewInventory.swift \
 		--sources Sources/MacSyncCore/MachineFileDelivery.swift \
 		--sources Sources/MacSyncCore/NewestDiskPage.swift \
 		--sources Sources/MacSyncCore/SnapshotReadWorkspace.swift \
@@ -392,8 +428,10 @@ package-built:
 	(cd "$$archive_dir" && shasum -a 256 "$$archive_name" > "$$archive_name.sha256")
 
 coverage-tools-test:
-	$(PYTHON) -m py_compile Tools/coverage/*.py Tools/release/*.py
+	bash tests/protected-tap.sh
+	$(PYTHON) -m py_compile Tools/coverage/*.py Tools/release/*.py Tools/runtime/*.py
 	$(PYTHON) -m unittest discover -s Tools/release -p 'test_*.py'
+	$(PYTHON) -m unittest discover -s Tools/runtime -p 'test_*.py'
 
 check: lint
 

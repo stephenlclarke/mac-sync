@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "minimum_macos": "13.0",
+  "go_version": "go1.27.4",
+  "sources": {
+    "git": {"version": "2.56.1", "url": "https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.56.1.tar.xz", "sha256": "f0b0bf89264b9bd2e1c640363e7529643989da76281600473c50745cd34a607f", "license": "GPL-2.0-only AND GPL-2.0-or-later AND LGPL-2.1-or-later AND BSD-3-Clause AND MIT"},
+    "rsync": {"version": "3.5.2", "url": "https://github.com/RsyncProject/rsync/releases/download/v3.5.2/rsync-3.5.2.tar.gz", "sha256": "a10d591825251e070f74c98df3daad195def4ed81b4a2de16169026aea33f6c8", "license": "GPL-3.0-or-later"},
+    "tar": {"version": "1.35", "url": "https://ftpmirror.gnu.org/tar/tar-1.35.tar.gz", "sha256": "14d55e32063ea9526e057fbf35fcabd53378e769787eff7919c3755b02d2b57e", "license": "GPL-3.0-or-later"},
+    "age": {"version": "1.3.2", "url": "https://github.com/FiloSottile/age/archive/refs/tags/v1.3.2.tar.gz", "sha256": "b07c28c6c4bdafa272073a310b75bc22c49da8904585a89c30e5ca4233e63843", "license": "BSD-3-Clause"},
+    "curl-headers": {"version": "7.79.1", "url": "https://curl.se/download/curl-7.79.1.tar.xz", "sha256": "0606f74b1182ab732a17c11613cbbaf7084f2e6cca432642d0e3ad7c224c3689", "license": "curl", "scope": "build headers only; no curl implementation is bundled"}
+  }
+}

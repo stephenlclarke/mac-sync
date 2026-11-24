@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import MacSyncCore
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -10,6 +12,8 @@ struct SettingsView: View {
     @State private var calendarRules = [CalendarScheduleRule.standard]
     @State private var scheduleValidationMessage: String?
     @State private var showSetupAssistant = false
+    @State private var fileAccessError: String?
+    @State private var accessGeneration = 0
 
     var body: some View {
         Form {
@@ -35,6 +39,7 @@ struct SettingsView: View {
                 Button("Sync Setup Assistant…") {
                     showSetupAssistant = true
                 }
+                InstallationIdentityImportView(store: store)
             }
 
             Section("App appearance") {
@@ -46,11 +51,16 @@ struct SettingsView: View {
 
             if store.overview.configuration.storageKind == .git {
                 Section("Repository access") {
-                    Text("Mac Sync uses SSH or Git credentials already configured on this Mac. It never stores provider passwords or tokens.")
+                    Text(MacSyncDistribution.current == .appStore
+                        ? "This edition uses its bundled Git and its own Keychain access. Configure HTTPS access below, or grant access to your SSH keys and known-hosts folder. Shell startup files and custom SSH commands are not used."
+                        : "Mac Sync uses SSH or Git credentials already configured on this Mac. Credentials stay in Git and Keychain.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     if store.isSetupComplete {
+                        if MacSyncDistribution.current == .appStore, let remote = store.repositoryReports.first?.repository.remoteURL {
+                            DisclosureGroup("Set up HTTPS access") { GitCredentialsView(remote: remote) }
+                        }
                         ForEach(store.repositoryReports) { report in
                             RepositoryConnectionRow(report: report)
                         }
@@ -80,17 +90,51 @@ struct SettingsView: View {
             Section("Quiet sync controls") { SyncPreferencesControls(store: store) }
             Section("Recovery safeguards") { RecoverySettingsControls(store: store) }
 
-            Section("Homebrew integration") {
-                Text("The setup assistant saves only repository locations to \(MacSyncUserConfiguration.configurationFilePath()). The Homebrew CLI and automatic sync agent use the same locations; credentials remain in Git and Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            if MacSyncDistribution.current == .appStore {
+                Section("Folder access") {
+                    Text("Choose the containing folders that Mac Sync may read and update in the background. Granting access does not add a folder to Sync Selection. Folder grants also cover file creation and deletion inside them.")
+                    ForEach(MacSyncApplicationRuntime.shared.fileAccess?.records ?? []) { record in
+                        Text(record.path).textSelection(.enabled)
+                    }
+                    if let fileAccessError {
+                        Text(fileAccessError).foregroundStyle(.red)
+                    }
+                    Button("Grant Folder Access…") { grantFolderAccess() }
+                    Button("Reset Folder Access…") {
+                        let alert = NSAlert()
+                        alert.messageText = "Reset saved folder permissions?"
+                        alert.informativeText = "This disables this edition's automatic sync and forgets its folder grants. It does not delete your files, snapshots, selection or credentials. Choose the required folders again before syncing."
+                        alert.addButton(withTitle: "Cancel")
+                        alert.addButton(withTitle: "Reset Permissions")
+                        guard alert.runModal() == .alertSecondButtonReturn else { return }
+                        do {
+                            try MacSyncApplicationRuntime.shared.resetFolderAccess()
+                            store.reloadSyncSchedule()
+                            accessGeneration += 1
+                            fileAccessError = nil
+                        } catch { fileAccessError = error.localizedDescription }
+                    }
+                    .disabled(store.isRunning)
+                }
+                .id(accessGeneration)
+            }
+
+            if MacSyncDistribution.current.supportsDeveloperTools {
+                Section("Homebrew integration") {
+                    Text("The setup assistant saves only repository locations to \(MacSyncUserConfiguration.configurationFilePath()). The Homebrew CLI and automatic sync agent use the same locations; credentials remain in Git and Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
 
             Section("Automatic sync") {
                 Text(store.syncScheduleStatus.detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if store.syncScheduleStatus.requiresApproval || store.syncScheduleStatus.serviceDisabled {
+                    Button("Open Background Items Settings") { SMAppService.openSystemSettingsLoginItems() }
+                }
 
                 Picker("Schedule", selection: $scheduleChoice) {
                     ForEach(SyncScheduleChoice.allCases) { choice in
@@ -167,13 +211,15 @@ struct SettingsView: View {
                     .disabled(store.syncScheduleStatus.state == .disabled)
                 }
 
-                Text("Automatic sync runs in the background even when this app is closed. It does not open a window at login. Use either this schedule or the Homebrew service; both share the same worker lock.")
+                Text(MacSyncDistribution.current == .appStore
+                    ? "Saving a schedule allows Mac Sync to run in the background after login and when this window is closed. macOS manages this permission in Login Items & Extensions. Disable Automatic Sync to stop it."
+                    : "Automatic sync runs in the background even when this app is closed. It does not open a window at login. Use either this schedule or the Homebrew service; both share the same worker lock.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Legal") {
-                Text("Mac Sync by quux.io is licensed under AGPL-3.0-or-later. It is provided without warranty.")
+                Text("Mac Sync by quux.io is licensed under AGPL-3.0-or-later OR MIT, at your choice. Third-party licences are unchanged. It is provided without warranty.")
                 Text("Use at your own risk. Files can be lost, corrupted, overwritten or deleted. Keep an independent verified backup. Stephen Clarke and contributors disclaim liability to the extent permitted by law.")
                     .font(.caption)
                 Link("View the source and licence", destination: URL(string: "https://github.com/stephenlclarke/mac-sync")!)
@@ -181,6 +227,15 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding()
+            .background(.bar)
+        }
         .padding()
         .frame(width: 760)
         .sheet(isPresented: $showSetupAssistant) {
@@ -195,6 +250,27 @@ struct SettingsView: View {
         }
         .onChange(of: showDockIcon) { isVisible in
             MacSyncDockIconController.apply(isVisible: isVisible)
+        }
+    }
+
+    private func grantFolderAccess() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Allow Access"
+        panel.message = "Allow Mac Sync to read and update these folders, including while the window is closed. Access does not automatically select files for upload."
+        if panel.runModal() == .OK {
+            do {
+                for url in panel.urls {
+                    try MacSyncApplicationRuntime.shared.remember(url)
+                }
+                fileAccessError = nil
+                accessGeneration += 1
+                if let schedule = store.syncScheduleStatus.schedule {
+                    store.configureSyncSchedule(schedule: schedule)
+                }
+            } catch { fileAccessError = error.localizedDescription }
         }
     }
 

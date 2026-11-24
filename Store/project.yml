@@ -1,0 +1,128 @@
+name: MacSyncStore
+options:
+  minimumXcodeGenVersion: 2.46.0
+settings:
+  base:
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    MAC_SYNC_SOURCE_ROOT: ${MAC_SYNC_SOURCE_ROOT}
+packages:
+  Engine:
+    path: ${MAC_SYNC_SOURCE_ROOT}
+targets:
+  MacSync:
+    type: application
+    platform: macOS
+    sources:
+      - path: ${MAC_SYNC_SOURCE_ROOT}/Sources/MacSyncApp
+        excludes: [Resources]
+      - path: ${MAC_SYNC_SOURCE_ROOT}/Sources/MacSyncApp/Resources/MacSync.icns
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/LICENSE
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/LICENSE.md
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/LICENSE-MIT.md
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/NOTICE.md
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/Store/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: ${MAC_SYNC_SOURCE_ROOT}/Store/io.quux.mac-sync.background.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
+    settings:
+      base:
+        PRODUCT_NAME: MacSync
+        PRODUCT_BUNDLE_IDENTIFIER: io.quux.mac-sync
+        INFOPLIST_FILE: $(MAC_SYNC_SOURCE_ROOT)/Store/Info.plist
+        CODE_SIGN_ENTITLEMENTS: $(MAC_SYNC_SOURCE_ROOT)/Store/MacSync.entitlements
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: NO
+    dependencies:
+      - package: Engine
+        product: MacSyncCore
+      - target: mac-sync
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+    postBuildScripts:
+      - name: Sign bundled runtime tools
+        script: |
+          set -euo pipefail
+          app="$TARGET_BUILD_DIR/$WRAPPER_NAME"
+          "$MAC_SYNC_SOURCE_ROOT/Tools/runtime/install-runtime.sh" "$app" "$MAC_SYNC_SOURCE_ROOT/.build/store-runtime/Tools"
+          if [[ "$CODE_SIGNING_ALLOWED" == "YES" ]]; then
+            identity="$EXPANDED_CODE_SIGN_IDENTITY"
+            if [[ -z "$identity" ]]; then identity=-; fi
+            "$MAC_SYNC_SOURCE_ROOT/Tools/runtime/sign-runtime.sh" \
+              "$app" "$identity" "$MAC_SYNC_SOURCE_ROOT/Store/Child.entitlements"
+          fi
+        basedOnDependencyAnalysis: false
+  mac-sync:
+    type: tool
+    platform: macOS
+    sources: ["${MAC_SYNC_SOURCE_ROOT}/Sources/MacSyncCLI"]
+    settings:
+      base:
+        PRODUCT_NAME: mac-sync
+        PRODUCT_BUNDLE_IDENTIFIER: io.quux.mac-sync.worker
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+        OTHER_CODE_SIGN_FLAGS: "$(inherited) -i $(PRODUCT_BUNDLE_IDENTIFIER)"
+        CODE_SIGN_ENTITLEMENTS: $(MAC_SYNC_SOURCE_ROOT)/Store/Child.entitlements
+        SKIP_INSTALL: YES
+    dependencies:
+      - package: Engine
+        product: MacSyncCore
+  MacSyncStoreSmoke:
+    type: application
+    platform: macOS
+    sources: ["${MAC_SYNC_SOURCE_ROOT}/Store/Smoke"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.quux.mac-sync.smoke
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: $(MAC_SYNC_SOURCE_ROOT)/Store/MacSync.entitlements
+        CODE_SIGN_STYLE: Manual
+    dependencies:
+      - package: Engine
+        product: MacSyncCore
+      - target: mac-sync
+        embed: true
+        link: false
+        codeSign: true
+        copy:
+          destination: wrapper
+          subpath: Contents/Helpers
+    postBuildScripts:
+      - name: Install test runtime
+        script: |
+          set -euo pipefail
+          app="$TARGET_BUILD_DIR/$WRAPPER_NAME"
+          /usr/libexec/PlistBuddy -c 'Set :MacSyncDistribution app-store' "$app/Contents/Info.plist" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Add :MacSyncDistribution string app-store' "$app/Contents/Info.plist"
+          "$MAC_SYNC_SOURCE_ROOT/Tools/runtime/install-runtime.sh" "$app" "$MAC_SYNC_SOURCE_ROOT/.build/store-runtime/Tools"
+          "$MAC_SYNC_SOURCE_ROOT/Tools/runtime/sign-runtime.sh" "$app" "${EXPANDED_CODE_SIGN_IDENTITY:--}" "$MAC_SYNC_SOURCE_ROOT/Store/Child.entitlements"
+        basedOnDependencyAnalysis: false
+schemes:
+  MacSyncStore:
+    build:
+      targets:
+        MacSync: all
+    archive:
+      config: Release
+  MacSyncStoreSmoke:
+    build:
+      targets:
+        MacSyncStoreSmoke: all

@@ -4,7 +4,7 @@ class MacSync < Formula
   url "https://github.com/stephenlclarke/mac-sync/releases/download/0.0.0/mac-sync-release-arm64.tar.gz"
   version "0.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
-  license "AGPL-3.0-or-later"
+  license any_of: ["AGPL-3.0-or-later", "MIT"]
 
   depends_on "age"
   depends_on arch: :arm64

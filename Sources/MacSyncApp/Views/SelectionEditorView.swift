@@ -42,16 +42,9 @@ struct SelectionEditorView: View {
             Divider()
 
             if !safetyWarnings.isEmpty {
-                DisclosureGroup("Review \(safetyWarnings.count) possible credential risks before syncing") {
-                    ForEach(safetyWarnings) { warning in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(warning.path).font(.caption.monospaced()).textSelection(.enabled)
-                            Text(warning.reason).font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 3)
-                    }
-                    Text("Warnings are advisory, not a complete secrets scan. Removing a file now does not remove copies from older Git or cloud versions; rotate exposed credentials.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(.horizontal, 24).padding(.vertical, 8).foregroundStyle(.orange)
+                SyncSelectionWarningsView(warnings: safetyWarnings)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
             }
 
             List(selection: $selectedOutlinePaths) {
@@ -133,7 +126,7 @@ struct SelectionEditorView: View {
         .task(id: store.selectedPaths.joined(separator: "\0")) {
             let paths = store.selectedPaths
             let home = store.overview.configuration.homeDirectory
-            let result = await Task.detached(priority: .utility) { SyncSelectionSafety.warnings(paths: paths, home: home) }.value
+            let result = await SyncSelectionSafety.scan(paths: paths, home: home)
             if !Task.isCancelled {
                 safetyWarnings = result
             }

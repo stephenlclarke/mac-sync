@@ -38,6 +38,13 @@ struct SyncSelectionWarning: Identifiable, Equatable, Sendable {
 }
 
 enum SyncSelectionSafety {
+    static func scan(paths: [String], home: String) async -> [SyncSelectionWarning] {
+        await withTaskGroup(of: [SyncSelectionWarning].self) { group in
+            group.addTask(priority: .utility) { warnings(paths: paths, home: home) }
+            return await group.next() ?? []
+        }
+    }
+
     static func warnings(paths: [String], home: String) -> [SyncSelectionWarning] {
         paths.compactMap { path in
             if Task.isCancelled {

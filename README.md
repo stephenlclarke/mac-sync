@@ -6,7 +6,7 @@ Mac Sync helps keep important files and settings in sync between Macs. Each Mac 
 
 ## Install
 
-Requires an Apple silicon Mac, macOS 13 or later, and Homebrew. Use a private Git repository (GitHub, GitLab, Bitbucket or another host), or a folder already synced by iCloud Drive, OneDrive or another provider.
+Requires an Apple silicon Mac and macOS 13 or later. The GitHub/Homebrew edition uses Homebrew dependencies. A separate, self-contained App Store edition is being prepared; it is not yet listed. See [edition differences and migration](docs/distribution.md). Use a private Git repository (GitHub, GitLab, Bitbucket or another host), or a folder already synced by iCloud Drive, OneDrive or another provider.
 
 ```sh
 brew tap stephenlclarke/tap
@@ -30,6 +30,8 @@ For the opt-in Current build, use `mac-sync-current` instead. Uninstall one chan
    ```
 
 Non-conflicting changes to selected home-folder files are applied automatically. Conflicts and deletions wait for review. You can choose review-only mode in Settings. Do not add private keys, tokens or credentials to the regular selection; use [encrypted secrets](docs/cli-reference.md#encrypted-secrets) instead.
+
+For a read-only explanation of saved sync records, choose **Sync Health → Diagnose On Device**. This optional feature uses Apple's prepared on-device model on macOS 26 or later, with no cloud fallback or automatic fixes. See [on-device diagnosis](docs/desktop-guide.md#on-device-diagnosis).
 
 Under **Other Macs**, select files and use **Copy to This Mac** to pull them. Drop regular files onto another Mac's view to send them. Select one stored file and use **Send Files → Replace selected file** to queue a replacement. The receiving Mac applies it on its next sync if selected and unchanged locally; otherwise it waits in **Inbox**. See [sync, transfer and recovery](docs/sync-and-transfer.md).
 
@@ -68,7 +70,8 @@ For Current, use `brew upgrade mac-sync-current`. Restart an existing Homebrew s
 - [Desktop app guide](docs/desktop-guide.md)
 - [CLI reference](docs/cli-reference.md)
 - [Configuration and snapshot layout](docs/configuration.md)
+- [Installation editions and migration](docs/distribution.md) · [Privacy](PRIVACY.md)
 - [Troubleshooting and known issues](SUPPORT.md)
 - [Development and API documentation](CONTRIBUTING.md) · [Releases and rollback](RELEASES.md)
 
-Copyright © 2026 quux.io. Licensed under [AGPL-3.0-or-later](LICENSE.md). See [notices](NOTICE.md).
+Copyright © 2026 quux.io. Mac Sync code is [dual-licensed: AGPL-3.0-or-later OR MIT](LICENSE.md). Third-party licences are unchanged. See [notices](NOTICE.md).

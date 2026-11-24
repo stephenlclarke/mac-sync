@@ -1,5 +1,15 @@
 # Quiet background sync
 
+## Distribution boundary
+
+Both editions use `MacSyncCore` and the same per-Mac snapshot, version and delivery formats. `MacSyncDistribution` reads the sealed bundle's edition. The direct edition keeps its Homebrew command locations and LaunchAgent path. The Store edition selects bundled tools, holds explicit folder grants, uses container-private settings/status/workspace and registers its own signed executable as a background agent. No UI instance is created for `--background-agent`.
+
+The registered agent restores bookmarks independently and invokes the existing watcher. A changed grant file requests an orderly observer restart; launchd reacquires scopes on the next launch with throttling. Each worker receives an immutable access manifest that describes its parent's active grants. The kernel remains the authority; metadata never grants access. Ordinary and encrypted source preflights refuse unavailable access instead of publishing an incomplete replacement. Managed service status distinguishes saved, approval-pending, disabled and failed states.
+
+The Store runtime is source-pinned and linked to Apple system libraries. It includes notices and corresponding source. The main app and inherited children use different, minimal entitlement sets. [Distribution](distribution.md) and [submission](app-store-submission.md) describe migration, authentication and remaining external gates.
+
+## Shared engine
+
 Version 1.1 keeps the existing snapshot format and separates the worker's
 lifetime from the desktop UI. The goal is low disturbance and bounded resource
 use, not the shortest possible sync time.
@@ -37,6 +47,16 @@ Activity uses the shared status PID marker, not just a temporary-directory
 path which may differ between Finder and launchd. A PID must identify a real
 `mac-sync` worker. Stop rechecks that identity; invalid, reused or process-group
 PIDs are not signalled.
+
+## Read-only on-device diagnosis
+
+Sync Health offers an explicit, on-demand diagnosis sheet. `IncomingSyncEngine.reviewInventory` opens an existing `SyncStateDatabase` with `SQLITE_OPEN_READONLY` and streams all review entries in a consistent read transaction. It creates no identity, directory, schema, configuration or sync/recovery operation, and does not change ledger permissions. Missing and malformed ledgers are not silently converted into zero counts. The normal pending-change list also uses the read-only open mode.
+
+The UI combines the current review counts with a captured, already-loaded `SyncStatus`; the view labels the queue read time separately from the last recorded run. Neither a Git/network probe nor a Keychain lookup is part of this path. Raw messages, commands, outputs, paths, names and contents are excluded. A fixed catalog derives the explanations from typed flags, recognised reasons and condition codes. Unknown reasons remain unknown.
+
+`OnDeviceDiagnosisService` uses only `FoundationModels.SystemLanguageModel.default` behind a macOS 26 availability check. It creates a fresh, tool-free session for each request, uses greedy guided generation with a bounded response, and permits one active generation across diagnosis sheets. The controller supports cancellation and a 30-second deadline. Older systems and unavailable models keep the deterministic evidence view; there is no remote model/provider or CLI fallback. No model is loaded by the background worker or normal status refresh.
+
+The generated response contains only a copied result, optional counts and ordered finding identifiers. Validation rejects changed counts/result, omissions, duplicates and unknown identifiers. The UI renders trusted catalog text, never unvalidated model prose or actions. It cannot turn a generic deletion sentence, missing local path or unknown author into a new claim. There is no automatic resolution or durable AI transcript. Ordinary CI uses injected fake generators; an opt-in native test checks actual and synthetic deletion counts without touching a user's files.
 
 ## Bounded work
 

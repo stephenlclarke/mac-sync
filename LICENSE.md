@@ -2,12 +2,14 @@
 
 Copyright © 2026 quux.io.
 
-This repository is licensed under the GNU Affero General Public License v3.0 or
-later (AGPL-3.0-or-later).
+Mac Sync code owned by quux.io is dual-licensed. You may choose either the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later), or the MIT licence. This additional choice applies from the source revision that introduces it; published historical releases are not rewritten.
+
+Third-party code, tools, dependencies and submodules keep their own licences. The MIT option does not relicense them. See [NOTICE.md](NOTICE.md) and the notices included with each distribution.
 
 Files:
 
 - `LICENSE`: full GNU Affero General Public License v3.0 text
+- `LICENSE-MIT.md`: alternative MIT licence for quux.io's Mac Sync code
 - `NOTICE.md`: project notices and third-party attribution notes
 
 In short:
@@ -18,4 +20,4 @@ In short:
   version available to others, you must provide the corresponding source under
   the same license
 
-This summary is informational only. The full legal terms are in `LICENSE`.
+The bullets above summarise the AGPL choice only. This summary is informational; the full terms are in `LICENSE` and `LICENSE-MIT.md` respectively.
