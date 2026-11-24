@@ -36,14 +36,12 @@ enum LocalRepairInspectionReader {
     }
 
     static func worker(configuration: SyncConfiguration, temporaryDirectory: String) throws -> LocalWorkerState {
-        let paths = ["\(configuration.statusDirectory)/\(configuration.machineName).running",
-                     "\(temporaryDirectory)/mac-sync-\(configuration.machineName).lock/pid"]
-        for path in paths {
-            guard let data = try read(path, limit: 64) else { continue }
+        let runningPath = "\(configuration.statusDirectory)/\(configuration.machineName).running"
+        if let data = try read(runningPath, limit: 64) {
             guard let text = String(data: data, encoding: .utf8), let pid = Int32(text
                 .trimmingCharacters(in: .whitespacesAndNewlines)),
                 pid > 1 else { return .unknown }
-            // Even an unrelated reused PID blocks repair. Never signal or kill a process.
+            // An unrelated reused PID remains conservative for this legacy marker.
             if kill(pid, 0) == 0 {
                 return .active
             }
@@ -51,7 +49,25 @@ enum LocalRepairInspectionReader {
                 return .unknown
             }
         }
-        return .idle
+        return operationLockState("\(temporaryDirectory)/mac-sync-\(configuration.machineName).lock/pid")
+    }
+
+    /// UI-only inspection. The worker deliberately retains an empty file after
+    /// release. F_GETLK queries the kernel; it never takes a lock or writes bytes.
+    private static func operationLockState(_ path: String) -> LocalWorkerState {
+        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else { return errno == ENOENT ? .idle : .unknown }
+        defer { close(descriptor) }
+        var opened = stat()
+        var current = stat()
+        var query = flock()
+        query.l_type = Int16(F_WRLCK)
+        query.l_whence = Int16(SEEK_SET)
+        guard fstat(descriptor, &opened) == 0, opened.st_mode & S_IFMT == S_IFREG,
+              fcntl(descriptor, F_GETLK, &query) == 0,
+              stat(path, &current) == 0,
+              opened.st_dev == current.st_dev, opened.st_ino == current.st_ino else { return .unknown }
+        return query.l_type == F_UNLCK ? .idle : .active
     }
 
     static func status(

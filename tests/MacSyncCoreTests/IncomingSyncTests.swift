@@ -176,6 +176,9 @@ struct SyncPeer {
 
     var environment: [String: String] {
         var values = ["HOME": home.path, "TMPDIR": root.appendingPathComponent("tmp").path, "USER": "test", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                      // Clones do not retain repository-local identity. Keep fixtures independent of the user's Git setup.
+                      "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                      "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
                       "GIT_CONFIG_NOSYSTEM": "1", "MAC_SYNC_MACHINE": name, "MAC_SYNC_MACHINES_REPO": repository.path, "MAC_SYNC_STATUS_DIR": status.path,
                       "MAC_SYNC_DYNAMIC_REFS": "0", "MAC_SYNC_HOMEBREW": "0", "MAC_SYNC_VSCODE_EXTENSIONS": "0", "MAC_SYNC_GITHUB_REPOS": "0", "MAC_SYNC_SECRETS": "0", "MAC_SYNC_QUIET": "1"]
         if let cloudFolder {

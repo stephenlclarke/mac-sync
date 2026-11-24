@@ -2,6 +2,7 @@
 
 ## Guarded operational repairs — 24 November 2026
 
+- [x] Correct the live acceptance-test false busy result for a normal empty retained PID file. Query kernel ownership read-only and add real child-process lock tests. Do not remove the marker or infer ownership from its contents.
 - [x] Preserve the read-only diagnosis option and add a separate on-demand Local Repair Assistant.
 - [x] Limit automatic effects to app-memory status refresh, read-only observer reconnection and finished-process busy-state cleanup. Use cached triage decisions, not another disk read or migration.
 - [x] Give the local model only verified repair IDs. Reject the whole invalid batch, recheck scope/worker state, verify effects and stop on cancellation, unavailable model or failure. Never use cloud AI or generated commands.

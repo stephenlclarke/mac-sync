@@ -49,6 +49,8 @@ This feature does not sync, apply or resolve incoming changes, acknowledge warni
 
 ## Local Repair Assistant
 
+An empty retained worker PID file is normal after a run. The assistant checks the operating system's lock state without acquiring a lock or changing the file. It does not ask you to remove a normal idle marker. An active lock or an uncertain inspection still blocks automatic repairs.
+
 Choose **Sync Health → Local Repair Assistant** for active help. Opening it authorises only three automatic operational repairs: refresh stale saved status in app memory, reconnect a broken read-only status-file observer, and clear a busy indicator after its owned process has finished. It does not start or restart the background agent. It does not write, replace or remove any file, acknowledge a warning, change a schedule, or test credentials or network access. Ordinary background sync remains a separate feature governed by your saved schedule.
 
 The app first verifies the faults. If there are none, it makes no repair-model request. Otherwise Apple's prepared on-device model orders the fixed repair identifiers. The app rejects an invalid plan before any repair, rechecks each fault and worker state, then verifies the effect. Repairs stop on cancellation, changed destination/selection/operation, unreadable status, an active or unknown worker, model failure or failed verification. **Stop** and **Close** prevent further assistant actions; earlier verified memory/observer repairs remain. They do not stop a sync you already approved and started. There is no cloud fallback or background AI loop. Receipts stay in memory. Read-only diagnosis follows the operational checks and remains available without AI.

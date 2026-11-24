@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # USAGE: update-protected-tap.sh FORMULA LABEL
 # Run in the tap checkout with GH_TOKEN set. Open a signed formula PR, then
-# wait up to 15 minutes for an authorised maintainer to merge it after checks.
+# wait up to 45 minutes for an authorised maintainer to merge it after checks.
 set -euo pipefail
 
 # Publish one formula without bypassing protected-branch reviews or checks.
 main() {
   if [[ "${1:-}" == '--help' || "${1:-}" == '-h' ]]; then
-    printf 'Usage: %s FORMULA LABEL\nRequires GH_TOKEN; waits up to 15 minutes for PR merge.\n' "${0##*/}"
+    printf 'Usage: %s FORMULA LABEL\nRequires GH_TOKEN; waits up to 45 minutes for PR merge.\n' "${0##*/}"
     return 0
   fi
   if [[ "$#" != 2 || ! "$1" =~ ^mac-sync(-current)?\.rb$ ]]; then
@@ -51,7 +51,7 @@ main() {
       --body 'Update the signed release archive and checksum. Merge only after all required checks pass. The release job waits for the exact formula on main.')"
   fi
   printf 'Awaiting reviewed formula merge: %s\n' "$url"
-  for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  for ((attempt = 1; attempt <= 180; attempt += 1)); do
     existing="$(gh api "repos/$repo/contents/$path?ref=main" --jq .sha)"
     if [[ "$existing" == "$blob" ]]; then
       printf 'Verified published formula: %s\n' "$path"

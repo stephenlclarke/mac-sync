@@ -125,7 +125,9 @@ brew trust --formula stephenlclarke/tap/mac-spinner
 
 The workflow trusts only that dependency, not every formula in the tap.
 
-Both release lanes use a signed pull request for the protected tap. The publication step prints its URL and waits up to 15 minutes for a maintainer to merge it. Check that `Formula Syntax` passes before merging. The workflow never bypasses reviews or changes branch protection. If the wait expires, merge the checked formula and rerun the release job; an exact formula already on `main` is accepted without a new pull request.
+Both release lanes use a signed pull request for the protected tap. The publication step prints its URL and waits up to 45 minutes for a maintainer to merge it. The publishing job has a 90-minute budget for exact-commit checks, signing/notarisation, the tap wait and final verification. Check that `Formula Syntax` passes before merging. The workflow never bypasses reviews or changes branch protection.
+
+If GitHub fails to assign a hosted runner, retry only the affected check on the same commit and retain successful results. If the tap wait still expires, preserve the already signed archive and checksum. Merge the formula only after its required checks pass, verify Homebrew installation/test, then resume Current finalisation from that same archive. Do not blindly rebuild a staged Current archive: signing timestamps can change its checksum under the same commit-based asset name. A new archive requires a matching protected formula update and fresh formula checks before final publication. Keep the recovery and exact digests visible in the release notes.
 
 Stable formulae infer their version from the semantic release URL. Only Current keeps an explicit custom `version`, because its archive URL contains a commit rather than a semantic version. This avoids Homebrew's strict redundant-version audit failure.
 
