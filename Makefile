@@ -10,7 +10,7 @@ MARKDOWNLINT ?= markdownlint
 COVERAGE_MIN ?= 85
 DIST_DIR ?= dist
 MAC_SYNC_ARCHIVE ?= mac-sync-release-arm64.tar.gz
-MAC_SYNC_VERSION ?= 1.2.0
+MAC_SYNC_VERSION ?= 1.3.0
 MAC_SYNC_BUILD ?= 1
 MAC_SYNC_SOURCE ?= $(shell $(PYTHON) -c 'import subprocess; result = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True); url = result.stdout.strip() if result.returncode == 0 else ""; url = url.removeprefix("git@github.com:").removeprefix("https://github.com/").removesuffix(".git"); print(url or "stephenlclarke/mac-sync")')
 MAC_SYNC_BRANCH ?= $(shell git branch --show-current 2>/dev/null || git rev-parse --short HEAD)
@@ -428,6 +428,7 @@ package-built:
 	(cd "$$archive_dir" && shasum -a 256 "$$archive_name" > "$$archive_name.sha256")
 
 coverage-tools-test:
+	bash tests/protected-tap.sh
 	$(PYTHON) -m py_compile Tools/coverage/*.py Tools/release/*.py Tools/runtime/*.py
 	$(PYTHON) -m unittest discover -s Tools/release -p 'test_*.py'
 	$(PYTHON) -m unittest discover -s Tools/runtime -p 'test_*.py'

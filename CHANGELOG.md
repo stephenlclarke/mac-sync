@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 24 November 2026
 
 - Add optional read-only on-device diagnosis in Sync Health using Apple's native system model on macOS 26 or later. Keep complete typed review counts and verified explanations separate from AI ordering, reject inconsistent answers, and provide cancellation, a deadline and an evidence-only fallback. No cloud AI, raw-log/file-content input or automatic conflict resolution.
+- Diagnosis requires a supported Apple Intelligence Mac with macOS 26 or later and a prepared model. Ordinary sync still supports macOS 13 or later. Model preparation may need an initial download; the prepared on-device model works offline. Earlier-macOS runtime and Store-sandbox AI qualification remain unverified.
 
 - Improve credential-risk warnings with normal-size, full-contrast descriptions, bold file paths and clearer spacing. Keep orange on the warning heading rather than the explanatory text.
 - Bound and scroll expanded credential warnings, propagate scan cancellation, and add an explicit Settings Close button.

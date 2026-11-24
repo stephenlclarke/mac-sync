@@ -203,7 +203,7 @@ jobs:
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
             label="current"
             title="Current build"
-            app_version="1.2.0"
+            app_version="1.3.0"
           fi
           {
             printf 'app_version=%s\n' "$app_version"
@@ -462,28 +462,16 @@ jobs:
           ruby -c "homebrew-tap/Formula/${FORMULA}"
           brew style "homebrew-tap/Formula/${FORMULA}"
 
-      - name: Commit Homebrew formula
+      - name: Publish protected Homebrew formula
         env:
           FORMULA: ${{ steps.metadata.outputs.formula }}
           LABEL: ${{ steps.metadata.outputs.label }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         shell: bash
         working-directory: homebrew-tap
         run: |
           set -euo pipefail
-          push_url="$(git remote get-url --push origin)"
-          if [[ ! "$push_url" =~ ^(https://github\.com/|git@github\.com:)stephenlclarke/homebrew-tap(\.git)?$ ]]; then
-            printf 'Unexpected Homebrew tap push target: %s\n' "$push_url" >&2
-            exit 1
-          fi
-          if git diff --quiet -- "Formula/${FORMULA}"; then
-            printf '%s already points at the requested asset.\n' "$FORMULA"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "Formula/${FORMULA}"
-          git commit -m "chore(mac-sync): update ${LABEL} formula"
-          git push
+          bash ../mac-sync/Tools/release/update-protected-tap.sh "$FORMULA" "$LABEL"
 
       - name: Verify Homebrew installation
         env:
