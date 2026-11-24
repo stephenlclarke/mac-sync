@@ -259,7 +259,7 @@ final class LocalDiagnosisSessionTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
     }
 
-    func testControllerKeepsVerifiedEvidenceWhenTheModelIsUnavailable() async throws {
+    func testControllerShowsUnknownInventoryEvenWhenTheModelIsUnavailable() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("diagnosis-unavailable-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -271,8 +271,10 @@ final class LocalDiagnosisSessionTests: XCTestCase {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         XCTAssertNotNil(controller.evidence)
-        XCTAssertNil(controller.orderedFindings)
-        XCTAssertEqual(controller.message, LocalDiagnosisError.notReady.localizedDescription)
+        XCTAssertNotNil(controller.orderedFindings)
+        XCTAssertFalse(controller.usedModel)
+        XCTAssertNil(controller.message)
+        XCTAssertEqual(controller.evidence?.advice.steps.map(\.id), ["inspect_inventory"])
         controller.cancel()
         XCTAssertFalse(controller.isRunning)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
@@ -299,16 +301,19 @@ final class LocalDiagnosisSessionTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["MAC_SYNC_TEST_LOCAL_AI"] == "1" else {
             throw XCTSkip("Opt-in native on-device integration test; no model runs in ordinary CI.")
         }
-        for inventory in [
+        let inventories: [IncomingReviewInventory?] = [
+            nil,
+            .init(),
             IncomingReviewInventory(conflicts: 30, pathOrLink: 1),
             IncomingReviewInventory(conflicts: 28, deletions: 2, pathOrLink: 1),
             IncomingReviewInventory(conflicts: 30, pathOrLink: 1)
-        ] {
+        ]
+        for inventory in inventories {
             let facts = diagnosisFixture(inventory: inventory)
             let generated = try await OnDeviceDiagnosisService.shared.generate(evidence: facts)
             XCTAssertEqual(generated.runResult, facts.runResult)
-            XCTAssertEqual(generated.totalReviewItems, inventory.total)
-            XCTAssertEqual(generated.pendingDeletions, inventory.deletions)
+            XCTAssertEqual(generated.totalReviewItems, inventory?.total)
+            XCTAssertEqual(generated.pendingDeletions, inventory?.deletions)
             XCTAssertEqual(generated.orderedFindingIDs.count, facts.findings.count)
             XCTAssertEqual(Set(generated.orderedFindingIDs), Set(facts.findings.map(\.id)))
             let findings = try facts.validatedFindings(generated)

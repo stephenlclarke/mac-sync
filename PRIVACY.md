@@ -24,6 +24,8 @@ On-device diagnosis is optional and starts only when you choose it in Sync Healt
 
 The input is an in-memory, app-generated summary of the last displayed run result, warning/error counts, recorded publish exit status, destination kind, complete incoming-review category counts and recognised health-condition codes. It does not include file contents or names, paths, peer names, repository URLs, raw warnings, command output, credentials or Keychain data. It opens the ledger read-only, does not construct a sync engine, and never saves an AI transcript or diagnosis to the sync destination. Closing the sheet cancels the request; this feature does not save its results. The model can organise only supplied findings; the app discards an inconsistent answer and keeps verified records visible. Diagnosis never applies files, resolves conflicts, acknowledges conditions or changes configuration.
 
+Unknown and empty incoming-review queues do not call the model. Missing or unreadable counts remain unknown, not zero. The app derives a fixed-order safety checklist from typed records; no model-generated repair prose is displayed. This advice has no executable actions and remains available if the model is absent, fails or returns an inconsistent answer. A healthy empty queue produces no repair tasks. The advice cannot initiate a sync, inspect file contents or select a winning version.
+
 ## Background activity and removal
 
 Automatic sync is optional. The App Store edition registers its bundled background agent with macOS after you save a schedule. You can disable it in Mac Sync or in macOS Login Items & Extensions. The direct edition also supports Homebrew services. Stop automatic sync before switching editions or uninstalling.

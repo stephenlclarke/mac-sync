@@ -76,7 +76,7 @@ files.
 
 ### On-device diagnosis tests
 
-Normal CI uses fake AI generators and generated review records. It checks exact deletion counts, missing evidence, invalid or omitted findings, cancellation, deadlines, privacy filtering and read-only database access. Do not point these fixtures at an installed Mac Sync configuration or real synced files.
+Normal CI uses fake AI generators and generated review records. It checks exact deletion counts, explicit nulls for unknown counts, invalid or omitted findings, cancellation, deadlines, privacy filtering and read-only database access. Advice tests cover unknown and corrupt ledgers, healthy queues with historical warnings, recorded failures, cloud folders, fixed preservation/approval order and zero generator calls for unknown or empty review queues. Do not point these fixtures at an installed Mac Sync configuration or real synced files.
 
 For an explicit native-model check on an eligible Mac with macOS 26 or later and a prepared Apple Intelligence model, run `make diagnosis-model-test`. It uses only `SystemLanguageModel.default`, generated zero- and two-deletion cases, and a fresh session for each request. It never resolves conflicts or uses a cloud fallback. To verify offline operation, disconnect external networking before this opt-in check and confirm that it stays disconnected throughout; the target itself never changes network settings. Run with normal permission to contact macOS's local model service: a restricted command runner can report model error 1008 when it blocks that local service.
 

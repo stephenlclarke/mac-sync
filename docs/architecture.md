@@ -58,6 +58,10 @@ The UI combines the current review counts with a captured, already-loaded `SyncS
 
 The generated response contains only a copied result, optional counts and ordered finding identifiers. Validation rejects changed counts/result, omissions, duplicates and unknown identifiers. The UI renders trusted catalog text, never unvalidated model prose or actions. It cannot turn a generic deletion sentence, missing local path or unknown author into a new claim. There is no automatic resolution or durable AI transcript. Ordinary CI uses injected fake generators; an opt-in native test checks actual and synthetic deletion counts without touching a user's files.
 
+`LocalDiagnosisEvidence.reviewState` distinguishes unknown, empty and pending review inventories. Unknown counts encode as explicit nulls, not zeros. Both the session boundary and native service bypass inference for unknown and empty queues, so optional-number generation cannot invent zeros and the model cannot invent tasks for a healthy queue. A read failure retains deterministic unknown evidence without modifying the ledger.
+
+`LocalDiagnosisAdvice` is a pure, app-owned policy with no runner, callbacks, file access or model dependency. Its fixed-order steps derive from typed review counts, storage kind and saved status: preserve available versions, compare recorded conflicts, inspect recorded path/link items, separate deletion decisions, require user approval and describe verification after a separately authorised later sync. No file-review steps are emitted for an empty queue; recorded publish failures, missing publish evidence, recognised health conditions and unconfirmed cloud upload remain distinct. Advice is not part of the model response schema, is not reordered by it and stays visible on model failure. The UI contains only text, retry and close controls, not repair or sync buttons.
+
 ## Bounded work
 
 | Path | Bound or policy |

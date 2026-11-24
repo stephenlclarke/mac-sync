@@ -8,6 +8,10 @@ struct LocalDiagnosisFinding: Codable, Hashable, Identifiable, Sendable {
 }
 
 struct LocalDiagnosisEvidence: Encodable, Equatable, Sendable {
+    enum ReviewState: String, Encodable, Sendable {
+        case unknown, empty, pending
+    }
+
     let runResult: String
     let warningCount: Int
     let errorCount: Int
@@ -18,6 +22,13 @@ struct LocalDiagnosisEvidence: Encodable, Equatable, Sendable {
     let pendingDeletions: Int?
     let findings: [LocalDiagnosisFinding]
     let requiredFindingIDs: [String]
+    let reviewState: ReviewState
+    /// Advice is deliberately not model-generated or included in its schema.
+    let advice: LocalDiagnosisAdvice
+
+    var requiresModelOrdering: Bool {
+        reviewState == .pending
+    }
 
     init(status: SyncStatus, storageKind: BackupStorageKind, inventory: IncomingReviewInventory?) {
         runResult = status.result.rawValue
@@ -28,6 +39,10 @@ struct LocalDiagnosisEvidence: Encodable, Equatable, Sendable {
         self.inventory = inventory
         totalReviewItems = inventory?.total
         pendingDeletions = inventory?.deletions
+        reviewState = inventory.map { $0.total == 0 ? .empty : .pending } ?? .unknown
+        advice = LocalDiagnosisAdvice(
+            status: status, storageKind: storageKind, inventory: inventory, publishExitStatus: publishExitStatus
+        )
         findings = Self.runFindings(status: status, storageKind: storageKind, publishExitStatus: publishExitStatus)
             + Self.reviewFindings(inventory)
             + Self.messageFindings(warnings: warningCount, errors: errorCount)
@@ -75,13 +90,19 @@ struct LocalDiagnosisEvidence: Encodable, Equatable, Sendable {
             return [.init(
                 id: "inventory_unknown",
                 title: "Incoming review counts are unavailable",
-                detail: "No review ledger exists for this destination and Mac identifier. Deletion counts are unknown."
+                detail: """
+                The review ledger is missing or unreadable for this destination and Mac identifier. All \
+                review counts, including deletions, are unknown, not zero.
+                """
             )]
         }
         var items = [LocalDiagnosisFinding(
             id: "deletions", title: "\(inventory.deletions) pending deletions",
             detail: inventory.deletions == 0
-                ? "No review entry is marked as a deletion. Generic warnings and absent paths are not deletion records."
+                ? """
+                No review entry is marked as a deletion. Generic warnings and absent paths are not deletion \
+                records.
+                """
                 : "These entries are marked as deletions. They still require a separate user decision."
         )]
         if inventory.total == 0 {
@@ -126,6 +147,27 @@ struct LocalDiagnosisEvidence: Encodable, Equatable, Sendable {
             throw LocalDiagnosisError.failed
         }
         return value
+    }
+
+    /// Explicit nulls preserve unknown counts in the wire format as well as UI.
+    private enum CodingKeys: String, CodingKey {
+        case runResult, warningCount, errorCount, publishExitStatus, storageKind
+        case inventory, totalReviewItems, pendingDeletions, findings, requiredFindingIDs, reviewState
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(runResult, forKey: .runResult)
+        try values.encode(warningCount, forKey: .warningCount)
+        try values.encode(errorCount, forKey: .errorCount)
+        try values.encode(publishExitStatus, forKey: .publishExitStatus)
+        try values.encode(storageKind, forKey: .storageKind)
+        try values.encode(inventory, forKey: .inventory)
+        try values.encode(totalReviewItems, forKey: .totalReviewItems)
+        try values.encode(pendingDeletions, forKey: .pendingDeletions)
+        try values.encode(findings, forKey: .findings)
+        try values.encode(requiredFindingIDs, forKey: .requiredFindingIDs)
+        try values.encode(reviewState, forKey: .reviewState)
     }
 
     func validatedFindings(_ answer: LocalDiagnosisAnswer) throws -> [LocalDiagnosisFinding] {

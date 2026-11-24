@@ -25,8 +25,9 @@ struct LocalDiagnosisView: View {
             .fixedSize(horizontal: false, vertical: true)
             Text(
                 """
-                The AI organises verified findings. Counts and explanations come from Mac Sync's records, \
-                not generated prose. An inconsistent answer is discarded.
+                The AI can organise verified findings. The app supplies counts and a fixed-order safety \
+                checklist, not generated repair instructions. Unknown and empty review queues do not call the AI. \
+                An inconsistent answer is discarded.
                 """
             )
             .font(.callout)
@@ -72,6 +73,21 @@ struct LocalDiagnosisView: View {
                             .padding(5)
                             .textSelection(.enabled)
                         }
+                        GroupBox("Suggested next steps · read-only") {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Text(facts.advice.summary).font(.headline)
+                                ForEach(facts.advice.steps) { step in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(step.title).font(.headline)
+                                        Text(step.detail)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(5)
+                            .textSelection(.enabled)
+                        }
                     }
                     if controller.evidence != nil {
                         GroupBox("What remains unknown") {
@@ -91,8 +107,9 @@ struct LocalDiagnosisView: View {
             HStack {
                 Text(
                     """
-                    Apple Intelligence and macOS 26 or later are required. macOS may need an initial \
-                    model download; prepared models work offline. This feature never disconnects your network.
+                    Optional AI ordering requires Apple Intelligence and macOS 26 or later. macOS may need \
+                    an initial model download; prepared models work offline. Verified records and advice \
+                    do not need a model. This feature never disconnects your network.
                     """
                 )
                 .font(.callout)
@@ -110,7 +127,10 @@ struct LocalDiagnosisView: View {
     }
 
     private var findingsTitle: String {
-        controller.orderedFindings == nil
+        if controller.evidence?.requiresModelOrdering == false {
+            return "Verified records · no AI needed"
+        }
+        return !controller.usedModel
             ? "Verified records (not an AI diagnosis)"
             : "On-device diagnosis · verified findings"
     }
