@@ -968,7 +968,10 @@ extension SyncStore: LocalRepairRuntime {
             replaceOperationalOverview(status: status, clearWorker: false)
             activeConditionCodes = Set(status.conditions.map(\.code)
                 + (status.warnings + status.errors).compactMap(SyncHealthMessage.conditionCode))
-            reloadSyncIssues()
+            syncIssues = issueRepository.issues(
+                for: overview, activeConditionCodes: activeConditionCodes, cachedDecisions: syncIssues
+            )
+            updateDockBadge()
         case .reconnectObserver:
             if stateObservation?.isHealthy != true {
                 observeLocalState()
