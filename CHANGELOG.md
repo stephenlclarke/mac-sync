@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add optional read-only on-device diagnosis in Sync Health using Apple's native system model on macOS 26 or later. Keep complete typed review counts and verified explanations separate from AI ordering, reject inconsistent answers, and provide cancellation, a deadline and an evidence-only fallback. No cloud AI, raw-log/file-content input or automatic conflict resolution.
+
 - Improve credential-risk warnings with normal-size, full-contrast descriptions, bold file paths and clearer spacing. Keep orange on the warning heading rather than the explanatory text.
 - Bound and scroll expanded credential warnings, propagate scan cancellation, and add an explicit Settings Close button.
 - Offer Mac Sync's own code under AGPL-3.0-or-later OR MIT. Preserve third-party licences and historical releases.

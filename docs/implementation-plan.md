@@ -1,5 +1,17 @@
 # Quiet background sync implementation
 
+## Read-only on-device diagnosis — 23 November 2026
+
+- [x] Add a user-requested Sync Health diagnosis sheet and native on-device-only model service, without a cloud or command-line fallback.
+- [x] Stream complete review counts through a read-only ledger connection; keep missing or malformed evidence distinct from zero.
+- [x] Exclude file contents, names, paths, raw logs and credentials. Validate generated counts/result and finding identifiers; render only trusted explanations.
+- [x] Add cancellation, bounded generation, a deadline, unavailable-model handling and deterministic regression tests for false deletion claims.
+- [x] Complete final tests, native offline integration, running-window inspection and review. No installed app, sync destination or conflict is changed by development.
+
+Local validation on 24 November: `make ci` passed with 96 core and 115 app test cases, including one opt-in model test skipped in ordinary CI, and 88.17% instrumented core coverage. The focused AddressSanitizer and ThreadSanitizer runs passed. Strict lint and formatting checks passed for the new Swift files, as did documentation lint. The isolated production-view fixture showed the verified counts and a visible Close action without using real sync data.
+
+The native `make diagnosis-model-test` target passed separately on macOS 27.2.1 with external connectivity disabled throughout three fresh model sessions: zero deletions, a synthetic two-deletion case, then zero again. Ethernet was restored and checked afterwards. A first native validation correctly rejected an omitted zero-deletion finding; an explicit required-ID list corrected the model input without weakening validation. These results do not qualify earlier macOS runtimes, Store-sandbox model access or hosted release gates. No installed app was replaced, no conflict was resolved and nothing was published.
+
 ## Dual distribution — started 17 November 2026
 
 Approved: keep Git and cloud-folder file sync in the App Store and GitHub/Homebrew editions. Optional developer-tool features may remain direct-distribution only. Keep one shared sync engine. quux.io has authorised an MIT option alongside AGPL for its own Mac Sync code; third-party licences are unchanged.

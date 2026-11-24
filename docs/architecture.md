@@ -48,6 +48,16 @@ path which may differ between Finder and launchd. A PID must identify a real
 `mac-sync` worker. Stop rechecks that identity; invalid, reused or process-group
 PIDs are not signalled.
 
+## Read-only on-device diagnosis
+
+Sync Health offers an explicit, on-demand diagnosis sheet. `IncomingSyncEngine.reviewInventory` opens an existing `SyncStateDatabase` with `SQLITE_OPEN_READONLY` and streams all review entries in a consistent read transaction. It creates no identity, directory, schema, configuration or sync/recovery operation, and does not change ledger permissions. Missing and malformed ledgers are not silently converted into zero counts. The normal pending-change list also uses the read-only open mode.
+
+The UI combines the current review counts with a captured, already-loaded `SyncStatus`; the view labels the queue read time separately from the last recorded run. Neither a Git/network probe nor a Keychain lookup is part of this path. Raw messages, commands, outputs, paths, names and contents are excluded. A fixed catalog derives the explanations from typed flags, recognised reasons and condition codes. Unknown reasons remain unknown.
+
+`OnDeviceDiagnosisService` uses only `FoundationModels.SystemLanguageModel.default` behind a macOS 26 availability check. It creates a fresh, tool-free session for each request, uses greedy guided generation with a bounded response, and permits one active generation across diagnosis sheets. The controller supports cancellation and a 30-second deadline. Older systems and unavailable models keep the deterministic evidence view; there is no remote model/provider or CLI fallback. No model is loaded by the background worker or normal status refresh.
+
+The generated response contains only a copied result, optional counts and ordered finding identifiers. Validation rejects changed counts/result, omissions, duplicates and unknown identifiers. The UI renders trusted catalog text, never unvalidated model prose or actions. It cannot turn a generic deletion sentence, missing local path or unknown author into a new claim. There is no automatic resolution or durable AI transcript. Ordinary CI uses injected fake generators; an opt-in native test checks actual and synthetic deletion counts without touching a user's files.
+
 ## Bounded work
 
 | Path | Bound or policy |

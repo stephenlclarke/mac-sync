@@ -320,7 +320,24 @@ public final class IncomingSyncEngine {
     public static func pendingChanges(repository: String, status: String, machine: String, limit: Int = 100, offset: Int = 0) throws -> [IncomingSyncChange] {
         let path = "\(status)/sync-\(hash(repository + "\0" + machine)).sqlite"
         guard FileManager.default.fileExists(atPath: path) else { return [] }
-        return try changes(database: SyncStateDatabase(path: path), limit: limit, offset: offset)
+        return try changes(database: SyncStateDatabase(path: path, readOnly: true), limit: limit, offset: offset)
+    }
+
+    /// Inspect every pending entry without constructing a sync engine, creating
+    /// an identity, changing permissions, or limiting counts to the UI page.
+    /// A missing ledger is unknown, not proof of an empty review queue.
+    public static func reviewInventory(repository: String, status: String, machine: String, boundary: () throws -> Void = {}) throws -> IncomingReviewInventory? {
+        let path = "\(status)/sync-\(hash(repository + "\0" + machine)).sqlite"
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let database = try SyncStateDatabase(path: path, readOnly: true)
+        try database.execute("BEGIN")
+        defer { try? database.execute("ROLLBACK") }
+        var inventory = IncomingReviewInventory()
+        try database.each(prefix: "change:", as: IncomingReviewInventory.Entry.self) { _, entry in
+            try boundary()
+            inventory.record(entry)
+        }
+        return inventory
     }
 
     private static func changes(database: SyncStateDatabase, limit: Int, offset: Int) throws -> [IncomingSyncChange] {

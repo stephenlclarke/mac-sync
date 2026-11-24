@@ -6,12 +6,27 @@ final class SyncStateDatabase {
     private var database: OpaquePointer?
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    init(path: String) throws {
-        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        guard sqlite3_open_v2(path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { throw BackupStorageError.invalidSnapshot }
+    init(path: String, readOnly: Bool = false) throws {
+        if !readOnly {
+            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        let access = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+        guard sqlite3_open_v2(path, &database, access | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(database)
+            database = nil
+            throw BackupStorageError.invalidSnapshot
+        }
         sqlite3_busy_timeout(database, 5000)
-        try execute("PRAGMA journal_mode=WAL; PRAGMA cache_size=-1024; PRAGMA temp_store=FILE; CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value BLOB NOT NULL);")
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        if !readOnly {
+            do {
+                try execute("PRAGMA journal_mode=WAL; PRAGMA cache_size=-1024; PRAGMA temp_store=FILE; CREATE TABLE IF NOT EXISTS state(key TEXT PRIMARY KEY, value BLOB NOT NULL);")
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+            } catch {
+                sqlite3_close(database)
+                database = nil
+                throw error
+            }
+        }
     }
 
     deinit { sqlite3_close(database) }

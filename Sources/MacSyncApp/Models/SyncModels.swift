@@ -22,7 +22,7 @@ enum NavigationItem: Hashable {
     case machine(String)
 }
 
-enum SyncResult: String, Equatable {
+enum SyncResult: String, Equatable, Sendable {
     case unknown
     case success
     case partial
@@ -60,7 +60,7 @@ enum SyncResult: String, Equatable {
     }
 }
 
-struct SyncStatus: Equatable {
+struct SyncStatus: Equatable, Sendable {
     let result: SyncResult
     let startedAt: String?
     let finishedAt: String?
@@ -333,7 +333,7 @@ struct MachineSnapshot: Identifiable, Hashable {
     }
 }
 
-struct SyncConfiguration: Equatable {
+struct SyncConfiguration: Equatable, Sendable {
     let homeDirectory: String
     let dataRepository: String
     let statusDirectory: String

@@ -215,6 +215,10 @@ run:
 
 test: swift-test shell-test
 
+.PHONY: diagnosis-model-test
+diagnosis-model-test:
+	MAC_SYNC_TEST_LOCAL_AI=1 $(SWIFT) test $(SWIFT_RESOLVED_FLAGS) --filter LocalDiagnosisSessionTests/testLiveOnDeviceDiagnosisWhenExplicitlyRequested
+
 swift-test-build:
 	$(SWIFT) build $(SWIFT_RESOLVED_FLAGS) --build-tests --enable-code-coverage
 
@@ -279,6 +283,7 @@ swift-coverage: swift-test-build
 		--sources Sources/MacSyncCore/FolderSnapshotStore.swift \
 		--sources Sources/MacSyncCore/GitRemote.swift \
 		--sources Sources/MacSyncCore/IncomingSync.swift \
+		--sources Sources/MacSyncCore/IncomingReviewInventory.swift \
 		--sources Sources/MacSyncCore/MachineFileDelivery.swift \
 		--sources Sources/MacSyncCore/NewestDiskPage.swift \
 		--sources Sources/MacSyncCore/SnapshotReadWorkspace.swift \
