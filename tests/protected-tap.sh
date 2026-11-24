@@ -45,10 +45,11 @@ gh() {
 }
 
 # Do not delay deterministic timeout coverage.
-sleep() { :; }
+sleep() { printf '%s\n' "$1" >> "$TEST_DIR/sleeps"; }
 
 for MODE in existing create reuse mismatch timeout; do
   : > "$TEST_DIR/calls"
+  : > "$TEST_DIR/sleeps"
   rm -f "$TEST_DIR/created"
   if [[ "$MODE" == mismatch || "$MODE" == timeout ]]; then
     if (main mac-sync.rb Stable) > "$TEST_DIR/output" 2>&1; then
@@ -60,6 +61,10 @@ for MODE in existing create reuse mismatch timeout; do
   fi
   if [[ "$MODE" == existing || "$MODE" == reuse || "$MODE" == mismatch ]]; then
     if grep -Eq 'graphql|pr create' "$TEST_DIR/calls"; then exit 1; fi
+  fi
+  if [[ "$MODE" == timeout ]]; then
+    [[ "$(wc -l < "$TEST_DIR/sleeps" | tr -d ' ')" == 180 ]]
+    [[ "$(sort -u "$TEST_DIR/sleeps")" == 15 ]]
   fi
   printf 'PASS protected tap: %s\n' "$MODE"
 done

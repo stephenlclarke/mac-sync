@@ -120,7 +120,7 @@ jobs:
     if: needs.resolve.outputs.publish == 'true'
     runs-on: macos-26
     environment: release-signing
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - name: Checkout mac-sync
         uses: actions/checkout@v7
@@ -203,7 +203,7 @@ jobs:
             formula_version="current.${GITHUB_RUN_NUMBER}.${short_commit}"
             label="current"
             title="Current build"
-            app_version="1.4.0"
+            app_version="1.4.1"
           fi
           {
             printf 'app_version=%s\n' "$app_version"

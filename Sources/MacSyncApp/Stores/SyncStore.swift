@@ -959,7 +959,7 @@ extension SyncStore: LocalRepairRuntime {
 
     func applyLocalRepair(_ action: LocalRepairAction, scope: String) async throws {
         let state = try await readLocalRepairState()
-        guard state.scope == scope else { throw LocalRepairError.changedScope }
+        guard state.scope == scope, localRepairScope == scope else { throw LocalRepairError.changedScope }
         guard state.worker == .idle else { throw LocalRepairError.workerNotIdle }
         // No suspension between this final check and the bounded memory/handle change.
         switch action {
@@ -996,7 +996,7 @@ extension SyncStore: LocalRepairRuntime {
     /// Call only from an explicit native confirmation, never from the model or automatic executor.
     func approveAssistantSync(scope: String) async throws {
         let inspection = try await inspectLocalRepairs()
-        guard inspection.scope == scope else { throw LocalRepairError.changedScope }
+        guard inspection.scope == scope, localRepairScope == scope else { throw LocalRepairError.changedScope }
         guard inspection.worker == .idle, !isRunning else { throw LocalRepairError.workerNotIdle }
         repairScopeNonce = UUID() // Single use, including a failed launch.
         syncSelection()
