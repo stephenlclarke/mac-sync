@@ -459,6 +459,11 @@ jobs:
             --asset "$ASSET" \
             --label "$LABEL" \
             --sha256 "$sha256"
+          # Stable URLs already contain the version; strict Homebrew audit
+          # rejects a redundant override. Current needs its custom version.
+          if [[ "$FORMULA" == "mac-sync.rb" ]]; then
+            sed -i '' '/^  version "/d' "homebrew-tap/Formula/${FORMULA}"
+          fi
           ruby -c "homebrew-tap/Formula/${FORMULA}"
           brew style "homebrew-tap/Formula/${FORMULA}"
 

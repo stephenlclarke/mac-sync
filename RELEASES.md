@@ -127,6 +127,8 @@ The workflow trusts only that dependency, not every formula in the tap.
 
 Both release lanes use a signed pull request for the protected tap. The publication step prints its URL and waits up to 15 minutes for a maintainer to merge it. Check that `Formula Syntax` passes before merging. The workflow never bypasses reviews or changes branch protection. If the wait expires, merge the checked formula and rerun the release job; an exact formula already on `main` is accepted without a new pull request.
 
+Stable formulae infer their version from the semantic release URL. Only Current keeps an explicit custom `version`, because its archive URL contains a commit rather than a semantic version. This avoids Homebrew's strict redundant-version audit failure.
+
 Only these releases retain downloadable assets:
 
 - `current`
