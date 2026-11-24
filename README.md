@@ -33,6 +33,8 @@ Non-conflicting changes to selected home-folder files are applied automatically.
 
 For a read-only explanation and safety checklist, choose **Sync Health → Diagnose On Device**. The app supplies the advice; optional AI ordering uses Apple's prepared on-device model on macOS 26 or later, with no cloud fallback or automatic fixes. Unknown and empty review queues do not call the model. See [on-device diagnosis](docs/desktop-guide.md#on-device-diagnosis).
 
+Choose **Sync Health → Local Repair Assistant** to fix verified app-state faults automatically. It asks before a sync and leaves all file, conflict, credential and security decisions to you. AI stays on this Mac. See [local repairs and approval](docs/desktop-guide.md#local-repair-assistant).
+
 Under **Other Macs**, select files and use **Copy to This Mac** to pull them. Drop regular files onto another Mac's view to send them. Select one stored file and use **Send Files → Replace selected file** to queue a replacement. The receiving Mac applies it on its next sync if selected and unchanged locally; otherwise it waits in **Inbox**. See [sync, transfer and recovery](docs/sync-and-transfer.md).
 
 To restore from another Mac, preview the changes first:

@@ -38,5 +38,5 @@ MAC_SYNC_SOURCE_ROOT="$REPOSITORY_ROOT" xcodegen generate \
 xcodebuild -project "$REPOSITORY_ROOT/MacSyncStore.xcodeproj" \
   -scheme MacSyncStore -configuration Release -archivePath "$ARCHIVE" \
   -derivedDataPath "$REPOSITORY_ROOT/.build/store-derived" -jobs 2 ARCHS=arm64 \
-  MARKETING_VERSION="${MAC_SYNC_VERSION:-1.3.1}" \
+  MARKETING_VERSION="${MAC_SYNC_VERSION:-1.4.0}" \
   CURRENT_PROJECT_VERSION="${MAC_SYNC_BUILD:-1}" "${signing[@]}" archive

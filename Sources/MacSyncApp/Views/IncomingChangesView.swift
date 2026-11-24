@@ -3,6 +3,7 @@ import SwiftUI
 
 struct IncomingChangesView: View {
     @ObservedObject var store: SyncStore
+    var allowsSync = true
     @Environment(\.dismiss) private var dismiss
     @State private var changes: [IncomingSyncChange] = []
     @State private var offset = 0
@@ -47,7 +48,9 @@ struct IncomingChangesView: View {
                 Text("Page \(offset / 100 + 1)").font(.caption)
                 Button("Next") { offset += 100 }.disabled(changes.count < 100 || loading)
                 Spacer()
-                Button("Check for Changes") { store.syncSelection() }.disabled(store.isRunning)
+                if allowsSync {
+                    Button("Check for Changes") { store.syncSelection() }.disabled(store.isRunning)
+                }
             }
             Text("Applying an incoming version saves a local Undo copy first. Keep Both leaves your file in place and creates a named copy beside it. Sync again to send your decision to the other Macs.")
                 .font(.caption).foregroundStyle(.secondary)
