@@ -31,6 +31,8 @@ For the opt-in Current build, use `mac-sync-current` instead. Uninstall one chan
 
 Non-conflicting changes to selected home-folder files are applied automatically. Conflicts and deletions wait for review. You can choose review-only mode in Settings. Do not add private keys, tokens or credentials to the regular selection; use [encrypted secrets](docs/cli-reference.md#encrypted-secrets) instead.
 
+When the review queue becomes empty, its active health warning clears without another sync. The recorded warning stays in **Sync Health → All** and **Sync History**.
+
 For a read-only explanation and safety checklist, choose **Sync Health → Diagnose On Device**. The app supplies the advice; optional AI ordering uses Apple's prepared on-device model on macOS 26 or later, with no cloud fallback or automatic fixes. Unknown and empty review queues do not call the model. See [on-device diagnosis](docs/desktop-guide.md#on-device-diagnosis).
 
 Choose **Sync Health → Local Repair Assistant** to fix verified app-state faults automatically. It asks before a sync and leaves all file, conflict, credential and security decisions to you. AI stays on this Mac. See [local repairs and approval](docs/desktop-guide.md#local-repair-assistant).

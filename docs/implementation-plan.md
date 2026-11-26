@@ -1,5 +1,14 @@
 # Quiet background sync implementation
 
+## Immediate review-health recovery — 26 November 2026
+
+- [x] Use a read-only, one-entry ledger lookup to distinguish a pending queue, a confirmed empty queue and unknown evidence.
+- [x] Recover the recognised incoming-review warning in memory when the queue is empty. Retain history, occurrences, notes and dispositions; leave unrelated warnings alone.
+- [x] Refresh the health list and badge through filtered ledger/journal events and the post-command read, without polling. Do not sync, resolve files, change credentials or call the model.
+- [x] Complete regression, observer, full-suite and documentation validation.
+
+Local validation on 26 November: `make ci` passed with 88.22% core coverage. Focused ASan and TSan checks passed. The production-store fixture clears the warning and badge on committed journal writes while the writer stays open, detects later review items and journal replacement, and keeps saved warnings and triage history. Missing or malformed evidence stays unresolved. No real files were synced or resolved by validation. Signed publication and installation use the existing Current workflow, exact-commit hosted gates and protected tap; release provenance, not this source checklist, establishes delivery.
+
 ## Guarded operational repairs — 24 November 2026
 
 - [x] Correct the live acceptance-test false busy result for a normal empty retained PID file. Query kernel ownership read-only and add real child-process lock tests. Do not remove the marker or infer ownership from its contents.

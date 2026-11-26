@@ -30,7 +30,10 @@ final class SyncStore: ObservableObject {
     @Published private(set) var backupPreferences = BackupPreferences()
     @Published private(set) var protection: BackupProtectionRecord?
     @Published private(set) var incomingChanges: [IncomingSyncChange] = []
+    private var hasPendingIncomingChanges: Bool?
     private var stateObservation: LocalStateObservation?
+    private var incomingReviewObservation: LocalStateObservation?
+    private var observedReviewLedger: String?
     // Global queues do not guarantee a per-work-item autorelease pool.
     private let readQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.overview", qos: .utility, autoreleaseFrequency: .workItem)
     private let healthQueue = DispatchQueue(label: "tools.xyzzy.mac-sync.health", qos: .utility, autoreleaseFrequency: .workItem)
@@ -132,6 +135,9 @@ final class SyncStore: ObservableObject {
     }
 
     func healthActivity(for message: String) -> SyncHealthActivity? {
+        if SyncHealthMessage.isIncomingReviewWarning(message), !overview.status.errors.contains(message) {
+            return hasPendingIncomingChanges == false ? .recovered : .active
+        }
         guard let conditionCode = SyncHealthMessage.conditionCode(for: message) else {
             return nil
         }
@@ -164,6 +170,10 @@ final class SyncStore: ObservableObject {
             let protection = BackupProtectionRecord.load(directory: snapshot.configuration.statusDirectory, machine: snapshot.configuration.machineName)
             let incoming = try? IncomingSyncEngine.pendingChanges(repository: snapshot.configuration.dataRepository,
                                                                   status: snapshot.configuration.statusDirectory, machine: snapshot.configuration.machineName)
+            let incomingPending = try? IncomingSyncEngine.hasPendingChanges(
+                repository: snapshot.configuration.dataRepository,
+                status: snapshot.configuration.statusDirectory, machine: snapshot.configuration.machineName
+            )
             DispatchQueue.main.async {
                 guard let self, self.generation == requestedGeneration else { return }
                 self.overview = snapshot
@@ -178,6 +188,7 @@ final class SyncStore: ObservableObject {
                 if let incoming {
                     self.incomingChanges = incoming
                 }
+                self.hasPendingIncomingChanges = incomingPending
                 self.activeConditionCodes = Set(snapshot.status.conditions.map(\.code)
                     + (snapshot.status.warnings + snapshot.status.errors).compactMap(SyncHealthMessage.conditionCode))
                 if checkpoint.consecutiveFailures < 3, snapshot.status.result == .deferred {
@@ -205,6 +216,30 @@ final class SyncStore: ObservableObject {
         stateObservation = LocalStateObservation(directory: overview.configuration.statusDirectory) { [weak self] in
             DispatchQueue.main.async { self?.reload() }
         }
+        let config = overview.configuration
+        let ledger = IncomingSyncEngine.reviewLedgerPath(
+            repository: config.dataRepository, status: config.statusDirectory, machine: config.machineName
+        )
+        let journal = ledger + "-wal"
+        if !FileManager.default.fileExists(atPath: journal) {
+            incomingReviewObservation = nil
+        } else if incomingReviewObservation?.isHealthy != true || observedReviewLedger != ledger {
+            // Watch only WAL data, not the database or SHM files that carry
+            // SQLite locks. Reject a substituted symbolic link.
+            incomingReviewObservation = LocalStateObservation(directory: journal, noFollow: true) { [weak self] in
+                DispatchQueue.main.async { self?.reload() }
+            }
+        }
+        observedReviewLedger = ledger
+    }
+
+    private var incomingReviewObservationIsHealthy: Bool {
+        let config = overview.configuration
+        let ledger = IncomingSyncEngine.reviewLedgerPath(
+            repository: config.dataRepository, status: config.statusDirectory, machine: config.machineName
+        )
+        guard observedReviewLedger == ledger else { return false }
+        return !FileManager.default.fileExists(atPath: ledger + "-wal") || incomingReviewObservation?.isHealthy == true
     }
 
     func requestSetup() {
@@ -838,6 +873,7 @@ final class SyncStore: ObservableObject {
         repositoryReports = setupService.initialRepositoryReports(for: repositoryInspections)
         isSetupComplete = repositoryInspections.allSatisfy(\.isReady)
         overview = repository.load(includeSnapshotDetails: false)
+        hasPendingIncomingChanges = nil
         issueRepository = SyncIssueRepository(configuration: overview.configuration)
         activeConditionCodes = nil
         reloadSyncIssues()
@@ -887,6 +923,7 @@ final class SyncStore: ObservableObject {
         syncIssues = issueRepository.issues(
             for: overview,
             activeConditionCodes: activeConditionCodes,
+            hasPendingIncomingChanges: hasPendingIncomingChanges,
         )
         updateDockBadge()
     }
@@ -946,7 +983,7 @@ extension SyncStore: LocalRepairRuntime {
         if let status = state.status, status != overview.status {
             candidates.append(.refreshStatus)
         }
-        if stateObservation?.isHealthy != true {
+        if stateObservation?.isHealthy != true || !incomingReviewObservationIsHealthy {
             candidates.append(.reconnectObserver)
         }
         if (activeAction != nil && process?.isRunning != true) || overview.isLocalSyncActive {
@@ -969,14 +1006,15 @@ extension SyncStore: LocalRepairRuntime {
             activeConditionCodes = Set(status.conditions.map(\.code)
                 + (status.warnings + status.errors).compactMap(SyncHealthMessage.conditionCode))
             syncIssues = issueRepository.issues(
-                for: overview, activeConditionCodes: activeConditionCodes, cachedDecisions: syncIssues
+                for: overview, activeConditionCodes: activeConditionCodes,
+                hasPendingIncomingChanges: hasPendingIncomingChanges, cachedDecisions: syncIssues
             )
             updateDockBadge()
         case .reconnectObserver:
-            if stateObservation?.isHealthy != true {
+            if stateObservation?.isHealthy != true || !incomingReviewObservationIsHealthy {
                 observeLocalState()
             }
-            guard stateObservation?.isHealthy == true else { throw LocalRepairError.verificationFailed }
+            guard stateObservation?.isHealthy == true, incomingReviewObservationIsHealthy else { throw LocalRepairError.verificationFailed }
         case .clearFinishedActivity:
             guard process?.isRunning != true else { throw LocalRepairError.workerNotIdle }
             // Do not call finish/reload: those paths may migrate history or probe credentials/network.

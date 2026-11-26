@@ -70,6 +70,8 @@ private struct SyncIndexHeader: Codable {
 /// Per-file causal versions prevent a stale/offline Mac from replacing newer
 /// work. Timestamps do not decide a winner. All indexes are streamed on disk.
 public final class IncomingSyncEngine {
+    public static let reviewRequiredMessage = "Incoming changes need review. Open Settings → Incoming Changes or run mac-sync incoming list. Deletions were not applied automatically."
+
     private let repository: String
     private let status: String
     private let home: String
@@ -318,16 +320,29 @@ public final class IncomingSyncEngine {
     }
 
     public static func pendingChanges(repository: String, status: String, machine: String, limit: Int = 100, offset: Int = 0) throws -> [IncomingSyncChange] {
-        let path = "\(status)/sync-\(hash(repository + "\0" + machine)).sqlite"
+        let path = reviewLedgerPath(repository: repository, status: status, machine: machine)
         guard FileManager.default.fileExists(atPath: path) else { return [] }
         return try changes(database: SyncStateDatabase(path: path, readOnly: true), limit: limit, offset: offset)
+    }
+
+    /// A bounded health check, not a count or sync. Missing evidence is unknown.
+    public static func hasPendingChanges(repository: String, status: String, machine: String) throws -> Bool? {
+        let path = reviewLedgerPath(repository: repository, status: status, machine: machine)
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let database = try SyncStateDatabase(path: path, readOnly: true)
+        return try !database.page(prefix: "change:", as: IncomingReviewInventory.Entry.self, limit: 1, offset: 0).isEmpty
+    }
+
+    /// Identifies the existing local ledger for read-only state observation.
+    public static func reviewLedgerPath(repository: String, status: String, machine: String) -> String {
+        "\(status)/sync-\(hash(repository + "\0" + machine)).sqlite"
     }
 
     /// Inspect every pending entry without constructing a sync engine, creating
     /// an identity, changing permissions, or limiting counts to the UI page.
     /// A missing ledger is unknown, not proof of an empty review queue.
     public static func reviewInventory(repository: String, status: String, machine: String, boundary: () throws -> Void = {}) throws -> IncomingReviewInventory? {
-        let path = "\(status)/sync-\(hash(repository + "\0" + machine)).sqlite"
+        let path = reviewLedgerPath(repository: repository, status: status, machine: machine)
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         let database = try SyncStateDatabase(path: path, readOnly: true)
         try database.execute("BEGIN")

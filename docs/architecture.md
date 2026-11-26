@@ -37,6 +37,8 @@ changes over 500 ms; window activation also refreshes saved state. Only one
 overview read and one pending replacement are allowed. Disk reads run off the
 main thread. A user-requested sync or health action can use the network and
 interactive credentials.
+
+Incoming-review health uses `IncomingSyncEngine.hasPendingChanges`, a read-only, indexed lookup of at most one local ledger entry on the overview queue. A confirmed empty queue recovers only the recognised incoming-review warning in app memory. The existing status-directory observer detects journal creation/removal; a retained `LocalStateObservation` watches writes within an existing WAL, including commits while the writer remains open. It uses `O_EVTONLY | O_NOFOLLOW`, coalesces events over 500 ms and has no polling timer. It never watches the main database or SHM files that carry [SQLite's locks](https://www.sqlite.org/walformat.html). The existing bounded refresh queue and post-command read update the health list and Dock badge without a sync. Missing, unreadable or malformed evidence stays unresolved; cached healthy evidence is discarded on a failed read or destination change. Status files, history, occurrence identifiers, triage notes and dispositions are not rewritten. The model receives no extra capability or input.
 Overview and health queues drain an autorelease pool after each work item;
 folder reads also drain one per page. They do not rely on a global queue to
 release Foundation's temporary objects.

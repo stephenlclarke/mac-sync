@@ -59,6 +59,7 @@ struct SyncIssueRepository {
     func issues(
         for overview: SyncOverview,
         activeConditionCodes: Set<SyncHealthConditionCode>? = nil,
+        hasPendingIncomingChanges: Bool? = nil,
         cachedDecisions: [SyncIssue]? = nil,
     ) -> [SyncIssue] {
         // Operational memory refresh must not read an unrelated, potentially large triage file.
@@ -67,12 +68,22 @@ struct SyncIssueRepository {
                 guard let updatedAt = issue.updatedAt else { return }
                 states[issue.id] = PersistedState(
                     disposition: issue.disposition, note: issue.note,
-                    updatedAt: updatedAt, latestOccurrenceID: issue.latestOccurrenceID
+                    updatedAt: updatedAt, latestOccurrenceID: issue.latestOccurrenceID,
                 )
             }
         } ?? readStates()
         return groupedCandidates(for: overview, activeConditionCodes: activeConditionCodes)
             .map { candidate in
+                let reviewWarning = candidate.severity == .warning
+                    && candidate.conditionCode == nil
+                    && SyncHealthMessage.isIncomingReviewWarning(candidate.message)
+                let recommendedAction = if !reviewWarning {
+                    candidate.recommendedAction
+                } else if hasPendingIncomingChanges == false {
+                    "The review queue is empty. No sync or file action is needed to clear this warning. The recorded warning stays in All and Sync History."
+                } else {
+                    "Review Incoming Changes from Overview or Settings. An empty review queue clears this active warning without another sync; the recorded warning stays in All and Sync History."
+                }
                 let state = states[candidate.id] ?? states[candidate.latestOccurrenceID]
                 let stateAppliesToLatestOccurrence = state?.latestOccurrenceID == nil
                     || state?.latestOccurrenceID == candidate.latestOccurrenceID
@@ -81,15 +92,15 @@ struct SyncIssueRepository {
                     conditionCode: candidate.conditionCode,
                     severity: candidate.severity,
                     message: candidate.message,
-                    recommendedAction: candidate.recommendedAction,
+                    recommendedAction: recommendedAction,
                     source: candidate.source,
                     recordedAt: candidate.recordedAt,
                     firstRecordedAt: candidate.firstRecordedAt,
                     occurrenceCount: candidate.occurrenceCount,
                     latestOccurrenceID: candidate.latestOccurrenceID,
                     detail: candidate.detail,
-                    recoveryActions: candidate.recoveryActions,
-                    isActive: candidate.isActive,
+                    recoveryActions: reviewWarning ? [] : candidate.recoveryActions,
+                    isActive: candidate.isActive && (!reviewWarning || hasPendingIncomingChanges != false),
                     disposition: stateAppliesToLatestOccurrence ? state?.disposition ?? .open : .open,
                     note: state?.note ?? "",
                     updatedAt: state?.updatedAt,
