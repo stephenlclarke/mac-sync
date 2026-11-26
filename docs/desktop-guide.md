@@ -31,6 +31,8 @@ Mac Sync is a regular macOS app with a status item in the system menu bar. It us
 
 The menu-bar item gives quick access to the dashboard, current status, sync, stop, refresh, About, and repository setup actions. By default the running app stays in the menu bar without adding a Dock icon; **Settings → App appearance** can restore the Dock icon. The menu-bar icon is static: a filled sync symbol means a run is active, and a warning triangle means attention is needed. It changes only when status changes. The blue dashboard icon can rotate during sync; it respects Reduce Motion. The app's settings view shows the active repository and status paths, lets you re-run local setup, and includes a non-interactive GitHub read/write check. It never stores a GitHub token: the check uses the Mac's existing Git authentication and redacts credentials from its output.
 
+When the incoming review queue becomes empty, its active Sync Health warning and Dock badge clear after the local refresh, without another sync. The warning remains under **All** as **Recovered** and in **Sync History**. No warning is acknowledged or deleted. A missing or unreadable review ledger does not count as an empty queue; other health warnings keep their own checks.
+
 ## On-device diagnosis
 
 Choose **Sync Health → Diagnose On Device** after an active sync finishes. The app reads the complete local incoming-review ledger and the last run status already loaded in the window. It shows when it read the queue and the recorded run time; this is not a live connection test. Close or cancel the sheet to stop the request. Choose **Try Again** for another reading, or reopen the sheet after a new sync.

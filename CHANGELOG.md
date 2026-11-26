@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clear the active incoming-review warning and Dock badge as soon as the local review queue is confirmed empty, without another sync. Keep the warning, occurrences and triage notes in history. Missing or unreadable queue evidence remains unresolved; unrelated warnings are unchanged.
 - Fix the live-check false busy warning for the normal empty worker PID file. Query the existing kernel lock with read-only `F_GETLK`, without acquiring a lock, creating/removing a marker or changing its contents. Keep active locks and uncertain inspection blocked. Recheck approval scope against the current store at the final action boundary.
 - Allow 45 minutes for the protected tap check/review during hosted Mac runner shortages, within a 90-minute publisher budget. Preserve all required checks and document recovery with the original signed archive instead of an unchecked rebuild/checksum change.
 - Make Git round-trip fixtures independent of the developer's global author identity, including after cloning their disposable test repositories. Do not change real Git credentials or settings to run tests.

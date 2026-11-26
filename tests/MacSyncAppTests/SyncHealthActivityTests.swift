@@ -3,6 +3,14 @@ import MacSyncCore
 import XCTest
 
 final class SyncHealthActivityTests: XCTestCase {
+    func testHistoricalIncomingReviewWarningIsRecognisedExactly() {
+        let legacy = "Incoming changes need review. Open Settings → Incoming Changes or run mac-sync incoming list. Deletions were not applied automatically."
+        XCTAssertTrue(SyncHealthMessage.isIncomingReviewWarning(legacy))
+        XCTAssertTrue(SyncHealthMessage.isIncomingReviewWarning("WARN: " + legacy))
+        XCTAssertFalse(SyncHealthMessage.isIncomingReviewWarning("ERROR: " + legacy))
+        XCTAssertFalse(SyncHealthMessage.isIncomingReviewWarning(legacy + " Another failure remains."))
+    }
+
     func testKnownConditionIsNeutralUntilTheLiveCheckCompletes() {
         XCTAssertEqual(
             SyncHealthActivity.resolve(

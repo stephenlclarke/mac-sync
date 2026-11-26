@@ -3811,7 +3811,7 @@ public final class MacSyncApp {
                 try incoming.exportIndex(selection: automaticSelection)
                 let pending = try incoming.changes()
                 if !pending.isEmpty {
-                    warning("Incoming changes need review. Open Settings → Incoming Changes or run mac-sync incoming list. Deletions were not applied automatically.")
+                    warning(IncomingSyncEngine.reviewRequiredMessage)
                 }
             }
             try pruneStaleDynamicPaths(currentDynamic: dynamicExtra, configured: configured)

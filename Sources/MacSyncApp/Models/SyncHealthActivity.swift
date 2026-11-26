@@ -18,6 +18,11 @@ enum SyncHealthActivity: Equatable {
 }
 
 enum SyncHealthMessage {
+    static func isIncomingReviewWarning(_ message: String) -> Bool {
+        message == IncomingSyncEngine.reviewRequiredMessage
+            || message == "WARN: " + IncomingSyncEngine.reviewRequiredMessage
+    }
+
     static func conditionCode(for message: String) -> SyncHealthConditionCode? {
         if isLocalChangesWarning(message) {
             return .remoteRefreshBlockedByLocalChanges

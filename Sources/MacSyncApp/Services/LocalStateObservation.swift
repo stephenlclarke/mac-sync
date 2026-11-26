@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Watches atomic status replacements. There is no repeating scan timer.
+/// Watches status directories or journal files. There is no repeating scan timer.
 final class LocalStateObservation {
     private let source: DispatchSourceFileSystemObject
     private let directory: String
@@ -9,19 +9,19 @@ final class LocalStateObservation {
     private var pending: DispatchWorkItem?
     private let queue = DispatchQueue(label: "tools.xyzzy.mac-sync.state", qos: .background)
 
-    init?(directory: String, changed: @escaping @Sendable () -> Void) {
+    init?(directory: String, noFollow: Bool = false, changed: @escaping @Sendable () -> Void) {
         self.directory = directory
         var observed = URL(fileURLWithPath: directory)
         while !FileManager.default.fileExists(atPath: observed.path), observed.path != "/" {
             observed.deleteLastPathComponent()
         }
-        let descriptor = open(observed.path, O_EVTONLY)
+        let descriptor = open(observed.path, O_EVTONLY | O_CLOEXEC | (noFollow ? O_NOFOLLOW : 0))
         guard descriptor >= 0 else { return nil }
         observedPath = observed.path
         source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: descriptor,
             eventMask: [.write, .rename, .delete],
-            queue: queue
+            queue: queue,
         )
         source.setCancelHandler { close(descriptor) }
         source.setEventHandler { [weak self] in

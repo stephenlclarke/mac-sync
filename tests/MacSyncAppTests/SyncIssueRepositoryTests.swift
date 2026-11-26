@@ -246,6 +246,62 @@ final class SyncIssueRepositoryTests: XCTestCase {
         XCTAssertEqual(issue.recoveryActions, [.testGitHubAccess, .useSSH, .retrySync])
     }
 
+    func testEmptyReviewQueueRecoversWarningAndPreservesHistoryAndTriage() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let warning = "WARN: " + IncomingSyncEngine.reviewRequiredMessage
+        let finishedAt = "2026-11-26 14:28:04 GMT+0"
+        let record = SyncHistoryRecord(
+            id: "review-needed", action: .sync, result: .success,
+            timing: SyncHistoryTiming(startedAt: finishedAt, finishedAt: finishedAt, durationSeconds: 0),
+            entries: [], diagnostics: SyncHistoryDiagnostics(warningCount: 1, errorCount: 0, warnings: [warning], errors: []),
+        )
+        let overview = makeOverview(fixture: fixture, status: makeStatus(warnings: [warning], finishedAt: finishedAt), history: [record])
+        let repository = SyncIssueRepository(configuration: overview.configuration)
+        let active = try XCTUnwrap(repository.issues(for: overview, hasPendingIncomingChanges: true).first)
+        XCTAssertTrue(active.requiresManualIntervention)
+        try repository.update(issueID: active.id, latestOccurrenceID: active.latestOccurrenceID,
+                              disposition: .open, note: "Keep this Mac; no sync approved.")
+        let triage = fixture.status.appendingPathComponent("issues/local.json")
+        let before = try Data(contentsOf: triage)
+
+        let recovered = try XCTUnwrap(repository.issues(for: overview, hasPendingIncomingChanges: false).first)
+        XCTAssertFalse(recovered.isActive)
+        XCTAssertFalse(recovered.requiresManualIntervention)
+        XCTAssertEqual(recovered.dispositionTitle, "Recovered")
+        XCTAssertEqual(recovered.id, active.id)
+        XCTAssertEqual(recovered.latestOccurrenceID, active.latestOccurrenceID)
+        XCTAssertEqual(recovered.occurrenceCount, active.occurrenceCount)
+        XCTAssertEqual(recovered.note, "Keep this Mac; no sync approved.")
+        XCTAssertEqual(recovered.disposition, .open)
+        XCTAssertEqual(recovered.recoveryActions, [])
+        XCTAssertTrue(recovered.recommendedAction.contains("No sync or file action is needed"))
+        XCTAssertEqual(overview.history.first?.warnings, [warning])
+        XCTAssertEqual(overview.status.warnings, [warning])
+        XCTAssertEqual(try Data(contentsOf: triage), before)
+
+        let unknown = try XCTUnwrap(repository.issues(for: overview, hasPendingIncomingChanges: nil).first)
+        XCTAssertTrue(unknown.isActive, "An unreadable/missing ledger is not a healthy queue")
+        let recurring = try XCTUnwrap(repository.issues(for: overview, hasPendingIncomingChanges: true).first)
+        XCTAssertTrue(recurring.isActive)
+    }
+
+    func testEmptyReviewQueueRecoversLegacyStatusWithoutHidingOtherIssues() throws {
+        let fixture = try makeFixture()
+        defer { try? fileManager.removeItem(at: fixture.root) }
+        let warning = IncomingSyncEngine.reviewRequiredMessage
+        let otherWarning = "WARN: Incoming changes need review. Unknown safety failure."
+        let overview = makeOverview(fixture: fixture,
+                                    status: makeStatus(warnings: [warning, otherWarning], errors: ["ERROR: git push failed"]), history: [])
+        let issues = SyncIssueRepository(configuration: overview.configuration)
+            .issues(for: overview, hasPendingIncomingChanges: false)
+        XCTAssertEqual(issues.count, 3)
+        XCTAssertFalse(try XCTUnwrap(issues.first { $0.message == warning }).isActive)
+        XCTAssertTrue(try XCTUnwrap(issues.first { $0.message == otherWarning }).isActive)
+        XCTAssertTrue(try XCTUnwrap(issues.first { $0.severity == .error }).isActive)
+        XCTAssertFalse(SyncHealthMessage.isIncomingReviewWarning("ERROR: " + warning))
+    }
+
     private func makeOverview(
         fixture: Fixture,
         status: SyncStatus? = nil,
